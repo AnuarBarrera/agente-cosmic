@@ -35,9 +35,7 @@ def test_brand_dna_creation(analysis_job):
 
 
 def test_analysis_job_progress_update(analysis_job):
-    analysis_job.progress = 50
-    analysis_job.stage = 'logo'
-    analysis_job.save()
+    analysis_job.update_progress(stage='logo', progress=50)
     refreshed = AnalysisJob.objects.get(id=analysis_job.id)
     assert refreshed.progress == 50
     assert refreshed.stage == 'logo'
