@@ -199,6 +199,7 @@ INSTALLED_APPS = [
     'core.tenant_management.apps.TenantManagementConfig',
     'core.shared.apps.SharedConfig',
     'core.agent.apps.AgentConfig',
+    'core.brand_dna.apps.BrandDnaConfig',
 ]
 
 # PII Encryption Key (should be in environment variables in production)
