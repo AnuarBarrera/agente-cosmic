@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import requests
 import google.genai as genai
 from bs4 import BeautifulSoup
@@ -67,7 +68,10 @@ class PostsAnalyzer:
         client = _vertex_client()
         prompt = _TEXT_PROMPT.format(posts=text[:3000])
         resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
-        raw = resp.text.strip().lstrip('```json').lstrip('```').rstrip('```').strip()
+        raw = resp.text.strip()
+        raw = re.sub(r'^```(?:json)?\n?', '', raw)
+        raw = re.sub(r'\n?```$', '', raw)
+        raw = raw.strip()
         return json.loads(raw)
 
     def _analyze_images(self, images: list[bytes]) -> dict:
@@ -76,7 +80,10 @@ class PostsAnalyzer:
         for img_bytes in images[:5]:
             parts.append(types.Part.from_bytes(data=img_bytes, mime_type='image/jpeg'))
         resp = client.models.generate_content(model=settings.VERTEX_VISION_MODEL, contents=parts)
-        raw = resp.text.strip().lstrip('```json').lstrip('```').rstrip('```').strip()
+        raw = resp.text.strip()
+        raw = re.sub(r'^```(?:json)?\n?', '', raw)
+        raw = re.sub(r'\n?```$', '', raw)
+        raw = raw.strip()
         return json.loads(raw)
 
     def _scrape_profile(self, url: str) -> str:

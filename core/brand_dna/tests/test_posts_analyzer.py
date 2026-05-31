@@ -82,3 +82,4 @@ def test_analyze_handles_vertex_error():
 
     assert result['posting_style'] == ''
     assert result['avg_caption_length'] == 150
+    assert result['common_hashtags'] == []
