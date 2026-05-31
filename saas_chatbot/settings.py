@@ -155,6 +155,15 @@ MAILGUN_DOMAIN = get_env('MAILGUN_DOMAIN')
 MAILGUN_SENDER_EMAIL = get_env('MAILGUN_SENDER_EMAIL', default='noreply@yourdomain.com')
 DEFAULT_TENANT_NOTIFICATION_EMAIL = get_env('DEFAULT_TENANT_NOTIFICATION_EMAIL', default='admin@example.com')
 
+# Google Cloud — Vertex AI ADC (Application Default Credentials)
+GOOGLE_CLOUD_PROJECT = get_env('GOOGLE_CLOUD_PROJECT', default='agente-cosmic')
+GOOGLE_CLOUD_STORAGE_BUCKET = get_env('GOOGLE_CLOUD_STORAGE_BUCKET', default='agente-cosmic-assets')
+GOOGLE_CLOUD_LOCATION = get_env('GOOGLE_CLOUD_LOCATION', default='us-central1')
+VERTEX_TEXT_MODEL = 'publishers/google/models/gemini-2.5-flash'
+VERTEX_IMAGE_MODEL = 'publishers/google/models/gemini-2.5-flash-image'
+VERTEX_VISION_MODEL = 'publishers/google/models/gemini-2.5-flash'
+# GOOGLE_APPLICATION_CREDENTIALS se inyecta vía docker-compose (volumen ADC)
+
 # Email Settings for Django
 if MAILGUN_API_KEY and MAILGUN_DOMAIN:
     EMAIL_BACKEND = 'anymail.backends.mailgun.EmailBackend'
