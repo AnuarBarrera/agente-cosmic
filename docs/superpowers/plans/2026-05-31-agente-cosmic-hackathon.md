@@ -6,7 +6,9 @@
 
 **Architecture:** Dos apps Django nuevas (`core/brand_dna` y `core/content_pipeline`) coordinadas por RQ. La landing en `/` recibe formulario multipart → crea `AnalysisJob` → encola `analyze_brand_task`. El frontend hace polling a `/api/brand-dna/status/<id>/` cada 3s. Al terminar el análisis se encola `content_generation_task` que genera contenido, envía email #1 y programa 6 RQ jobs para emails diarios 2-7.
 
-**Tech Stack:** Django 5.2, django-rq 3.0.1, rq 2.4.0, google-cloud-vision, google-cloud-storage, google-genai (Vertex AI mode), Pollinations.ai, django-anymail/Mailgun, BeautifulSoup4, pytest + unittest.mock.
+**Tech Stack:** Django 5.2, django-rq 3.0.1, rq 2.4.0, google-cloud-vision, google-cloud-storage, google-genai (Vertex AI ADC — `publishers/google/models/` prefix), django-anymail/Mailgun, BeautifulSoup4, pytest + unittest.mock.
+
+> **Cambio vs. plan original:** Imágenes generadas con `gemini-2.5-flash-image` vía Vertex AI (no Pollinations.ai). Autenticación por ADC montado en Docker, no API key. Modelos con prefijo `publishers/google/models/gemini-2.5-flash`.
 
 ---
 
@@ -95,34 +97,53 @@ Esperado: build exitoso, sin errores de pip.
 
 En `saas_chatbot/settings.py`, después de las variables de Mailgun, agregar:
 ```python
-# Google Cloud (para Cloud Vision + Cloud Storage + Vertex AI)
-GOOGLE_CLOUD_PROJECT = get_env('GOOGLE_CLOUD_PROJECT', default='')
+# Google Cloud — Vertex AI ADC (Application Default Credentials)
+GOOGLE_CLOUD_PROJECT = get_env('GOOGLE_CLOUD_PROJECT', default='agente-cosmic')
 GOOGLE_CLOUD_STORAGE_BUCKET = get_env('GOOGLE_CLOUD_STORAGE_BUCKET', default='agente-cosmic-assets')
 GOOGLE_CLOUD_LOCATION = get_env('GOOGLE_CLOUD_LOCATION', default='us-central1')
-# GOOGLE_APPLICATION_CREDENTIALS se inyecta como variable de entorno del contenedor
+VERTEX_TEXT_MODEL = 'publishers/google/models/gemini-2.5-flash'
+VERTEX_IMAGE_MODEL = 'publishers/google/models/gemini-2.5-flash-image'
+VERTEX_VISION_MODEL = 'publishers/google/models/gemini-2.5-flash'
+# GOOGLE_APPLICATION_CREDENTIALS se inyecta vía docker-compose (volumen ADC)
 ```
 
-- [ ] **Paso 4: Agregar vars al .env (no commitear el .env)**
+- [ ] **Paso 4: Agregar vars al .env y montar ADC en docker-compose**
 
+Agregar al `.env`:
 ```bash
-GOOGLE_CLOUD_PROJECT=tu-project-id
+GOOGLE_CLOUD_PROJECT=agente-cosmic
 GOOGLE_CLOUD_STORAGE_BUCKET=agente-cosmic-assets
 GOOGLE_CLOUD_LOCATION=us-central1
-GOOGLE_APPLICATION_CREDENTIALS=/app/google-credentials.json
+GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json
 ```
 
-Y copiar el archivo `google-credentials.json` de la service account al directorio raíz del proyecto (está en `.gitignore`).
+En `docker-compose.yml`, bajo los servicios `backend` y `worker`, agregar en `volumes`:
+```yaml
+volumes:
+  - ~/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
+```
 
-- [ ] **Paso 5: Verificar autenticación dentro del contenedor**
+Y en `environment`:
+```yaml
+environment:
+  - GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json
+```
+
+- [ ] **Paso 5: Verificar autenticación y modelo dentro del contenedor**
 
 ```bash
 docker exec agente-cosmic-backend-1 python -c "
-from google.cloud import vision
-client = vision.ImageAnnotatorClient()
-print('Cloud Vision OK')
+import google.genai as genai
+from django.conf import settings
+import django, os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'saas_chatbot.settings')
+django.setup()
+client = genai.Client(vertexai=True, project=settings.GOOGLE_CLOUD_PROJECT, location=settings.GOOGLE_CLOUD_LOCATION)
+resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents='di hola')
+print('Vertex AI OK:', resp.text.strip())
 "
 ```
-Esperado: `Cloud Vision OK` sin excepciones.
+Esperado: `Vertex AI OK: ...` sin excepciones.
 
 - [ ] **Paso 6: Commit**
 
@@ -130,6 +151,43 @@ Esperado: `Cloud Vision OK` sin excepciones.
 git add requirements.txt saas_chatbot/settings.py
 GIT_EDITOR=true git commit -m "feat: add google-cloud-vision, cloud-storage packages and settings"
 ```
+
+---
+
+## Patrón Vertex AI (aplica a todas las tareas)
+
+Todos los extractores y generadores usan este patrón — NO usar `GeminiAdapter` ni `GEMINI_API_KEY`:
+
+```python
+import google.genai as genai
+from django.conf import settings
+
+def _vertex_client():
+    return genai.Client(
+        vertexai=True,
+        project=settings.GOOGLE_CLOUD_PROJECT,
+        location=settings.GOOGLE_CLOUD_LOCATION,
+    )
+
+# Texto
+client = _vertex_client()
+resp = client.models.generate_content(
+    model=settings.VERTEX_TEXT_MODEL,   # 'publishers/google/models/gemini-2.5-flash'
+    contents=prompt,
+)
+text = resp.text
+
+# Imagen
+from google.genai import types
+resp = client.models.generate_content(
+    model=settings.VERTEX_IMAGE_MODEL,  # 'publishers/google/models/gemini-2.5-flash-image'
+    contents=prompt,
+    config=types.GenerateContentConfig(response_modalities=['IMAGE', 'TEXT']),
+)
+image_bytes = resp.candidates[0].content.parts[0].inline_data.data
+```
+
+En tests: usar `@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1')` y `patch('modulo._vertex_client')`.
 
 ---
 
@@ -630,13 +688,14 @@ Crear `core/brand_dna/extractors/web_scraper.py`:
 import json
 import logging
 import requests
+import google.genai as genai
 from bs4 import BeautifulSoup
-from core.agent.infrastructure.gemini_adapter import GeminiAdapter
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
 _PROMPT_TEMPLATE = """
-Analiza el siguiente HTML de un sitio web de negocio y extrae su información de marca.
+Analiza el siguiente texto extraído de un sitio web de negocio y extrae su información de marca.
 Responde ÚNICAMENTE con un JSON válido, sin markdown, con esta estructura exacta:
 {{
   "business_name": "nombre del negocio",
@@ -646,7 +705,7 @@ Responde ÚNICAMENTE con un JSON válido, sin markdown, con esta estructura exac
   "tone": "uno de: formal, casual, inspiracional, urgente, profesional, amigable"
 }}
 
-HTML:
+Texto del sitio:
 {html}
 """
 
@@ -659,31 +718,35 @@ _FALLBACK = {
 }
 
 
-class WebScraper:
-    def __init__(self, gemini_api_key: str, gemini_model: str = 'gemini-2.5-flash'):
-        self._api_key = gemini_api_key
-        self._model = gemini_model
+def _vertex_client():
+    return genai.Client(
+        vertexai=True,
+        project=settings.GOOGLE_CLOUD_PROJECT,
+        location=settings.GOOGLE_CLOUD_LOCATION,
+    )
 
+
+class WebScraper:
     def extract(self, url: str) -> dict:
         try:
-            html = self._fetch_html(url)
-            return self._analyze_with_gemini(html)
+            text = self._fetch_text(url)
+            return self._analyze_with_vertex(text)
         except Exception as e:
             logger.error(f"WebScraper error para {url}: {e}")
             return _FALLBACK.copy()
 
-    def _fetch_html(self, url: str) -> str:
+    def _fetch_text(self, url: str) -> str:
         response = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(response.text, 'html.parser')
         for tag in soup(['script', 'style', 'nav', 'footer']):
             tag.decompose()
         return soup.get_text(separator=' ', strip=True)[:4000]
 
-    def _analyze_with_gemini(self, text: str) -> dict:
-        adapter = GeminiAdapter()
+    def _analyze_with_vertex(self, text: str) -> dict:
+        client = _vertex_client()
         prompt = _PROMPT_TEMPLATE.format(html=text)
-        raw = adapter.generate_response(prompt, api_key=self._api_key, model_name=self._model)
-        raw = raw.strip().lstrip('```json').lstrip('```').rstrip('```').strip()
+        resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        raw = resp.text.strip().lstrip('```json').lstrip('```').rstrip('```').strip()
         return json.loads(raw)
 ```
 
@@ -786,16 +849,17 @@ docker exec agente-cosmic-backend-1 python -m pytest core/brand_dna/tests/test_l
 
 Crear `core/brand_dna/extractors/logo_analyzer.py`:
 ```python
-import base64
 import logging
+import google.genai as genai
 from google.cloud import vision
-from core.agent.infrastructure.gemini_adapter import GeminiAdapter
+from google.genai import types
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
 _FALLBACK = {'primary_colors': [], 'logo_elements': ''}
 
-_GEMINI_PROMPT = """
+_VISION_PROMPT = """
 Analiza esta imagen de logo de marca. Describe en 1-2 oraciones:
 - Estilo tipográfico (si lo hay)
 - Estilo gráfico (minimalista, ilustrativo, geométrico, etc.)
@@ -804,26 +868,28 @@ Responde solo con la descripción, sin listas ni formato.
 """
 
 
-class LogoAnalyzer:
-    def __init__(self, gemini_api_key: str, gemini_model: str = 'gemini-2.5-flash'):
-        self._api_key = gemini_api_key
-        self._model = gemini_model
+def _vertex_client():
+    return genai.Client(
+        vertexai=True,
+        project=settings.GOOGLE_CLOUD_PROJECT,
+        location=settings.GOOGLE_CLOUD_LOCATION,
+    )
 
+
+class LogoAnalyzer:
     def analyze(self, image_bytes: bytes, mime_type: str) -> dict:
         try:
-            colors = self._extract_colors(image_bytes, mime_type)
-            elements = self._describe_with_gemini(image_bytes, mime_type)
+            colors = self._extract_colors(image_bytes)
+            elements = self._describe_with_vertex(image_bytes, mime_type)
             return {'primary_colors': colors, 'logo_elements': elements}
         except Exception as e:
             logger.error(f"LogoAnalyzer error: {e}")
             return _FALLBACK.copy()
 
-    def _extract_colors(self, image_bytes: bytes, mime_type: str) -> list[str]:
+    def _extract_colors(self, image_bytes: bytes) -> list[str]:
         client = vision.ImageAnnotatorClient()
         image = vision.Image(content=image_bytes)
-        features = [
-            vision.Feature(type_=vision.Feature.Type.IMAGE_PROPERTIES),
-        ]
+        features = [vision.Feature(type_=vision.Feature.Type.IMAGE_PROPERTIES)]
         request = vision.AnnotateImageRequest(image=image, features=features)
         response = client.annotate_image(request=request)
         colors = response.image_properties_annotation.dominant_colors.colors
@@ -833,16 +899,14 @@ class LogoAnalyzer:
             hex_colors.append(f'#{r:02x}{g:02x}{b:02x}')
         return hex_colors
 
-    def _describe_with_gemini(self, image_bytes: bytes, mime_type: str) -> str:
-        from google.genai import types
-        import google.genai as genai
-        client = genai.Client(api_key=self._api_key)
+    def _describe_with_vertex(self, image_bytes: bytes, mime_type: str) -> str:
+        client = _vertex_client()
         image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
-        response = client.models.generate_content(
-            model=self._model,
-            contents=[_GEMINI_PROMPT, image_part],
+        resp = client.models.generate_content(
+            model=settings.VERTEX_VISION_MODEL,
+            contents=[_VISION_PROMPT, image_part],
         )
-        return response.text.strip()
+        return resp.text.strip()
 ```
 
 - [ ] **Paso 4: Ejecutar tests**
@@ -939,12 +1003,13 @@ docker exec agente-cosmic-backend-1 python -m pytest core/brand_dna/tests/test_p
 
 Crear `core/brand_dna/extractors/posts_analyzer.py`:
 ```python
-import base64
 import json
 import logging
 import requests
+import google.genai as genai
 from bs4 import BeautifulSoup
-from core.agent.infrastructure.gemini_adapter import GeminiAdapter
+from google.genai import types
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -974,11 +1039,15 @@ Describe el estilo visual y de comunicación. Responde ÚNICAMENTE con JSON vál
 """
 
 
-class PostsAnalyzer:
-    def __init__(self, gemini_api_key: str, gemini_model: str = 'gemini-2.5-flash'):
-        self._api_key = gemini_api_key
-        self._model = gemini_model
+def _vertex_client():
+    return genai.Client(
+        vertexai=True,
+        project=settings.GOOGLE_CLOUD_PROJECT,
+        location=settings.GOOGLE_CLOUD_LOCATION,
+    )
 
+
+class PostsAnalyzer:
     def analyze(
         self,
         images: list[bytes] | None = None,
@@ -1002,21 +1071,19 @@ class PostsAnalyzer:
             return _FALLBACK.copy()
 
     def _analyze_text(self, text: str) -> dict:
-        adapter = GeminiAdapter()
+        client = _vertex_client()
         prompt = _TEXT_PROMPT.format(posts=text[:3000])
-        raw = adapter.generate_response(prompt, api_key=self._api_key, model_name=self._model)
-        raw = raw.strip().lstrip('```json').lstrip('```').rstrip('```').strip()
+        resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        raw = resp.text.strip().lstrip('```json').lstrip('```').rstrip('```').strip()
         return json.loads(raw)
 
     def _analyze_images(self, images: list[bytes]) -> dict:
-        import google.genai as genai
-        from google.genai import types
-        client = genai.Client(api_key=self._api_key)
+        client = _vertex_client()
         parts = [_IMAGE_PROMPT]
         for img_bytes in images[:5]:
             parts.append(types.Part.from_bytes(data=img_bytes, mime_type='image/jpeg'))
-        response = client.models.generate_content(model=self._model, contents=parts)
-        raw = response.text.strip().lstrip('```json').lstrip('```').rstrip('```').strip()
+        resp = client.models.generate_content(model=settings.VERTEX_VISION_MODEL, contents=parts)
+        raw = resp.text.strip().lstrip('```json').lstrip('```').rstrip('```').strip()
         return json.loads(raw)
 
     def _scrape_profile(self, url: str) -> str:
@@ -1075,7 +1142,7 @@ def pending_job():
     return AnalysisJob.objects.create(email='test@example.com', business_url='https://tuwebmx.com')
 
 
-@override_settings(GEMINI_API_KEY='test-key', AI_MODEL='gemini-2.5-flash', GOOGLE_CLOUD_PROJECT='proj')
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1', GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket', VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash', VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image', VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash')
 def test_task_creates_brand_dna(pending_job):
     with patch('core.brand_dna.tasks.WebScraper') as MockScraper, \
          patch('core.brand_dna.tasks.LogoAnalyzer') as MockLogo, \
@@ -1096,7 +1163,7 @@ def test_task_creates_brand_dna(pending_job):
     assert dna.tone == 'profesional'
 
 
-@override_settings(GEMINI_API_KEY='test-key', AI_MODEL='gemini-2.5-flash', GOOGLE_CLOUD_PROJECT='proj')
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1', GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket', VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash', VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image', VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash')
 def test_task_enqueues_content_generation(pending_job):
     with patch('core.brand_dna.tasks.WebScraper') as MockScraper, \
          patch('core.brand_dna.tasks.LogoAnalyzer') as MockLogo, \
@@ -1112,7 +1179,7 @@ def test_task_enqueues_content_generation(pending_job):
     mock_rq.enqueue.assert_called_once()
 
 
-@override_settings(GEMINI_API_KEY='test-key', AI_MODEL='gemini-2.5-flash', GOOGLE_CLOUD_PROJECT='proj')
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1', GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket', VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash', VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image', VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash')
 def test_task_marks_failed_on_error(pending_job):
     with patch('core.brand_dna.tasks.WebScraper') as MockScraper, \
          patch('core.brand_dna.tasks.LogoAnalyzer'), \
@@ -1156,12 +1223,9 @@ def analyze_brand_task(job_id: str) -> None:
     job.save(update_fields=['status'])
 
     try:
-        api_key = settings.GEMINI_API_KEY
-        model = settings.AI_MODEL
-
         # Stage 1: Web scraping
         job.update_progress(AnalysisJob.STAGE_WEB, 10)
-        scraper = WebScraper(gemini_api_key=api_key, gemini_model=model)
+        scraper = WebScraper()
         web_data = scraper.extract(job.business_url)
         job.update_progress(AnalysisJob.STAGE_WEB, 30)
 
@@ -1174,7 +1238,7 @@ def analyze_brand_task(job_id: str) -> None:
                 with open(logo_path, 'rb') as f:
                     logo_bytes = f.read()
                 mime = 'image/png' if logo_path.endswith('.png') else 'image/jpeg'
-                analyzer = LogoAnalyzer(gemini_api_key=api_key, gemini_model=model)
+                analyzer = LogoAnalyzer()
                 logo_data = analyzer.analyze(logo_bytes, mime)
         job.update_progress(AnalysisJob.STAGE_LOGO, 55)
 
@@ -1186,7 +1250,7 @@ def analyze_brand_task(job_id: str) -> None:
             if os.path.exists(full_path):
                 with open(full_path, 'rb') as f:
                     posts_images.append(f.read())
-        posts_analyzer = PostsAnalyzer(gemini_api_key=api_key, gemini_model=model)
+        posts_analyzer = PostsAnalyzer()
         posts_data = posts_analyzer.analyze(
             images=posts_images if posts_images else None,
             text=job.posts_text if job.posts_text else None,
@@ -1277,7 +1341,7 @@ def brand_dna():
     )
 
 
-@override_settings(GEMINI_API_KEY='test-key', AI_MODEL='gemini-2.5-flash')
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1', VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash')
 def test_generate_returns_7_posts(brand_dna):
     with patch('core.content_pipeline.generators.text_generator.GeminiAdapter') as MockGemini:
         MockGemini.return_value.generate_response.return_value = MOCK_GEMINI_RESPONSE
@@ -1287,7 +1351,7 @@ def test_generate_returns_7_posts(brand_dna):
     assert len(result) == 7
 
 
-@override_settings(GEMINI_API_KEY='test-key', AI_MODEL='gemini-2.5-flash')
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1', VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash')
 def test_generate_post_has_required_keys(brand_dna):
     with patch('core.content_pipeline.generators.text_generator.GeminiAdapter') as MockGemini:
         MockGemini.return_value.generate_response.return_value = MOCK_GEMINI_RESPONSE
@@ -1420,13 +1484,20 @@ class TextGenerator:
 Crear `core/content_pipeline/generators/image_generator.py`:
 ```python
 import logging
-import urllib.parse
-import requests
+import google.genai as genai
+from google.genai import types
 from google.cloud import storage
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-_POLLINATIONS_URL = 'https://image.pollinations.ai/prompt/{prompt}?width=1080&height=1080&nologo=true'
+
+def _vertex_client():
+    return genai.Client(
+        vertexai=True,
+        project=settings.GOOGLE_CLOUD_PROJECT,
+        location=settings.GOOGLE_CLOUD_LOCATION,
+    )
 
 
 class ImageGenerator:
@@ -1436,32 +1507,39 @@ class ImageGenerator:
     def generate(self, caption: str, colors: list[str], tone: str, filename: str) -> str:
         try:
             prompt = self._build_prompt(caption, colors, tone)
-            image_bytes = self._fetch_from_pollinations(prompt)
+            image_bytes = self._generate_with_vertex(prompt)
             return self._upload_to_storage(image_bytes, filename)
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")
             return ''
 
     def _build_prompt(self, caption: str, colors: list[str], tone: str) -> str:
-        color_str = ', '.join(colors[:3]) if colors else 'modern colors'
+        color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
         return (
-            f"Social media post image for: {caption[:100]}. "
-            f"Brand colors: {color_str}. Style: {tone}, professional, clean, "
-            f"high quality photography, no text overlay, square format."
+            f"Professional social media post image. Concept: {caption[:120]}. "
+            f"Use brand colors: {color_str}. Visual style: {tone}, clean, "
+            f"high quality, square format 1:1, no text overlay."
         )
 
-    def _fetch_from_pollinations(self, prompt: str) -> bytes:
-        encoded = urllib.parse.quote(prompt)
-        url = _POLLINATIONS_URL.format(prompt=encoded)
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        return response.content
+    def _generate_with_vertex(self, prompt: str) -> bytes:
+        client = _vertex_client()
+        resp = client.models.generate_content(
+            model=settings.VERTEX_IMAGE_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_modalities=['IMAGE', 'TEXT']
+            ),
+        )
+        for part in resp.candidates[0].content.parts:
+            if part.inline_data:
+                return part.inline_data.data
+        raise ValueError("No image returned by Vertex AI")
 
     def _upload_to_storage(self, image_bytes: bytes, filename: str) -> str:
-        client = storage.Client()
+        client = storage.Client(project=settings.GOOGLE_CLOUD_PROJECT)
         bucket = client.bucket(self._bucket)
-        blob = bucket.blob(f'posts/{filename}.jpg')
-        blob.upload_from_string(image_bytes, content_type='image/jpeg')
+        blob = bucket.blob(f'posts/{filename}.png')
+        blob.upload_from_string(image_bytes, content_type='image/png')
         blob.make_public()
         return blob.public_url
 ```
@@ -1477,7 +1555,7 @@ Esperado: 5 tests PASSED.
 
 ```bash
 git add core/content_pipeline/generators/ core/content_pipeline/tests/test_text_generator.py core/content_pipeline/tests/test_image_generator.py
-GIT_EDITOR=true git commit -m "feat: add TextGenerator (Gemini) and ImageGenerator (Pollinations+CloudStorage)"
+GIT_EDITOR=true git commit -m "feat: add TextGenerator (Vertex AI) and ImageGenerator (gemini-2.5-flash-image+CloudStorage)"
 ```
 
 ---
@@ -1831,7 +1909,10 @@ def job_with_dna():
     return job
 
 
-@override_settings(GEMINI_API_KEY='test-key', AI_MODEL='gemini-2.5-flash',
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1',
+                   VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+                   VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+                   VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
                    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket', DEFAULT_FROM_EMAIL='noreply@test.com')
 def test_content_generation_creates_calendar(job_with_dna):
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
@@ -1848,7 +1929,10 @@ def test_content_generation_creates_calendar(job_with_dna):
     assert ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna).count() == 7
 
 
-@override_settings(GEMINI_API_KEY='test-key', AI_MODEL='gemini-2.5-flash',
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1',
+                   VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+                   VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+                   VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
                    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket', DEFAULT_FROM_EMAIL='noreply@test.com')
 def test_content_generation_marks_job_done(job_with_dna):
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \

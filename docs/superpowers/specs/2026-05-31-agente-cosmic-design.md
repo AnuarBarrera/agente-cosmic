@@ -183,10 +183,12 @@ Los 6 jobs de RQ se programan con `enqueue_at(scheduled_at)` justo después de g
 | Cloud Vision API | Colores + labels del logo | $0.0015 |
 | Gemini 1.5 Flash | Análisis web + posts + generación de captions | $0.002 |
 | Cloud Storage | 7 imágenes generadas por análisis | $0.001 |
-| Pollinations.ai | Generación de imágenes (gratuito; fallback: placeholder con colores del ADN) | $0.00 |
-| **Total** | | **~$0.005 USD** |
+| gemini-2.5-flash-image (Vertex AI) | Generación de 7 imágenes por análisis | ~$0.02 |
+| **Total** | | **~$0.025 USD** |
 
-Con $500 USD en créditos → capacidad para ~100,000 análisis completos.
+Con $500 USD en créditos → capacidad para ~20,000 análisis completos.
+
+**Autenticación:** Application Default Credentials (ADC) vía `gcloud auth application-default login`. Montado en Docker como volumen read-only. Modelos con prefijo `publishers/google/models/`.
 
 **Variables de entorno nuevas requeridas:**
 ```
