@@ -35,7 +35,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - .:/app
-      - /home/anuarbarrera/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json
     env_file:
@@ -57,7 +57,7 @@ services:
     command: python manage.py rqworker default --worker-ttl 1800
     volumes:
       - .:/app
-      - /home/anuarbarrera/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json
     env_file:
@@ -79,7 +79,7 @@ services:
     command: python manage.py run_telegram_bot
     volumes:
       - .:/app
-      - /home/anuarbarrera/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json
     env_file:
@@ -124,7 +124,7 @@ services:
       done"
     volumes:
       - .:/app
-      - /home/anuarbarrera/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
     environment:
       - TZ=America/Mexico_City
       - GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json

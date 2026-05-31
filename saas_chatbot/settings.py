@@ -161,7 +161,7 @@ GOOGLE_CLOUD_STORAGE_BUCKET = get_env('GOOGLE_CLOUD_STORAGE_BUCKET', default='ag
 GOOGLE_CLOUD_LOCATION = get_env('GOOGLE_CLOUD_LOCATION', default='us-central1')
 VERTEX_TEXT_MODEL = 'publishers/google/models/gemini-2.5-flash'
 VERTEX_IMAGE_MODEL = 'publishers/google/models/gemini-2.5-flash-image'
-VERTEX_VISION_MODEL = 'publishers/google/models/gemini-2.5-flash'
+VERTEX_VISION_MODEL = 'publishers/google/models/gemini-2.5-flash'  # same model handles vision
 # GOOGLE_APPLICATION_CREDENTIALS se inyecta vía docker-compose (volumen ADC)
 
 # Email Settings for Django
