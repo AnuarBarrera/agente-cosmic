@@ -200,6 +200,7 @@ INSTALLED_APPS = [
     'core.shared.apps.SharedConfig',
     'core.agent.apps.AgentConfig',
     'core.brand_dna.apps.BrandDnaConfig',
+    'core.content_pipeline.apps.ContentPipelineConfig',
 ]
 
 # PII Encryption Key (should be in environment variables in production)
