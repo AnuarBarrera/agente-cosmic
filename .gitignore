@@ -1,0 +1,51 @@
+# Entornos virtuales
+venv/
+.venv/
+
+# Variables de entorno
+.env
+.env.prod
+.env.local
+
+# Archivos de runtime
+/backups/
+/logs/
+/ssl/
+/files/
+/static/
+/staticfiles/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Node (si alguna vez se agrega frontend)
+node_modules/
+/frontend/
+/landing/
+
+# Credenciales
+google_credentials.json
+token.json
+client_secret*.json
+*.p12
+*.pem
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+.dockerignore
+
+# macOS
+.DS_Store

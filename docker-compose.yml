@@ -1,0 +1,143 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    volumes:
+      - cosmic_postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cosmic-net
+
+  redis:
+    image: "redis:alpine"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "6380:6379"
+    networks:
+      - cosmic-net
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    env_file:
+      - ./.env
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    depends_on:
+      - db
+      - redis
+    networks:
+      - cosmic-net
+
+  rqworker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    entrypoint: ""
+    command: python manage.py rqworker default --worker-ttl 1800
+    volumes:
+      - .:/app
+    env_file:
+      - ./.env
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - cosmic-net
+
+  telegram_bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ""
+    command: python manage.py run_telegram_bot
+    volumes:
+      - .:/app
+    env_file:
+      - ./.env
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    depends_on:
+      - backend
+      - db
+      - redis
+    restart: unless-stopped
+    networks:
+      - cosmic-net
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "3002:80"
+    volumes:
+      - ./nginx.dev.conf:/etc/nginx/conf.d/default.conf
+      - ./staticfiles:/app/staticfiles
+    depends_on:
+      - backend
+    networks:
+      - cosmic-net
+
+  cron:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ""
+    command: >
+      sh -c "while true; do
+        HOUR=$$(date +%H);
+        MINUTE=$$(date +%M);
+        if [ \"$$HOUR\" = \"09\" ] && [ \"$$MINUTE\" = \"55\" ]; then
+          python manage.py daily_summary;
+          sleep 61;
+        fi;
+        sleep 30;
+      done"
+    volumes:
+      - .:/app
+    environment:
+      - TZ=America/Mexico_City
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - cosmic-net
+
+  brave-search-mcp:
+    build:
+      context: ./mcp_servers/brave_search
+    environment:
+      - SERPER_API_KEY=${SERPER_API_KEY}
+    networks:
+      - cosmic-net
+
+volumes:
+  cosmic_postgres_data:
+
+networks:
+  cosmic-net:
+    driver: bridge

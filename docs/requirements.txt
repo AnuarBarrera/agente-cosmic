@@ -1,0 +1,13 @@
+# MkDocs Documentation Requirements
+
+# Core MkDocs
+mkdocs>=1.5.0
+
+# Material Theme
+mkdocs-material>=9.0.0
+
+# Essential plugins only
+mkdocs-minify-plugin>=0.7.0
+
+# Code syntax highlighting
+Pygments>=2.15.0

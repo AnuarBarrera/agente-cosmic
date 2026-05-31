@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1080px; height: 1920px; overflow: hidden;
+    background: linear-gradient(180deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    font-family: 'Arial', sans-serif; color: white;
+  }
+  .container { padding: 100px; text-align: center; width: 100%; }
+  .top-accent {
+    width: 80px; height: 6px; background: #e94560;
+    margin: 0 auto 60px; border-radius: 3px;
+  }
+  h1 { font-size: 80px; font-weight: 900; line-height: 1.1; margin-bottom: 50px; }
+  .body-text { font-size: 42px; color: #c9d1d9; line-height: 1.6; margin-bottom: 80px; }
+  .cta-box {
+    background: #e94560; display: inline-block;
+    padding: 24px 60px; border-radius: 50px; font-size: 40px; font-weight: bold;
+  }
+  .brand { position: absolute; bottom: 80px; font-size: 32px; opacity: 0.5; }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="top-accent"></div>
+    <h1>{{title}}</h1>
+    <p class="body-text">{{body}}</p>
+    <div class="cta-box">{{cta}}</div>
+  </div>
+  <div class="brand">{{brand}}</div>
+</body>
+</html>
