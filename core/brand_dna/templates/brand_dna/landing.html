@@ -1,4 +1,80 @@
 <!DOCTYPE html>
-<html><head><title>Agente Cosmic</title></head>
-<body><h1>Agente Cosmic</h1><p>Stub — será reemplazado en Tarea 11.</p></body>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agente Cosmic — ADN de Marca + Contenido Automatico</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #f0f0f0; min-height: 100vh; }
+    .hero { text-align: center; padding: 60px 20px 40px; }
+    .hero h1 { font-size: 2.5rem; color: #e94560; margin-bottom: 12px; }
+    .hero p { font-size: 1.1rem; color: #aaa; max-width: 600px; margin: 0 auto 40px; }
+    .form-card { background: #1a1a2e; max-width: 600px; margin: 0 auto; padding: 40px; border-radius: 16px; }
+    .form-group { margin-bottom: 20px; }
+    label { display: block; font-size: 0.9rem; color: #aaa; margin-bottom: 6px; }
+    input[type="text"], input[type="email"], input[type="url"], textarea {
+      width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #333;
+      background: #0d0d1a; color: #f0f0f0; font-size: 1rem;
+    }
+    textarea { height: 100px; resize: vertical; }
+    .section-title { font-size: 1rem; color: #e94560; margin: 28px 0 16px; font-weight: 600; }
+    .optional-badge { font-size: 0.75rem; background: #333; color: #aaa; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
+    input[type="file"] { width: 100%; padding: 10px; background: #0d0d1a; border: 1px dashed #444; border-radius: 8px; color: #aaa; }
+    .btn { width: 100%; padding: 16px; background: #e94560; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; font-weight: 600; cursor: pointer; margin-top: 12px; }
+    .btn:hover { background: #c73652; }
+    .features { display: flex; justify-content: center; gap: 32px; padding: 40px 20px; flex-wrap: wrap; }
+    .feature { text-align: center; max-width: 160px; }
+    .feature .icon { font-size: 2rem; margin-bottom: 8px; }
+    .feature p { font-size: 0.85rem; color: #aaa; }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>Agente Cosmic</h1>
+    <p>Da la URL de tu negocio y genera automaticamente 7 dias de contenido listo para publicar — posts, imagenes y mas.</p>
+  </div>
+
+  <div class="form-card">
+    <form method="POST" action="/analizar/" enctype="multipart/form-data">
+      {% csrf_token %}
+      <div class="form-group">
+        <label>Tu correo electronico</label>
+        <input type="email" name="email" placeholder="tu@correo.com" required>
+      </div>
+      <div class="form-group">
+        <label>URL de tu negocio</label>
+        <input type="url" name="business_url" placeholder="https://tuempresa.com" required>
+      </div>
+      <div class="form-group">
+        <label>Logo de tu marca <span class="optional-badge">opcional</span></label>
+        <input type="file" name="logo" accept="image/*">
+      </div>
+
+      <div class="section-title">Posts anteriores <span class="optional-badge">opcional — mejora el resultado</span></div>
+      <div class="form-group">
+        <label>Sube hasta 5 imagenes de tus posts</label>
+        <input type="file" name="post_images" accept="image/*" multiple>
+      </div>
+      <div class="form-group">
+        <label>O pega el texto de tus ultimos posts</label>
+        <textarea name="posts_text" placeholder="Post 1: Hoy lanzamos..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>O ingresa la URL de tu perfil publico</label>
+        <input type="url" name="profile_url" placeholder="https://facebook.com/tupagina">
+      </div>
+
+      <button type="submit" class="btn">Analizar mi marca</button>
+    </form>
+  </div>
+
+  <div class="features">
+    <div class="feature"><div class="icon">*</div><p>Analisis del sitio web</p></div>
+    <div class="feature"><div class="icon">*</div><p>Extraccion de colores del logo</p></div>
+    <div class="feature"><div class="icon">*</div><p>7 dias de contenido</p></div>
+    <div class="feature"><div class="icon">*</div><p>Entregado por email</p></div>
+    <div class="feature"><div class="icon">*</div><p>Google Cloud Vision</p></div>
+  </div>
+</body>
 </html>

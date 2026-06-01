@@ -1,4 +1,138 @@
 <!DOCTYPE html>
-<html><head><title>Resultados</title></head>
-<body><h1>Resultados</h1><p>Job: {{ job.id }}</p></body>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analizando tu marca — Agente Cosmic</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #f0f0f0; min-height: 100vh; padding: 40px 20px; }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { color: #e94560; margin-bottom: 8px; }
+    .subtitle { color: #aaa; margin-bottom: 32px; }
+    .progress-card { background: #1a1a2e; border-radius: 12px; padding: 28px; margin-bottom: 24px; }
+    .stage-list { list-style: none; }
+    .stage-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; color: #aaa; }
+    .stage-item.active { color: #f0f0f0; }
+    .stage-item.done { color: #4caf50; }
+    .stage-icon { width: 24px; text-align: center; }
+    .progress-bar-bg { background: #333; border-radius: 8px; height: 8px; margin-top: 16px; }
+    .progress-bar { background: #e94560; border-radius: 8px; height: 8px; transition: width 0.5s; }
+    .progress-text { text-align: right; font-size: 0.85rem; color: #aaa; margin-top: 6px; }
+    .results-section { display: none; }
+    .dna-card { background: #1a1a2e; border-radius: 12px; padding: 28px; margin-bottom: 24px; }
+    .dna-card h2 { color: #e94560; margin-bottom: 16px; }
+    .dna-row { display: flex; gap: 8px; margin-bottom: 10px; }
+    .dna-label { color: #aaa; min-width: 110px; font-size: 0.9rem; }
+    .color-swatch { display: inline-block; width: 20px; height: 20px; border-radius: 4px; margin-right: 6px; vertical-align: middle; }
+    .calendar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+    .post-card { background: #1a1a2e; border-radius: 10px; overflow: hidden; }
+    .post-card img { width: 100%; aspect-ratio: 1; object-fit: cover; }
+    .post-card .post-body { padding: 14px; }
+    .post-card .day { font-size: 0.8rem; color: #e94560; margin-bottom: 6px; }
+    .post-card .caption { font-size: 0.9rem; color: #ddd; line-height: 1.4; }
+    .email-note { background: #1a2e1a; border: 1px solid #4caf50; border-radius: 10px; padding: 16px; margin-top: 24px; color: #aaa; }
+    .error-card { background: #2e1a1a; border: 1px solid #e94560; border-radius: 12px; padding: 28px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Agente Cosmic</h1>
+  <p class="subtitle">Analizando: <strong>{{ job.business_url }}</strong></p>
+
+  <div class="progress-card" id="progressCard">
+    <ul class="stage-list" id="stageList">
+      <li class="stage-item" id="stage-web"><span class="stage-icon">o</span> Analizando sitio web</li>
+      <li class="stage-item" id="stage-logo"><span class="stage-icon">o</span> Analizando logo</li>
+      <li class="stage-item" id="stage-posts"><span class="stage-icon">o</span> Analizando posts anteriores</li>
+      <li class="stage-item" id="stage-content"><span class="stage-icon">o</span> Generando contenido</li>
+    </ul>
+    <div class="progress-bar-bg"><div class="progress-bar" id="progressBar" style="width: 5%"></div></div>
+    <div class="progress-text" id="progressText">5%</div>
+  </div>
+
+  <div class="results-section" id="resultsSection">
+    <div class="dna-card">
+      <h2>ADN de Marca</h2>
+      <div id="dnaContent"></div>
+    </div>
+    <h2 style="margin-bottom:16px; color:#e94560;">Tu Calendario de Contenido</h2>
+    <div class="calendar-grid" id="calendarGrid"></div>
+    <div class="email-note">
+      Revisa tu correo — te enviamos el ADN completo y el contenido del Dia 1. Recibiras un email por dia durante 7 dias.
+    </div>
+  </div>
+
+  <div class="error-card" id="errorCard" style="display:none;">
+    <h2>Error en el analisis</h2>
+    <p id="errorMessage" style="margin-top:12px; color:#aaa;"></p>
+  </div>
+</div>
+
+<script>
+  const jobId = '{{ job.id }}';
+  const statusUrl = `/api/brand-dna/status/${jobId}/`;
+  const stageOrder = ['web', 'logo', 'posts', 'content', 'complete'];
+  let pollInterval;
+
+  function updateStages(currentStage) {
+    const idx = stageOrder.indexOf(currentStage);
+    stageOrder.forEach((s, i) => {
+      const el = document.getElementById('stage-' + s);
+      if (!el) return;
+      if (i < idx) { el.className = 'stage-item done'; el.querySelector('.stage-icon').textContent = 'v'; }
+      else if (i === idx) { el.className = 'stage-item active'; el.querySelector('.stage-icon').textContent = '>'; }
+      else { el.className = 'stage-item'; el.querySelector('.stage-icon').textContent = 'o'; }
+    });
+  }
+
+  function renderDna(dna) {
+    const colors = (dna.primary_colors || []).map(function(c) {
+      return '<span class="color-swatch" style="background:' + c + '"></span>' + c;
+    }).join(' ');
+    document.getElementById('dnaContent').innerHTML =
+      '<div class="dna-row"><span class="dna-label">Negocio</span><span>' + dna.business_name + '</span></div>' +
+      '<div class="dna-row"><span class="dna-label">Descripcion</span><span>' + dna.description + '</span></div>' +
+      '<div class="dna-row"><span class="dna-label">Audiencia</span><span>' + dna.audience + '</span></div>' +
+      '<div class="dna-row"><span class="dna-label">Tono</span><span>' + dna.tone + '</span></div>' +
+      '<div class="dna-row"><span class="dna-label">Keywords</span><span>' + (dna.keywords||[]).join(', ') + '</span></div>' +
+      '<div class="dna-row"><span class="dna-label">Colores</span><span>' + (colors || 'No disponibles') + '</span></div>';
+  }
+
+  function renderCalendar(posts) {
+    document.getElementById('calendarGrid').innerHTML = posts.map(function(p) {
+      return '<div class="post-card">' +
+        (p.image_url ? '<img src="' + p.image_url + '" alt="Dia ' + p.day_number + '" onerror="this.style.display=\'none\'">' : '') +
+        '<div class="post-body"><div class="day">Dia ' + p.day_number + ' - ' + p.suggested_time + '</div>' +
+        '<div class="caption">' + p.caption + '</div></div></div>';
+    }).join('');
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch(statusUrl);
+      const data = await res.json();
+      const progress = data.progress || 0;
+      document.getElementById('progressBar').style.width = progress + '%';
+      document.getElementById('progressText').textContent = progress + '%';
+      updateStages(data.stage);
+      if (data.status === 'done') {
+        clearInterval(pollInterval);
+        document.getElementById('progressCard').style.display = 'none';
+        document.getElementById('resultsSection').style.display = 'block';
+        if (data.brand_dna) renderDna(data.brand_dna);
+        if (data.calendar) renderCalendar(data.calendar);
+      } else if (data.status === 'failed') {
+        clearInterval(pollInterval);
+        document.getElementById('progressCard').style.display = 'none';
+        document.getElementById('errorCard').style.display = 'block';
+        document.getElementById('errorMessage').textContent = data.error || 'Error desconocido.';
+      }
+    } catch (e) { console.error('Polling error:', e); }
+  }
+
+  pollInterval = setInterval(poll, 3000);
+  poll();
+</script>
+</body>
 </html>
