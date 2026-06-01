@@ -16,9 +16,9 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from .views import health_check
 from django.conf import settings
 from django.conf.urls.static import static
+from .views import health_check
 
 handler400 = 'core.shared.error_handlers.handler400'
 handler403 = 'core.shared.error_handlers.handler403'
@@ -26,10 +26,11 @@ handler404 = 'core.shared.error_handlers.handler404'
 handler500 = 'core.shared.error_handlers.handler500'
 
 urlpatterns = [
-    path('', health_check, name='health_check'),
     path('health/', health_check, name='health'),
     path('admin/', admin.site.urls),
     path('api/v1/agent/', include('core.agent.interfaces.urls')),
+    path('', include('core.brand_dna.urls')),
 ]
 
 urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
