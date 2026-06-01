@@ -30,6 +30,17 @@
   </style>
 </head>
 <body>
+  <nav style="background:#1a1a2e;padding:14px 32px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #2a2a4a;">
+    <span style="font-size:1.2rem;font-weight:700;color:#e94560;">Agente Cosmic</span>
+    {% if user.is_authenticated %}
+    <div style="display:flex;gap:16px;align-items:center;font-size:0.9rem;color:#aaa;">
+      <span>{{ user.email }}</span>
+      <a href="{% url 'dashboard' %}" style="color:#e94560;text-decoration:none;">Dashboard</a>
+      <a href="{% url 'logout' %}" style="color:#aaa;text-decoration:none;">Salir</a>
+    </div>
+    {% endif %}
+  </nav>
+
   <div class="hero">
     <h1>Agente Cosmic</h1>
     <p>Da la URL de tu negocio y genera automaticamente 7 dias de contenido listo para publicar — posts, imagenes y mas.</p>
@@ -38,10 +49,6 @@
   <div class="form-card">
     <form method="POST" action="/analizar/" enctype="multipart/form-data">
       {% csrf_token %}
-      <div class="form-group">
-        <label>Tu correo electronico</label>
-        <input type="email" name="email" placeholder="tu@correo.com" required>
-      </div>
       <div class="form-group">
         <label>URL de tu negocio</label>
         <input type="url" name="business_url" placeholder="https://tuempresa.com" required>

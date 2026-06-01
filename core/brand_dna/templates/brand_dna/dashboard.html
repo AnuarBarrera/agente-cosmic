@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — Agente Cosmic</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #f0f0f0; min-height: 100vh; }
+    nav { background: #1a1a2e; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #2a2a4a; }
+    .nav-brand { font-size: 1.3rem; font-weight: 700; color: #e94560; }
+    .nav-user { display: flex; align-items: center; gap: 16px; font-size: 0.9rem; color: #aaa; }
+    .nav-user a { color: #aaa; text-decoration: none; }
+    .nav-user a:hover { color: #e94560; }
+    .container { max-width: 800px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 1.6rem; margin-bottom: 8px; }
+    .welcome { color: #aaa; font-size: 0.95rem; margin-bottom: 32px; }
+    .btn-new { display: inline-block; padding: 12px 24px; background: #e94560; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.95rem; margin-bottom: 32px; }
+    .btn-new:hover { background: #c73652; }
+    .empty { background: #1a1a2e; padding: 48px; border-radius: 16px; text-align: center; color: #aaa; }
+    .empty p { margin-bottom: 20px; }
+    .job-card { background: #1a1a2e; border-radius: 12px; padding: 20px 24px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .job-info { flex: 1; min-width: 0; }
+    .job-url { font-weight: 600; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .job-meta { font-size: 0.8rem; color: #666; margin-top: 4px; }
+    .job-brand { font-size: 0.85rem; color: #aaa; margin-top: 2px; }
+    .status-badge { padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+    .status-done { background: #1a3a2a; color: #4caf7d; }
+    .status-processing { background: #2a2a1a; color: #f0c040; }
+    .status-failed { background: #3a1a1a; color: #e94560; }
+    .status-pending { background: #2a2a3a; color: #888; }
+    .job-link { color: #e94560; text-decoration: none; font-size: 0.85rem; white-space: nowrap; }
+    .job-link:hover { text-decoration: underline; }
+    .colors { display: flex; gap: 4px; margin-top: 6px; }
+    .color-dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #333; }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="nav-brand">Agente Cosmic</div>
+    <div class="nav-user">
+      <span>{{ user.email }}</span>
+      <a href="{% url 'logout' %}">Cerrar sesión</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <h1>Mis análisis de marca</h1>
+    <p class="welcome">Cada análisis genera 7 días de contenido entregado a tu correo.</p>
+
+    <a href="{% url 'landing' %}" class="btn-new">+ Nuevo análisis</a>
+
+    {% if jobs %}
+      {% for job in jobs %}
+      <div class="job-card">
+        <div class="job-info">
+          <div class="job-url">{{ job.business_url }}</div>
+          {% if job.brand_dna %}
+          <div class="job-brand">{{ job.brand_dna.business_name }}</div>
+          {% if job.brand_dna.primary_colors %}
+          <div class="colors">
+            {% for color in job.brand_dna.primary_colors|slice:":5" %}
+            <div class="color-dot" style="background:{{ color }};" title="{{ color }}"></div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% endif %}
+          <div class="job-meta">{{ job.created_at|date:"d M Y, H:i" }}</div>
+        </div>
+        <span class="status-badge status-{{ job.status }}">
+          {% if job.status == 'done' %}Completado
+          {% elif job.status == 'processing' %}Procesando
+          {% elif job.status == 'failed' %}Fallido
+          {% else %}Pendiente{% endif %}
+        </span>
+        {% if job.status == 'done' %}
+        <a href="{% url 'results' job.id %}" class="job-link">Ver resultados →</a>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty">
+        <p>Aún no tienes análisis. ¡Empieza con la URL de tu negocio!</p>
+        <a href="{% url 'landing' %}" class="btn-new">Analizar mi marca</a>
+      </div>
+    {% endif %}
+  </div>
+</body>
+</html>

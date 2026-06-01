@@ -1,0 +1,38 @@
+from django import forms
+from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+
+User = get_user_model()
+
+
+class RegisterForm(forms.Form):
+    email = forms.EmailField(label='Correo electrónico')
+    password1 = forms.CharField(
+        label='Contraseña',
+        widget=forms.PasswordInput,
+        min_length=8,
+        help_text='Mínimo 8 caracteres',
+    )
+    password2 = forms.CharField(
+        label='Confirmar contraseña',
+        widget=forms.PasswordInput,
+    )
+
+    def clean_email(self):
+        email = self.cleaned_data['email'].lower().strip()
+        if User.objects.filter(email=email).exists():
+            raise ValidationError('Este correo ya está registrado. ¿Quieres iniciar sesión?')
+        return email
+
+    def clean(self):
+        cleaned = super().clean()
+        p1 = cleaned.get('password1')
+        p2 = cleaned.get('password2')
+        if p1 and p2 and p1 != p2:
+            self.add_error('password2', 'Las contraseñas no coinciden.')
+        return cleaned
+
+
+class LoginForm(forms.Form):
+    email = forms.EmailField(label='Correo electrónico')
+    password = forms.CharField(label='Contraseña', widget=forms.PasswordInput)

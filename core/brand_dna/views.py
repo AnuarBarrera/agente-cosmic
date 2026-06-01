@@ -1,20 +1,24 @@
 import os
 import django_rq
 from django.conf import settings
+from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from core.brand_dna.models import AnalysisJob, BrandDNA
 
 
 def landing(request):
+    if request.user.is_authenticated:
+        return redirect('dashboard')
     return render(request, 'brand_dna/landing.html')
 
 
+@login_required
 def analyze_submit(request):
     if request.method != 'POST':
         return redirect('landing')
 
-    email = request.POST.get('email', '').strip()
+    email = request.user.email
     business_url = request.POST.get('business_url', '').strip()
     posts_text = request.POST.get('posts_text', '').strip()
     profile_url = request.POST.get('profile_url', '').strip()
@@ -24,6 +28,7 @@ def analyze_submit(request):
         business_url=business_url,
         posts_text=posts_text,
         profile_url=profile_url,
+        user=request.user,
     )
 
     if 'logo' in request.FILES:

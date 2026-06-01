@@ -1,9 +1,17 @@
 from django.urls import path
-from . import views
+from . import views, auth_views
 
 urlpatterns = [
     path('', views.landing, name='landing'),
     path('analizar/', views.analyze_submit, name='analyze_submit'),
     path('resultados/<uuid:job_id>/', views.results, name='results'),
     path('api/brand-dna/status/<uuid:job_id>/', views.status_api, name='status_api'),
+
+    # Auth
+    path('auth/login/', auth_views.login_view, name='login'),
+    path('auth/register/', auth_views.register_view, name='register'),
+    path('auth/logout/', auth_views.logout_view, name='logout'),
+    path('auth/google/', auth_views.google_login_view, name='google_login'),
+    path('auth/google/callback/', auth_views.google_callback_view, name='google_callback'),
+    path('dashboard/', auth_views.dashboard_view, name='dashboard'),
 ]

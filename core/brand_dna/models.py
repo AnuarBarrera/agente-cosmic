@@ -1,4 +1,5 @@
 import uuid
+from django.conf import settings
 from django.db import models
 
 
@@ -37,6 +38,12 @@ class AnalysisJob(models.Model):
     post_images_paths = models.JSONField(default=list, blank=True)
     posts_text = models.TextField(blank=True, default='')
     profile_url = models.URLField(blank=True, default='')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='analysis_jobs',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

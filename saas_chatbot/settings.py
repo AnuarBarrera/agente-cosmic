@@ -161,8 +161,21 @@ GOOGLE_CLOUD_STORAGE_BUCKET = get_env('GOOGLE_CLOUD_STORAGE_BUCKET', default='ag
 GOOGLE_CLOUD_LOCATION = get_env('GOOGLE_CLOUD_LOCATION', default='us-central1')
 VERTEX_TEXT_MODEL = 'publishers/google/models/gemini-2.5-flash'
 VERTEX_IMAGE_MODEL = 'publishers/google/models/gemini-2.5-flash-image'
-VERTEX_VISION_MODEL = 'publishers/google/models/gemini-2.5-flash'  # same model handles vision
+VERTEX_VERTEX_MODEL = 'publishers/google/models/gemini-2.5-flash'
 # GOOGLE_APPLICATION_CREDENTIALS se inyecta vía docker-compose (volumen ADC)
+
+# Google OAuth (para Sign in with Google)
+GOOGLE_CLIENT_ID = get_env('GOOGLE_CLIENT_ID', default='')
+GOOGLE_CLIENT_SECRET = get_env('GOOGLE_CLIENT_SECRET', default='')
+GOOGLE_OAUTH_REDIRECT_URI = get_env(
+    'GOOGLE_OAUTH_REDIRECT_URI',
+    default='https://cosmic.anuarbarrera.dev/auth/google/callback/',
+)
+
+# Auth routing
+LOGIN_URL = '/auth/login/'
+LOGIN_REDIRECT_URL = '/dashboard/'
+LOGOUT_REDIRECT_URL = '/auth/login/'
 
 # Email Settings for Django
 if MAILGUN_API_KEY and MAILGUN_DOMAIN:
