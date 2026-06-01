@@ -10,6 +10,7 @@ from core.content_pipeline.generators.text_generator import TextGenerator
 from core.content_pipeline.generators.image_generator import ImageGenerator
 from core.content_pipeline.email_sender import EmailSender
 from core.content_pipeline.scheduler import schedule_daily_emails
+from core.content_pipeline.smart_scheduler import smart_schedule_dates
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +31,13 @@ def content_generation_task(job_id: str) -> None:
         now = timezone.now()
         mexico_today = now.astimezone(MEXICO_TZ).date()
 
+        scheduled_dates = smart_schedule_dates(brand_dna, base_date=mexico_today, count=len(posts_data))
+
         for i, post_data in enumerate(posts_data, start=1):
             hour, minute = map(int, post_data.get('suggested_time', '19:00').split(':'))
+            scheduled = scheduled_dates[i - 1]
+
             if i == 1:
-                scheduled = now
-                # Solo generamos la imagen del día 1 ahora — las demás se generan al enviar
                 image_url = image_gen.generate(
                     caption=post_data['caption'],
                     colors=brand_dna.primary_colors,
@@ -42,13 +45,8 @@ def content_generation_task(job_id: str) -> None:
                     filename=f"{job_id}-day{i}",
                 )
             else:
-                # Día N → (hoy + N-1 días) a las 7 AM México, sin importar la hora del análisis
-                target_date = mexico_today + timedelta(days=i - 1)
-                scheduled = dt_datetime(
-                    target_date.year, target_date.month, target_date.day,
-                    7, 0, 0, tzinfo=MEXICO_TZ
-                )
                 image_url = ''
+
             ContentPost.objects.create(
                 calendar=calendar,
                 day_number=i,
