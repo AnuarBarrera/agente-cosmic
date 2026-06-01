@@ -1,5 +1,4 @@
 import logging
-import time
 from datetime import datetime as dt_datetime, timedelta, timezone as dt_timezone
 from django.conf import settings
 from django.utils import timezone
@@ -35,6 +34,13 @@ def content_generation_task(job_id: str) -> None:
             hour, minute = map(int, post_data.get('suggested_time', '19:00').split(':'))
             if i == 1:
                 scheduled = now
+                # Solo generamos la imagen del día 1 ahora — las demás se generan al enviar
+                image_url = image_gen.generate(
+                    caption=post_data['caption'],
+                    colors=brand_dna.primary_colors,
+                    tone=brand_dna.tone,
+                    filename=f"{job_id}-day{i}",
+                )
             else:
                 # Día N → (hoy + N-1 días) a las 7 AM México, sin importar la hora del análisis
                 target_date = mexico_today + timedelta(days=i - 1)
@@ -42,14 +48,7 @@ def content_generation_task(job_id: str) -> None:
                     target_date.year, target_date.month, target_date.day,
                     7, 0, 0, tzinfo=MEXICO_TZ
                 )
-            if i > 1:
-                time.sleep(3)
-            image_url = image_gen.generate(
-                caption=post_data['caption'],
-                colors=brand_dna.primary_colors,
-                tone=brand_dna.tone,
-                filename=f"{job_id}-day{i}",
-            )
+                image_url = ''
             ContentPost.objects.create(
                 calendar=calendar,
                 day_number=i,
@@ -81,4 +80,19 @@ def content_generation_task(job_id: str) -> None:
 
 def send_daily_email_task(post_id: str) -> None:
     post = ContentPost.objects.select_related('calendar__brand_dna__job').get(id=post_id)
+    # Genera la imagen justo antes de enviar (solo si no fue generada antes)
+    if not post.image_url:
+        brand_dna = post.calendar.brand_dna
+        job_id = str(brand_dna.job.id)
+        try:
+            image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+            post.image_url = image_gen.generate(
+                caption=post.caption,
+                colors=brand_dna.primary_colors,
+                tone=brand_dna.tone,
+                filename=f"{job_id}-day{post.day_number}",
+            )
+            post.save(update_fields=['image_url'])
+        except Exception as img_err:
+            logger.warning(f"Imagen día {post.day_number} falló (no fatal): {img_err}")
     EmailSender().send_daily(post=post)
