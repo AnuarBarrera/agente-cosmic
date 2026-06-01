@@ -46,14 +46,20 @@ class ImageGenerator:
         )
 
     def _overlay_text(self, image_bytes: bytes, caption: str) -> bytes:
+        if not caption or not caption.strip():
+            return image_bytes
+
         img = Image.open(io.BytesIO(image_bytes)).convert('RGBA')
         w, h = img.size
+
+        if w == 0 or h == 0:
+            return image_bytes
 
         bar_h = int(h * 0.25)
         overlay = Image.new('RGBA', (w, bar_h), (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
         for y in range(bar_h):
-            alpha = int(180 * (y / bar_h))
+            alpha = int(180 * (1 - y / bar_h))  # opaco arriba, transparente abajo
             draw_overlay.line([(0, y), (w, y)], fill=(0, 0, 0, alpha))
 
         img.paste(overlay, (0, h - bar_h), overlay)

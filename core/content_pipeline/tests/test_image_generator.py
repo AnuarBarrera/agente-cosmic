@@ -24,7 +24,7 @@ def test_generate_returns_url():
     gen = ImageGenerator(bucket_name='test-bucket')
     with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc, \
          patch.object(gen, '_upload_to_storage', return_value='https://storage.googleapis.com/test/img.jpg'), \
-         patch.object(gen, '_overlay_text', side_effect=lambda b, c: b):
+         patch.object(gen, '_overlay_text', side_effect=lambda b, c: b) as mock_overlay:
         mock_candidate = MagicMock()
         mock_part = MagicMock()
         mock_part.inline_data = MagicMock()
@@ -39,6 +39,7 @@ def test_generate_returns_url():
             filename='test-img',
         )
     assert url.startswith('https://')
+    mock_overlay.assert_called_once()
 
 
 @override_settings(
@@ -91,3 +92,5 @@ class TestOverlayText:
 
         result = gen._overlay_text(buf.getvalue(), long_caption)
         assert len(result) > 0
+        out = Image.open(io.BytesIO(result))
+        assert out.size == (1024, 1024)
