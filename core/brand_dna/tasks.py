@@ -56,7 +56,7 @@ def analyze_brand_task(job_id: str) -> None:
             keywords=web_data.get('keywords', []),
             audience=web_data.get('audience', ''),
             tone=web_data.get('tone', 'profesional'),
-            primary_colors=logo_data.get('primary_colors', []),
+            primary_colors=logo_data.get('primary_colors') or web_data.get('brand_colors', []),
             logo_elements=logo_data.get('logo_elements', ''),
             posting_style=posts_data.get('posting_style', ''),
             avg_caption_length=posts_data.get('avg_caption_length', 150),

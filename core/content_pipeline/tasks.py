@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
@@ -30,6 +31,8 @@ def content_generation_task(job_id: str) -> None:
         for i, post_data in enumerate(posts_data, start=1):
             hour, minute = map(int, post_data.get('suggested_time', '19:00').split(':'))
             scheduled = (now + timedelta(days=i)).replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if i > 1:
+                time.sleep(3)
             image_url = image_gen.generate(
                 caption=post_data['caption'],
                 colors=brand_dna.primary_colors,
@@ -48,8 +51,11 @@ def content_generation_task(job_id: str) -> None:
 
         job.update_progress(AnalysisJob.STAGE_CONTENT, 95)
 
-        EmailSender().send_initial(job=job, brand_dna=brand_dna, calendar=calendar)
-        schedule_daily_emails(calendar)
+        try:
+            EmailSender().send_initial(job=job, brand_dna=brand_dna, calendar=calendar)
+            schedule_daily_emails(calendar)
+        except Exception as email_err:
+            logger.error(f"Email falló para job {job_id} (no fatal): {email_err}")
 
         job.stage = AnalysisJob.STAGE_COMPLETE
         job.progress = 100

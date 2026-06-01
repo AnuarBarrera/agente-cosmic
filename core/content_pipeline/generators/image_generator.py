@@ -1,10 +1,14 @@
 import logging
+import time
 import google.genai as genai
 from google.genai import types
 from google.cloud import storage
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+_MAX_RETRIES = 3
+_RETRY_DELAYS = [10, 20, 40]
 
 
 def _vertex_client():
@@ -22,7 +26,7 @@ class ImageGenerator:
     def generate(self, caption: str, colors: list[str], tone: str, filename: str) -> str:
         try:
             prompt = self._build_prompt(caption, colors, tone)
-            image_bytes = self._generate_with_vertex(prompt)
+            image_bytes = self._generate_with_retry(prompt)
             return self._upload_to_storage(image_bytes, filename)
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")
@@ -35,6 +39,21 @@ class ImageGenerator:
             f"Use brand colors: {color_str}. Visual style: {tone}, clean, "
             f"high quality, square format 1:1, no text overlay."
         )
+
+    def _generate_with_retry(self, prompt: str) -> bytes:
+        last_error = None
+        for attempt in range(_MAX_RETRIES):
+            try:
+                return self._generate_with_vertex(prompt)
+            except Exception as e:
+                last_error = e
+                if '429' in str(e) and attempt < _MAX_RETRIES - 1:
+                    delay = _RETRY_DELAYS[attempt]
+                    logger.warning(f"Rate limit en imagen, reintento {attempt + 1} en {delay}s")
+                    time.sleep(delay)
+                else:
+                    raise
+        raise last_error
 
     def _generate_with_vertex(self, prompt: str) -> bytes:
         client = _vertex_client()

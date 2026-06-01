@@ -8,6 +8,7 @@ venv/
 .env.local
 
 # Archivos de runtime
+/media/
 /backups/
 /logs/
 /ssl/
