@@ -1,9 +1,13 @@
+import io
 import logging
+import textwrap
 import time
+
 import google.genai as genai
-from google.genai import types
 from google.cloud import storage
+from google.genai import types
 from django.conf import settings
+from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,7 @@ class ImageGenerator:
         try:
             prompt = self._build_prompt(caption, colors, tone)
             image_bytes = self._generate_with_retry(prompt)
+            image_bytes = self._overlay_text(image_bytes, caption)
             return self._upload_to_storage(image_bytes, filename)
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")
@@ -37,8 +42,40 @@ class ImageGenerator:
         return (
             f"Professional social media post image. Concept: {caption[:120]}. "
             f"Use brand colors: {color_str}. Visual style: {tone}, clean, "
-            f"high quality, square format 1:1, no text overlay."
+            f"high quality, square format 1:1, photographic or illustrated."
         )
+
+    def _overlay_text(self, image_bytes: bytes, caption: str) -> bytes:
+        img = Image.open(io.BytesIO(image_bytes)).convert('RGBA')
+        w, h = img.size
+
+        bar_h = int(h * 0.25)
+        overlay = Image.new('RGBA', (w, bar_h), (0, 0, 0, 0))
+        draw_overlay = ImageDraw.Draw(overlay)
+        for y in range(bar_h):
+            alpha = int(180 * (y / bar_h))
+            draw_overlay.line([(0, y), (w, y)], fill=(0, 0, 0, alpha))
+
+        img.paste(overlay, (0, h - bar_h), overlay)
+
+        draw = ImageDraw.Draw(img)
+        try:
+            font = ImageFont.load_default(size=max(20, w // 32))
+        except TypeError:
+            font = ImageFont.load_default()
+
+        padding = w // 20
+        max_chars = max(20, w // (max(20, w // 32) // 2))
+        lines = textwrap.wrap(caption[:240], width=max_chars)[:4]
+        text = '\n'.join(lines)
+
+        text_y = h - bar_h + padding
+        draw.text((padding + 2, text_y + 2), text, font=font, fill=(0, 0, 0, 200))
+        draw.text((padding, text_y), text, font=font, fill=(255, 255, 255, 255))
+
+        out = io.BytesIO()
+        img.convert('RGB').save(out, format='PNG', optimize=True)
+        return out.getvalue()
 
     def _generate_with_retry(self, prompt: str) -> bytes:
         last_error = None
