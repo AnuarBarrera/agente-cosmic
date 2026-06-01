@@ -1,8 +1,10 @@
 import logging
 import time
-from datetime import timedelta
+from datetime import datetime as dt_datetime, timedelta, timezone as dt_timezone
 from django.conf import settings
 from django.utils import timezone
+
+MEXICO_TZ = dt_timezone(timedelta(hours=-6))  # UTC-6 sin DST (desde 2023)
 from core.brand_dna.models import AnalysisJob
 from core.content_pipeline.models import ContentCalendar, ContentPost
 from core.content_pipeline.generators.text_generator import TextGenerator
@@ -27,10 +29,19 @@ def content_generation_task(job_id: str) -> None:
         calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
         now = timezone.now()
+        mexico_today = now.astimezone(MEXICO_TZ).date()
 
         for i, post_data in enumerate(posts_data, start=1):
             hour, minute = map(int, post_data.get('suggested_time', '19:00').split(':'))
-            scheduled = (now + timedelta(days=i)).replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if i == 1:
+                scheduled = now
+            else:
+                # Día N → (hoy + N-1 días) a las 7 AM México, sin importar la hora del análisis
+                target_date = mexico_today + timedelta(days=i - 1)
+                scheduled = dt_datetime(
+                    target_date.year, target_date.month, target_date.day,
+                    7, 0, 0, tzinfo=MEXICO_TZ
+                )
             if i > 1:
                 time.sleep(3)
             image_url = image_gen.generate(
