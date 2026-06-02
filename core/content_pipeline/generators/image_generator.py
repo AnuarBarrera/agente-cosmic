@@ -150,6 +150,53 @@ class ImageGenerator:
             logger.warning(f"Background analysis failed, using fallback: {e}")
         return _FALLBACK
 
+    def _generate_post_content(self, caption: str) -> dict:
+        """Text-only Gemini call → {headline, subtitle, cta, tag} for HTML template."""
+        _FALLBACK = {
+            'headline': self._extract_headline(caption),
+            'subtitle': (caption[:120] if caption else '').strip(),
+            'cta': 'Contáctanos hoy',
+            'tag': 'DESTACADO',
+        }
+        try:
+            client = _vertex_client()
+            prompt = (
+                f"Caption del post: \"{caption[:300]}\"\n\n"
+                "Genera el contenido para un post de Instagram con estos 4 elementos:\n"
+                "1. headline: 3-5 palabras. Frase gancho, memorable. Sin nombres de marca, URLs, hashtags.\n"
+                "2. subtitle: 8-15 palabras. Amplía el headline con el beneficio clave. Español correcto.\n"
+                "3. cta: 2-4 palabras. Llamada a la acción directa. (Ej: 'Empieza hoy', 'Solicita tu demo')\n"
+                "4. tag: 1-3 palabras EN MAYÚSCULAS. Categoría del sector. (Ej: 'DISEÑO WEB', 'NUTRICIÓN')\n\n"
+                "REGLAS: Español impecable. Sin inventar palabras. Sin duplicar letras.\n"
+                "Responde ÚNICAMENTE este JSON (sin markdown):\n"
+                "{\"headline\":\"...\",\"subtitle\":\"...\",\"cta\":\"...\",\"tag\":\"...\"}"
+            )
+            resp = client.models.generate_content(
+                model=settings.VERTEX_TEXT_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=(
+                        "Eres 'Cosmic', Director Creativo de Agente Cosmic. "
+                        "Generas contenido de marketing para redes sociales. "
+                        "Español impecable. Cero errores ortográficos. Nunca inventes palabras. "
+                        "Frases para imagen: cortas, impactantes, máximo 5 palabras."
+                    ),
+                ),
+            )
+            raw = resp.text.strip()
+            match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                return {
+                    'headline': str(data.get('headline', '')).strip() or _FALLBACK['headline'],
+                    'subtitle': str(data.get('subtitle', '')).strip() or _FALLBACK['subtitle'],
+                    'cta': str(data.get('cta', '')).strip() or _FALLBACK['cta'],
+                    'tag': str(data.get('tag', '')).strip().upper() or _FALLBACK['tag'],
+                }
+        except Exception as e:
+            logger.warning(f"Post content generation failed, using fallback: {e}")
+        return _FALLBACK
+
     def _generate_text_asset(self, headline: str, colors: list[str], max_retries: int = 2) -> bytes | None:
         """Render headline on exact magenta #FF00FF using PIL with dark backing rectangle.
 

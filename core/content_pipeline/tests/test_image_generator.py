@@ -168,6 +168,57 @@ class TestAnalyzeBackground:
         assert result['headline'] == 'Tu Web En 48h'
 
 
+class TestGeneratePostContent:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_all_required_keys_on_fallback(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            result = gen._generate_post_content('Tu negocio necesita una web profesional')
+        assert set(result.keys()) == {'headline', 'subtitle', 'cta', 'tag'}
+        assert len(result['headline']) > 0
+        assert len(result['cta']) > 0
+        assert len(result['tag']) > 0
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_parses_valid_gemini_response(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"headline":"Web en 48h","subtitle":"Sitio profesional listo en dos días","cta":"Empieza hoy","tag":"DISEÑO WEB"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._generate_post_content('Diseño web profesional para tu empresa')
+        assert result['headline'] == 'Web en 48h'
+        assert result['subtitle'] == 'Sitio profesional listo en dos días'
+        assert result['cta'] == 'Empieza hoy'
+        assert result['tag'] == 'DISEÑO WEB'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_tag_is_uppercased(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"headline":"Impulsa tu marca","subtitle":"Resultados reales y medibles","cta":"Ver más","tag":"marketing digital"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._generate_post_content('Marketing digital que convierte')
+        assert result['tag'] == 'MARKETING DIGITAL'
+
+
 class TestLayeredPipeline:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
