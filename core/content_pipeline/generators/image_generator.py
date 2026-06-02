@@ -1,5 +1,8 @@
 import io
+import json
 import logging
+import random
+import re
 import textwrap
 import time
 
@@ -29,12 +32,104 @@ class ImageGenerator:
 
     def generate(self, caption: str, colors: list[str], tone: str, filename: str) -> str:
         try:
-            prompt = self._build_prompt(caption, colors, tone)
-            image_bytes = self._generate_with_retry(prompt)
+            image_bytes = self._layered_pipeline(caption, colors, tone)
             return self._upload_to_storage(image_bytes, filename)
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")
             return ''
+
+    # ------------------------------------------------------------------
+    # Layered pipeline
+    # ------------------------------------------------------------------
+
+    def _layered_pipeline(self, caption: str, colors: list[str], tone: str) -> bytes:
+        from core.content_pipeline.generators.layer_composer import composite_layers
+
+        background_bytes = self._generate_background(caption, colors, tone)
+
+        headline = self._extract_headline(caption)
+        text_asset_bytes = self._generate_text_asset(headline, colors)
+
+        placement = self._analyze_negative_space(background_bytes)
+
+        rotation = random.uniform(-5.0, 5.0) if random.random() < 0.4 else 0.0
+
+        if text_asset_bytes:
+            return composite_layers(
+                background_bytes=background_bytes,
+                text_asset_bytes=text_asset_bytes,
+                x=placement['x'],
+                y=placement['y'],
+                width=placement['width'],
+                rotation_deg=rotation,
+            )
+
+        logger.warning("Text asset failed all retries — returning background only")
+        return background_bytes
+
+    def _generate_background(self, caption: str, colors: list[str], tone: str) -> bytes:
+        color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
+        prompt = (
+            f"Minimalist abstract background for social media. "
+            f"Visual concept: {caption[:80]}. "
+            f"Brand colors: {color_str}. Style: {tone}. "
+            f"CRITICAL: absolutely no text, no words, no letters, no numbers anywhere. "
+            f"Leave a significant area of flat or low-complexity negative space for text overlay. "
+            f"Square format 1:1, professional, high quality."
+        )
+        return self._generate_with_retry(prompt)
+
+    def _extract_headline(self, caption: str) -> str:
+        words = [w for w in caption.split() if not w.startswith('#')]
+        return ' '.join(words[:5]) or caption[:30]
+
+    def _generate_text_asset(self, headline: str, colors: list[str], max_retries: int = 2) -> bytes | None:
+        color_str = colors[0] if colors else '#ffffff'
+        prompt = (
+            f"High quality 3D rendered bold text saying exactly '{headline}' "
+            f"on a solid magenta background color #FF00FF. "
+            f"Text color: white or {color_str}. Modern bold font, centered. "
+            f"Nothing else in the image — only the text and the magenta background. "
+            f"High contrast, sharp edges. Square image."
+        )
+        for attempt in range(max_retries):
+            try:
+                return self._generate_with_vertex(prompt)
+            except Exception as e:
+                logger.warning(f"Text asset attempt {attempt + 1}/{max_retries} failed: {e}")
+        return None
+
+    def _analyze_negative_space(self, background_bytes: bytes) -> dict:
+        _FALLBACK = {'x': 0.1, 'y': 0.6, 'width': 0.8}
+        try:
+            client = _vertex_client()
+            image_part = types.Part.from_bytes(data=background_bytes, mime_type='image/png')
+            prompt = (
+                "Analyze this image and find the best rectangular area for a text overlay. "
+                "The area should have low visual complexity (flat color, negative space, or blur). "
+                "Return ONLY a JSON object — no explanation, no markdown: "
+                '{"x": <left edge 0.0-1.0>, "y": <top edge 0.0-1.0>, "width": <width 0.4-0.9>}'
+            )
+            resp = client.models.generate_content(
+                model=settings.VERTEX_TEXT_MODEL,
+                contents=[image_part, prompt],
+            )
+            raw = resp.text.strip()
+            match = re.search(r'\{[^}]+\}', raw)
+            if match:
+                data = json.loads(match.group())
+                return {
+                    'x': max(0.0, min(0.9, float(data.get('x', 0.1)))),
+                    'y': max(0.0, min(0.85, float(data.get('y', 0.6)))),
+                    'width': max(0.4, min(0.95, float(data.get('width', 0.8)))),
+                }
+        except Exception as e:
+            logger.warning(f"Negative space analysis failed, using fallback: {e}")
+        return _FALLBACK
+
+    # ------------------------------------------------------------------
+    # Low-level helpers (kept for fallback/legacy use)
+    # ------------------------------------------------------------------
 
     def _build_prompt(self, caption: str, colors: list[str], tone: str) -> str:
         color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
@@ -58,7 +153,7 @@ class ImageGenerator:
         overlay = Image.new('RGBA', (w, bar_h), (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
         for y in range(bar_h):
-            alpha = int(180 * (1 - y / bar_h))  # opaco arriba, transparente abajo
+            alpha = int(180 * (1 - y / bar_h))
             draw_overlay.line([(0, y), (w, y)], fill=(0, 0, 0, alpha))
 
         img.paste(overlay, (0, h - bar_h), overlay)
@@ -96,7 +191,7 @@ class ImageGenerator:
                 last_error = e
                 if '429' in str(e) and attempt < _MAX_RETRIES - 1:
                     delay = _RETRY_DELAYS[attempt]
-                    logger.warning(f"Rate limit en imagen, reintento {attempt + 1} en {delay}s")
+                    logger.warning(f"Rate limit, reintento {attempt + 1} en {delay}s")
                     time.sleep(delay)
                 else:
                     raise
@@ -117,7 +212,6 @@ class ImageGenerator:
             if resp.generated_images:
                 return resp.generated_images[0].image.image_bytes
             raise ValueError("No image returned by Imagen")
-        # Fallback: Gemini multimodal
         resp = client.models.generate_content(
             model=model,
             contents=prompt,
