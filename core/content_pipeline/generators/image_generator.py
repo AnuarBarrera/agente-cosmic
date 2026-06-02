@@ -31,7 +31,6 @@ class ImageGenerator:
         try:
             prompt = self._build_prompt(caption, colors, tone)
             image_bytes = self._generate_with_retry(prompt)
-            image_bytes = self._overlay_text(image_bytes, caption)
             return self._upload_to_storage(image_bytes, filename)
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")

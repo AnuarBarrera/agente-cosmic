@@ -118,7 +118,9 @@
     <div class="post-card {{ post.user_status }}" id="card-{{ post.id }}">
       <div class="post-img">
         {% if post.image_url %}
-          <img src="{{ post.image_url }}" alt="Día {{ post.day_number }}" loading="lazy">
+          <a href="{{ post.image_url }}" target="_blank" rel="noopener" title="Ver imagen completa" style="display:block;width:100%;height:100%;">
+            <img src="{{ post.image_url }}" alt="Día {{ post.day_number }}" loading="lazy" style="cursor:zoom-in;">
+          </a>
         {% else %}
           📸
         {% endif %}

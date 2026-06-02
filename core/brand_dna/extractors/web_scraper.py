@@ -70,13 +70,32 @@ class WebScraper:
             return _FALLBACK.copy()
 
     def _fetch_text_and_colors(self, url: str) -> tuple[str, list[str]]:
-        response = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, timeout=15, headers=headers)
         soup = BeautifulSoup(response.text, 'html.parser')
 
+        # 1. Inline <style> blocks
         css_text = ' '.join(tag.get_text() for tag in soup.find_all('style'))
-        raw_colors = _HEX_RE.findall(css_text)
+
+        # 2. Inline style="..." attributes
+        for tag in soup.find_all(style=True):
+            css_text += ' ' + tag['style']
+
+        # 3. External CSS files (primer hoja de estilos, timeout corto)
+        base_url = response.url.rstrip('/')
+        for link in soup.find_all('link', rel=lambda r: r and 'stylesheet' in r)[:2]:
+            href = link.get('href', '')
+            if not href:
+                continue
+            css_url = href if href.startswith('http') else f"{base_url}/{href.lstrip('/')}"
+            try:
+                css_resp = requests.get(css_url, timeout=6, headers=headers)
+                css_text += ' ' + css_resp.text
+            except Exception:
+                pass
+
         seen, colors = set(), []
-        for h in raw_colors:
+        for h in _HEX_RE.findall(css_text):
             normalized = _normalize_hex(h)
             if normalized not in seen and not _is_neutral(normalized[1:]):
                 seen.add(normalized)
@@ -98,5 +117,6 @@ class WebScraper:
         raw = re.sub(r'^```(?:json)?\n?', '', raw)
         raw = re.sub(r'\n?```$', '', raw)
         result = json.loads(raw.strip())
-        result.setdefault('brand_colors', css_colors[:5])
+        if not result.get('brand_colors'):
+            result['brand_colors'] = css_colors[:5]
         return result
