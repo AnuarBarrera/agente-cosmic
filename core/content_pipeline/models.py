@@ -36,6 +36,21 @@ class ContentPost(models.Model):
     scheduled_at = models.DateTimeField()
     sent_at = models.DateTimeField(null=True, blank=True)
 
+    USER_STATUS_PENDING = 'pending'
+    USER_STATUS_APPROVED = 'approved'
+    USER_STATUS_EDITED = 'edited'
+    USER_STATUS_CHANGE_REQUESTED = 'change_requested'
+    USER_STATUS_CHOICES = [
+        ('pending', 'Pendiente revisión'),
+        ('approved', 'Aprobado'),
+        ('edited', 'Editado por usuario'),
+        ('change_requested', 'Cambio solicitado'),
+    ]
+    user_status = models.CharField(
+        max_length=20, choices=USER_STATUS_CHOICES, default='pending'
+    )
+    user_note = models.TextField(blank=True, default='')
+
     class Meta:
         db_table = 'content_pipeline_post'
         ordering = ['day_number']
