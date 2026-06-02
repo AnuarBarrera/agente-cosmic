@@ -104,69 +104,6 @@ class TestExtractHeadline:
         assert len(gen._extract_headline("Hola mundo")) > 0
 
 
-class TestGenerateTextAsset:
-    def test_returns_valid_png_bytes(self):
-        from core.content_pipeline.generators.image_generator import ImageGenerator
-        gen = ImageGenerator(bucket_name='test-bucket')
-        result = gen._generate_text_asset("Digitaliza tu negocio", ['#1a1a2e'])
-        assert result is not None
-        out = Image.open(io.BytesIO(result))
-        assert out.size == (1024, 512)
-        assert out.mode == 'RGB'
-
-    def test_background_is_exact_magenta(self):
-        from core.content_pipeline.generators.image_generator import ImageGenerator
-        import numpy as np
-        gen = ImageGenerator(bucket_name='test-bucket')
-        result = gen._generate_text_asset("Hola Mundo", ['#ffffff'])
-        img = Image.open(io.BytesIO(result)).convert('RGB')
-        arr = np.array(img)
-        # Top-left corner should be magenta (255, 0, 255) — no text there
-        corner = arr[5, 5]
-        assert corner[0] == 255 and corner[1] == 0 and corner[2] == 255
-
-    def test_returns_none_on_exception(self):
-        from core.content_pipeline.generators.image_generator import ImageGenerator
-        from unittest.mock import patch as _patch
-        gen = ImageGenerator(bucket_name='test-bucket')
-        with _patch('core.content_pipeline.generators.image_generator.Image.new', side_effect=Exception('PIL error')):
-            result = gen._generate_text_asset("Test", [])
-        assert result is None
-
-
-class TestAnalyzeBackground:
-    @override_settings(
-        GOOGLE_CLOUD_PROJECT='agente-cosmic',
-        GOOGLE_CLOUD_LOCATION='us-central1',
-        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    )
-    def test_returns_fallback_on_api_error(self):
-        from core.content_pipeline.generators.image_generator import ImageGenerator
-        gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
-            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
-            result = gen._analyze_background(b'fake', 'Tu negocio necesita una web')
-        assert 'x' in result and 'y' in result and 'width' in result and 'headline' in result
-        assert 0.0 <= result['x'] <= 1.0
-        assert len(result['headline']) > 0
-
-    @override_settings(
-        GOOGLE_CLOUD_PROJECT='agente-cosmic',
-        GOOGLE_CLOUD_LOCATION='us-central1',
-        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    )
-    def test_parses_valid_gemini_response(self):
-        from core.content_pipeline.generators.image_generator import ImageGenerator
-        gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
-            mock_resp = MagicMock()
-            mock_resp.text = '{"x": 0.05, "y": 0.62, "width": 0.9, "headline": "Tu Web En 48h"}'
-            mock_vc.return_value.models.generate_content.return_value = mock_resp
-            result = gen._analyze_background(b'fake', 'Tu negocio necesita una web YA')
-        assert result['x'] == 0.05
-        assert result['y'] == 0.62
-        assert result['headline'] == 'Tu Web En 48h'
-
 
 class TestGeneratePostContent:
     @override_settings(
@@ -283,42 +220,36 @@ class TestLayeredPipeline:
         VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
         GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
     )
-    def test_pipeline_composites_when_text_asset_succeeds(self):
+    def test_pipeline_calls_render_html_template(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
-        import core.content_pipeline.generators.layer_composer as lc_module
         gen = ImageGenerator(bucket_name='test-bucket')
         fake_bg = _png_bytes((30, 30, 60))
-        fake_text = _png_bytes((255, 0, 255))
-        fake_composite = _png_bytes((100, 100, 100))
+        fake_shot = _png_bytes((100, 100, 100), size=(1080, 1080))
+        fake_content = {'headline': 'Web en 48h', 'subtitle': 'Tu negocio online', 'cta': 'Empieza', 'tag': 'DISEÑO WEB'}
 
         with patch.object(gen, '_generate_background', return_value=fake_bg), \
-             patch.object(gen, '_generate_text_asset', return_value=fake_text), \
-             patch.object(gen, '_analyze_background', return_value={'x': 0.1, 'y': 0.6, 'width': 0.8, 'headline': 'Caption de prueba'}), \
-             patch.object(lc_module, 'composite_layers', return_value=fake_composite) as mock_composite:
+             patch.object(gen, '_generate_post_content', return_value=fake_content), \
+             patch.object(gen, '_render_html_template', return_value=fake_shot) as mock_render:
             result = gen._layered_pipeline('Caption de prueba', ['#1a1a2e'], 'profesional')
 
-        mock_composite.assert_called_once()
-        call_kwargs = mock_composite.call_args
-        assert call_kwargs.kwargs['x'] == 0.1
-        assert call_kwargs.kwargs['y'] == 0.6
-        assert call_kwargs.kwargs['width'] == 0.8
-        assert result == fake_composite
+        mock_render.assert_called_once_with(fake_bg, fake_content, ['#1a1a2e'])
+        assert result == fake_shot
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
         GOOGLE_CLOUD_LOCATION='us-central1',
         VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
         VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-        GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
     )
-    def test_pipeline_returns_background_when_text_asset_fails(self):
+    def test_pipeline_propagates_render_error(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        fake_bg = _png_bytes((30, 30, 60))
+        fake_bg = _png_bytes()
+        fake_content = {'headline': 'Hola', 'subtitle': 'Mundo', 'cta': 'Ver', 'tag': 'TEST'}
 
         with patch.object(gen, '_generate_background', return_value=fake_bg), \
-             patch.object(gen, '_generate_text_asset', return_value=None), \
-             patch.object(gen, '_analyze_background', return_value={'x': 0.1, 'y': 0.6, 'width': 0.8, 'headline': 'Caption de prueba'}):
-            result = gen._layered_pipeline('Caption', ['#1a1a2e'], 'profesional')
-
-        assert result == fake_bg
+             patch.object(gen, '_generate_post_content', return_value=fake_content), \
+             patch.object(gen, '_render_html_template', side_effect=Exception('Playwright error')):
+            import pytest
+            with pytest.raises(Exception, match='Playwright error'):
+                gen._layered_pipeline('Caption', ['#1a1a2e'], 'profesional')

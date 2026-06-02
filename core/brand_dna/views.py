@@ -189,6 +189,7 @@ def post_action_api(request, post_id):
                 colors=brand_dna.primary_colors,
                 tone=brand_dna.tone,
                 filename=f"{job_id}-day{post.day_number}-regen-{int(_time.time())}",
+                brand_name=brand_dna.business_name,
             )
             if generated:
                 new_image_url = generated

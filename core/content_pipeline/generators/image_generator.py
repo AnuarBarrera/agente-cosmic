@@ -4,7 +4,6 @@ import io
 import json
 import logging
 import os
-import random
 import re
 import textwrap
 import time
@@ -30,21 +29,12 @@ def _vertex_client():
     )
 
 
-def _darken_color(hex_color: str) -> tuple:
-    """Convert #RRGGBB to a darkened (R, G, B) suitable as text backing."""
-    h = hex_color.lstrip('#')
-    try:
-        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
-        return (max(10, r // 3), max(10, g // 3), max(10, b // 3))
-    except (ValueError, IndexError):
-        return (15, 15, 40)
-
 
 class ImageGenerator:
     def __init__(self, bucket_name: str):
         self._bucket = bucket_name
 
-    def generate(self, caption: str, colors: list[str], tone: str, filename: str) -> str:
+    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '') -> str:
         try:
             image_bytes = self._layered_pipeline(caption, colors, tone)
             return self._upload_to_storage(image_bytes, filename)
@@ -57,30 +47,9 @@ class ImageGenerator:
     # ------------------------------------------------------------------
 
     def _layered_pipeline(self, caption: str, colors: list[str], tone: str) -> bytes:
-        from core.content_pipeline.generators.layer_composer import composite_layers
-
         background_bytes = self._generate_background(caption, colors, tone)
-
-        # Combined Gemini call: placement coords + AI-crafted headline
-        analysis = self._analyze_background(background_bytes, caption)
-        headline = analysis['headline']
-
-        text_asset_bytes = self._generate_text_asset(headline, colors)
-
-        rotation = random.uniform(-5.0, 5.0) if random.random() < 0.4 else 0.0
-
-        if text_asset_bytes:
-            return composite_layers(
-                background_bytes=background_bytes,
-                text_asset_bytes=text_asset_bytes,
-                x=analysis['x'],
-                y=analysis['y'],
-                width=analysis['width'],
-                rotation_deg=rotation,
-            )
-
-        logger.warning("Text asset failed — returning background only")
-        return background_bytes
+        content = self._generate_post_content(caption)
+        return self._render_html_template(background_bytes, content, colors)
 
     def _generate_background(self, caption: str, colors: list[str], tone: str) -> bytes:
         color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
@@ -113,46 +82,6 @@ class ImageGenerator:
         while selected and selected[-1].lower().strip('¡¿.,!?') in _CONNECTORS:
             selected.pop()
         return ' '.join(selected) or clean[:25]
-
-    def _analyze_background(self, background_bytes: bytes, caption: str) -> dict:
-        """Ask Gemini for text placement coords AND a punchy 3-5 word headline."""
-        _FALLBACK = {
-            'x': 0.05, 'y': 0.62, 'width': 0.9,
-            'headline': self._extract_headline(caption),
-        }
-        try:
-            client = _vertex_client()
-            image_part = types.Part.from_bytes(data=background_bytes, mime_type='image/png')
-            prompt = (
-                f"Caption: \"{caption[:200]}\"\n\n"
-                "1. Find the best spot in this image for a text bar overlay "
-                "(prefer lower third, flat or darker areas, avoid faces/focal points).\n"
-                "2. Write a SHORT punchy headline (3-5 words max) that captures the key message. "
-                "Rules: grammatically complete phrase, no mid-sentence cuts, "
-                "do NOT include brand names, URLs, company names, or hashtags — "
-                "only the core benefit or call to action.\n\n"
-                "Reply with ONLY this JSON (no markdown):\n"
-                "{\"x\": <left 0.0-1.0>, \"y\": <top 0.0-1.0>, "
-                "\"width\": <0.6-0.95>, \"headline\": \"<3-5 words>\"}"
-            )
-            resp = client.models.generate_content(
-                model=settings.VERTEX_TEXT_MODEL,
-                contents=[image_part, prompt],
-            )
-            raw = resp.text.strip()
-            match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
-            if match:
-                data = json.loads(match.group())
-                headline = str(data.get('headline', '')).strip()
-                return {
-                    'x': max(0.0, min(0.9, float(data.get('x', 0.05)))),
-                    'y': max(0.0, min(0.85, float(data.get('y', 0.62)))),
-                    'width': max(0.6, min(0.95, float(data.get('width', 0.9)))),
-                    'headline': headline if headline else self._extract_headline(caption),
-                }
-        except Exception as e:
-            logger.warning(f"Background analysis failed, using fallback: {e}")
-        return _FALLBACK
 
     def _generate_post_content(self, caption: str) -> dict:
         """Text-only Gemini call → {headline, subtitle, cta, tag} for HTML template."""
@@ -200,89 +129,6 @@ class ImageGenerator:
         except Exception as e:
             logger.warning(f"Post content generation failed, using fallback: {e}")
         return _FALLBACK
-
-    def _generate_text_asset(self, headline: str, colors: list[str], max_retries: int = 2) -> bytes | None:
-        """Render headline on exact magenta #FF00FF using PIL with dark backing rectangle.
-
-        PIL guarantees exact (255,0,255) so remove_chroma_key works perfectly.
-        The dark backing rectangle survives chroma key and ensures text legibility.
-        max_retries kept for caller compatibility (no API call needed).
-        """
-        try:
-            W, H = 1024, 512
-            _DEJAVU = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-            text = headline.upper()
-            padding = 60
-            max_w = W - 2 * padding
-
-            dummy_img = Image.new('RGB', (1, 1))
-            dummy_draw = ImageDraw.Draw(dummy_img)
-
-            # Find font size: try single line, then 2-line split
-            font = None
-            lines = [text]
-            chosen_size = 80
-
-            for size in range(110, 39, -10):
-                try:
-                    f = ImageFont.truetype(_DEJAVU, size=size)
-                except (OSError, IOError):
-                    f = ImageFont.load_default(size=size)
-                single_w = dummy_draw.textbbox((0, 0), text, font=f)[2]
-                if single_w <= max_w:
-                    font, lines, chosen_size = f, [text], size
-                    break
-                words = text.split()
-                mid = max(1, len(words) // 2)
-                l1, l2 = ' '.join(words[:mid]), ' '.join(words[mid:])
-                if l1 and l2:
-                    w1 = dummy_draw.textbbox((0, 0), l1, font=f)[2]
-                    w2 = dummy_draw.textbbox((0, 0), l2, font=f)[2]
-                    if max(w1, w2) <= max_w:
-                        font, lines, chosen_size = f, [l1, l2], size
-                        break
-
-            if font is None:
-                try:
-                    font = ImageFont.truetype(_DEJAVU, size=40)
-                except (OSError, IOError):
-                    font = ImageFont.load_default()
-                lines = [text[:28]]
-                chosen_size = 40
-
-            img = Image.new('RGB', (W, H), (255, 0, 255))  # magenta — removed by chroma key
-            draw = ImageDraw.Draw(img)
-
-            line_spacing = 18
-            bboxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
-            total_h = sum(b[3] - b[1] for b in bboxes) + line_spacing * (len(lines) - 1)
-            y_start = (H - total_h) // 2
-
-            # Dark backing rectangle — NOT magenta so it survives chroma key
-            backing = _darken_color(colors[0]) if colors else (15, 15, 40)
-            rect_pad_x, rect_pad_y = padding - 30, 24
-            draw.rectangle(
-                [rect_pad_x, y_start - rect_pad_y,
-                 W - rect_pad_x, y_start + total_h + rect_pad_y],
-                fill=backing,
-            )
-
-            y = y_start
-            shadow_off = max(2, chosen_size // 30)
-            for line, bb in zip(lines, bboxes):
-                lw = bb[2] - bb[0]
-                lh = bb[3] - bb[1]
-                x = (W - lw) // 2
-                draw.text((x + shadow_off, y + shadow_off), line, font=font, fill=(0, 0, 0))
-                draw.text((x, y), line, font=font, fill=(255, 255, 255))
-                y += lh + line_spacing
-
-            out = io.BytesIO()
-            img.save(out, format='PNG')
-            return out.getvalue()
-        except Exception as e:
-            logger.error(f"PIL text asset generation failed: {e}")
-            return None
 
     def _render_html_template(self, background_bytes: bytes, content: dict, colors: list[str]) -> bytes:
         """Inject Imagen 3 background + content into HTML template, render via Playwright → PNG."""

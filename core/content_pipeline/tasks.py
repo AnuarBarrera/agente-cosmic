@@ -43,6 +43,7 @@ def content_generation_task(job_id: str) -> None:
                     colors=brand_dna.primary_colors,
                     tone=brand_dna.tone,
                     filename=f"{job_id}-day{i}",
+                    brand_name=brand_dna.business_name,
                 )
             else:
                 image_url = ''
@@ -89,6 +90,7 @@ def send_daily_email_task(post_id: str) -> None:
                 colors=brand_dna.primary_colors,
                 tone=brand_dna.tone,
                 filename=f"{job_id}-day{post.day_number}",
+                brand_name=brand_dna.business_name,
             )
             post.save(update_fields=['image_url'])
         except Exception as img_err:
