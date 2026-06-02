@@ -45,14 +45,93 @@ class ImageGenerator:
 
     def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2) -> bytes:
         if product_image_bytes:
-            background_bytes = product_image_bytes
             kw_str = ', '.join((keywords or [])[:3])
             brand_context = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
+            pipeline = self._decide_pipeline(product_image_bytes)
+            if pipeline == 'B':
+                background_bytes = self._generate_lifestyle_shot(product_image_bytes, caption, tone)
+            else:
+                background_bytes = product_image_bytes
             content = self._generate_post_content(caption, product_image_bytes=product_image_bytes, brand_context=brand_context)
         else:
             background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, max_qc_retries=max_qc_retries)
             content = self._generate_post_content(caption, product_image_bytes=None)
         return self._render_html_template(background_bytes, content, colors)
+
+    def _decide_pipeline(self, product_image_bytes: bytes) -> str:
+        """Gemini analiza la foto del producto y decide 'A' (usar directo) o 'B' (generar lifestyle)."""
+        try:
+            client = _vertex_client()
+            mime = 'image/png' if product_image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+            image_part = types.Part.from_bytes(data=product_image_bytes, mime_type=mime)
+            prompt = (
+                "Analiza esta imagen de producto y determina el mejor pipeline para un post de Instagram:\n"
+                "A: usar la foto directamente como fondo (foto ya es lifestyle/tiene contexto/ambiente real)\n"
+                "B: generar una nueva foto lifestyle con este producto usando IA de edición de imágenes\n\n"
+                "Elige B si: fondo blanco o liso, fondo neutro/gris, foto de catálogo plana sin contexto, "
+                "producto aislado, imagen de estudio.\n"
+                "Elige A si: foto ya tiene ambiente real, contexto de uso, escena natural, "
+                "ya se ve como contenido de redes sociales, tiene elementos decorativos o entorno.\n\n"
+                "Responde ÚNICAMENTE este JSON (sin markdown):\n"
+                "{\"pipeline\": \"A\" or \"B\", \"reason\": \"brief reason in Spanish\"}"
+            )
+            resp = client.models.generate_content(
+                model=settings.VERTEX_TEXT_MODEL,
+                contents=[image_part, prompt],
+            )
+            raw = resp.text.strip()
+            match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                pipeline = str(data.get('pipeline', 'A')).upper().strip()
+                reason = data.get('reason', '')
+                if pipeline in ('A', 'B'):
+                    logger.info(f"Pipeline decision: {pipeline} — {reason}")
+                    return pipeline
+        except Exception as e:
+            logger.warning(f"Pipeline decision error (defaulting to A): {e}")
+        return 'A'
+
+    def _generate_lifestyle_shot(self, product_image_bytes: bytes, caption: str, tone: str) -> bytes:
+        """Imagen 3 edit_image genera foto lifestyle con el producto en escena real."""
+        mime = 'image/png' if product_image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+        prompt = (
+            f"Professional lifestyle photograph featuring this product in a real-world scene. "
+            f"The product must appear naturally in use or elegantly displayed in context. "
+            f"Scene: authentic environment, natural lighting, editorial quality, DSLR camera style. "
+            f"Mood: {tone}. "
+            f"Context clue: {caption[:80]}. "
+            f"NOT a white background. NOT a catalog shot. NOT floating on plain surface. "
+            f"Square 1:1 format. Photorealistic. "
+            f"Absolutely NO text, NO letters, NO logos, NO UI elements."
+        )
+        try:
+            client = _vertex_client()
+            resp = client.models.edit_image(
+                model=settings.VERTEX_IMAGE_EDIT_MODEL,
+                prompt=prompt,
+                reference_images=[
+                    types.SubjectReferenceImage(
+                        reference_image=types.Image(image_bytes=product_image_bytes, mime_type=mime),
+                        reference_id=1,
+                        config=types.SubjectReferenceConfig(
+                            subject_type=types.SubjectReferenceType.SUBJECT_TYPE_PRODUCT,
+                        ),
+                    )
+                ],
+                config=types.EditImageConfig(
+                    edit_mode=types.EditMode.EDIT_MODE_PRODUCT_IMAGE,
+                    number_of_images=1,
+                    aspect_ratio='1:1',
+                ),
+            )
+            if resp.generated_images:
+                logger.info("Lifestyle shot generated via edit_image (Opción B)")
+                return resp.generated_images[0].image.image_bytes
+            logger.warning("edit_image returned no images, falling back to product image")
+        except Exception as e:
+            logger.warning(f"Lifestyle shot generation failed (falling back to product image): {e}")
+        return product_image_bytes
 
     def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', max_qc_retries: int = 2) -> bytes:
         color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'

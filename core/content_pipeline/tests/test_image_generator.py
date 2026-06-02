@@ -378,24 +378,54 @@ class TestLayeredPipelineWithProduct:
         VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
         VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
     )
-    def test_product_path_skips_imagen3_uses_product_as_background(self):
+    def test_pipeline_a_uses_product_as_background_directly(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         product_img = _png_bytes((200, 150, 100))
         fake_content = {'headline': 'Brilla distinto', 'subtitle': 'Plata artesanal', 'cta': 'Cómpralo', 'tag': 'JOYERÍA'}
         fake_shot = _png_bytes((100, 100, 100), size=(1080, 1080))
 
-        with patch.object(gen, '_generate_background') as mock_bg, \
+        with patch.object(gen, '_decide_pipeline', return_value='A') as mock_decide, \
+             patch.object(gen, '_generate_background') as mock_bg, \
+             patch.object(gen, '_generate_lifestyle_shot') as mock_lifestyle, \
              patch.object(gen, '_generate_post_content', return_value=fake_content) as mock_content, \
              patch.object(gen, '_render_html_template', return_value=fake_shot) as mock_render:
             result = gen._layered_pipeline('Collar artesanal', ['#c0c0c0'], 'elegante', product_image_bytes=product_img)
 
+        mock_decide.assert_called_once_with(product_img)
         mock_bg.assert_not_called()
+        mock_lifestyle.assert_not_called()
         mock_content.assert_called_once()
         call_kwargs = mock_content.call_args.kwargs
         assert call_kwargs['product_image_bytes'] == product_img
         assert 'brand_context' in call_kwargs and len(call_kwargs['brand_context']) > 0
         mock_render.assert_called_once_with(product_img, fake_content, ['#c0c0c0'])
+        assert result == fake_shot
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_pipeline_b_generates_lifestyle_shot(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        product_img = _png_bytes((200, 150, 100))
+        lifestyle_img = _png_bytes((100, 180, 140))
+        fake_content = {'headline': 'Estilo que habla', 'subtitle': 'Joyería artesanal única', 'cta': 'Descúbrela', 'tag': 'JOYERÍA'}
+        fake_shot = _png_bytes((100, 100, 100), size=(1080, 1080))
+
+        with patch.object(gen, '_decide_pipeline', return_value='B'), \
+             patch.object(gen, '_generate_lifestyle_shot', return_value=lifestyle_img) as mock_lifestyle, \
+             patch.object(gen, '_generate_background') as mock_bg, \
+             patch.object(gen, '_generate_post_content', return_value=fake_content), \
+             patch.object(gen, '_render_html_template', return_value=fake_shot) as mock_render:
+            result = gen._layered_pipeline('Collar artesanal', ['#c0c0c0'], 'elegante', product_image_bytes=product_img)
+
+        mock_bg.assert_not_called()
+        mock_lifestyle.assert_called_once_with(product_img, 'Collar artesanal', 'elegante')
+        mock_render.assert_called_once_with(lifestyle_img, fake_content, ['#c0c0c0'])
         assert result == fake_shot
 
     @override_settings(
@@ -418,3 +448,100 @@ class TestLayeredPipelineWithProduct:
 
         mock_bg.assert_called_once()
         mock_content.assert_called_once_with('Caption', product_image_bytes=None)
+
+
+class TestDecidePipeline:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_b_for_catalog_photo(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        product_img = _png_bytes()
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"pipeline": "B", "reason": "fondo blanco, foto de catálogo"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._decide_pipeline(product_img)
+        assert result == 'B'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_a_for_lifestyle_photo(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        product_img = _png_bytes()
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"pipeline": "A", "reason": "foto ya tiene ambiente real"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._decide_pipeline(product_img)
+        assert result == 'A'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_defaults_to_a_on_api_error(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            result = gen._decide_pipeline(b'fake-bytes')
+        assert result == 'A'
+
+
+class TestGenerateLifestyleShot:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_EDIT_MODEL='imagen-3.0-capability-001',
+    )
+    def test_returns_lifestyle_bytes_on_success(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        product_img = _png_bytes((200, 150, 100))
+        lifestyle_img = _png_bytes((100, 180, 140))
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_generated = MagicMock()
+            mock_generated.image.image_bytes = lifestyle_img
+            mock_vc.return_value.models.edit_image.return_value.generated_images = [mock_generated]
+            result = gen._generate_lifestyle_shot(product_img, 'Collar artesanal', 'elegante')
+        assert result == lifestyle_img
+        call_kwargs = mock_vc.return_value.models.edit_image.call_args.kwargs
+        assert call_kwargs['model'] == 'imagen-3.0-capability-001'
+        assert 'lifestyle' in call_kwargs['prompt'].lower()
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_EDIT_MODEL='imagen-3.0-capability-001',
+    )
+    def test_falls_back_to_product_image_on_api_error(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        product_img = _png_bytes()
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.edit_image.side_effect = Exception('API error')
+            result = gen._generate_lifestyle_shot(product_img, 'Caption', 'profesional')
+        assert result == product_img  # graceful fallback
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_EDIT_MODEL='imagen-3.0-capability-001',
+    )
+    def test_falls_back_to_product_image_on_empty_response(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        product_img = _png_bytes()
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.edit_image.return_value.generated_images = []
+            result = gen._generate_lifestyle_shot(product_img, 'Caption', 'profesional')
+        assert result == product_img

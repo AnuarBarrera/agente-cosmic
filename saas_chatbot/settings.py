@@ -169,6 +169,7 @@ GOOGLE_CLOUD_STORAGE_BUCKET = get_env('GOOGLE_CLOUD_STORAGE_BUCKET', default='ag
 GOOGLE_CLOUD_LOCATION = get_env('GOOGLE_CLOUD_LOCATION', default='us-central1')
 VERTEX_TEXT_MODEL = 'publishers/google/models/gemini-2.5-flash'
 VERTEX_IMAGE_MODEL = 'imagen-3.0-generate-001'
+VERTEX_IMAGE_EDIT_MODEL = 'imagen-3.0-capability-001'
 VERTEX_VERTEX_MODEL = 'publishers/google/models/gemini-2.5-flash'
 # GOOGLE_APPLICATION_CREDENTIALS se inyecta vía docker-compose (volumen ADC)
 
