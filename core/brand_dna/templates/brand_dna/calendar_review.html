@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Revisar Calendario — Agente Cosmic</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #f0f0f0; min-height: 100vh; padding-top: 64px; }
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: #1a1a2e; border-bottom: 1px solid #2a2a4a;
+      padding: 0 24px; height: 64px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .nav-brand { font-size: 1.2rem; font-weight: 700; color: #e94560; }
+    .nav-actions { display: flex; gap: 12px; align-items: center; }
+    .nav-btn { padding: 7px 16px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; text-decoration: none; border: none; cursor: pointer; transition: background 0.2s; }
+    .nav-btn-ghost { background: transparent; color: #aaa; border: 1px solid #333; }
+    .nav-btn-ghost:hover { background: #2a2a4a; color: #f0f0f0; }
+    .nav-btn-primary { background: #e94560; color: #fff; }
+    .nav-btn-primary:hover { background: #c73652; }
+    .container { max-width: 900px; margin: 0 auto; padding: 40px 20px 80px; }
+    h1 { font-size: 1.4rem; margin-bottom: 4px; }
+    .subtitle { color: #777; font-size: 0.9rem; margin-bottom: 32px; }
+    .legend { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #888; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot-pending { background: #555; }
+    .dot-approved { background: #4caf7d; }
+    .dot-edited { background: #4a9eff; }
+    .dot-change { background: #f0c040; }
+    .posts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; }
+    .post-card { background: #1a1a2e; border-radius: 14px; overflow: hidden; transition: box-shadow 0.2s; }
+    .post-card.approved { box-shadow: 0 0 0 2px #4caf7d; }
+    .post-card.edited { box-shadow: 0 0 0 2px #4a9eff; }
+    .post-card.change_requested { box-shadow: 0 0 0 2px #f0c040; }
+    .post-img { width: 100%; aspect-ratio: 1; object-fit: cover; background: #111; display: flex; align-items: center; justify-content: center; color: #333; font-size: 2rem; }
+    .post-img img { width: 100%; height: 100%; object-fit: cover; }
+    .post-body { padding: 16px; }
+    .post-day { font-size: 0.78rem; color: #e94560; font-weight: 700; margin-bottom: 4px; }
+    .post-schedule { font-size: 0.75rem; color: #555; margin-bottom: 10px; }
+    .post-caption { font-size: 0.85rem; color: #ccc; line-height: 1.5; margin-bottom: 12px; }
+    .post-caption[contenteditable="true"] {
+      border: 1px solid #e94560; border-radius: 6px; padding: 6px 8px;
+      outline: none; background: #0d0d1a; min-height: 60px;
+    }
+    .post-hashtags { font-size: 0.75rem; color: #666; margin-bottom: 12px; }
+    .post-status { font-size: 0.75rem; font-weight: 600; margin-bottom: 10px; }
+    .status-pending { color: #666; }
+    .status-approved { color: #4caf7d; }
+    .status-edited { color: #4a9eff; }
+    .status-change_requested { color: #f0c040; }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .btn-action {
+      flex: 1; min-width: 70px; padding: 7px 8px; border: none; border-radius: 8px;
+      font-size: 0.78rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s;
+    }
+    .btn-approve { background: #1a3a2a; color: #4caf7d; }
+    .btn-approve:hover { background: #2a4a3a; }
+    .btn-edit { background: #1a2a3a; color: #4a9eff; }
+    .btn-edit:hover { background: #2a3a4a; }
+    .btn-regen { background: #3a3a1a; color: #f0c040; }
+    .btn-regen:hover { background: #4a4a2a; }
+    .btn-save { background: #e94560; color: #fff; display: none; }
+    .btn-save:hover { background: #c73652; }
+    .feedback-area { margin-top: 10px; display: none; }
+    .feedback-area textarea {
+      width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #333;
+      background: #0d0d1a; color: #f0f0f0; font-size: 0.82rem; resize: vertical; min-height: 60px;
+    }
+    .btn-send-regen {
+      margin-top: 6px; width: 100%; padding: 7px; background: #f0c040; color: #1a1a1a;
+      border: none; border-radius: 6px; font-size: 0.82rem; font-weight: 700; cursor: pointer;
+    }
+    .toast {
+      position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+      background: #1a3a2a; color: #4caf7d; padding: 10px 24px; border-radius: 8px;
+      font-size: 0.88rem; opacity: 0; transition: opacity 0.3s; pointer-events: none;
+      z-index: 200;
+    }
+    .toast.show { opacity: 1; }
+    #backToTop {
+      position: fixed; bottom: 28px; right: 24px;
+      background: #e94560; color: #fff; border: none; border-radius: 50%;
+      width: 44px; height: 44px; font-size: 1.2rem; cursor: pointer;
+      display: none; align-items: center; justify-content: center;
+      box-shadow: 0 4px 16px rgba(233,69,96,0.4); z-index: 99;
+    }
+    #backToTop.visible { display: flex; }
+  </style>
+</head>
+<body>
+<nav>
+  <span class="nav-brand">Agente Cosmic</span>
+  <div class="nav-actions">
+    <a href="{% url 'dashboard' %}" class="nav-btn nav-btn-ghost">Dashboard</a>
+    <a href="{% url 'landing' %}" class="nav-btn nav-btn-primary">+ Nuevo análisis</a>
+    <a href="{% url 'logout' %}" class="nav-btn nav-btn-ghost" style="font-size:0.8rem;">Salir</a>
+  </div>
+</nav>
+
+<div class="container">
+  <h1>Revisa tu calendario de contenido</h1>
+  <p class="subtitle">
+    {{ brand_dna.business_name }} · Aprueba, edita o pide cambios en cada post antes de que se envíe.
+  </p>
+
+  <div class="legend">
+    <div class="legend-item"><div class="dot dot-pending"></div> Sin revisar</div>
+    <div class="legend-item"><div class="dot dot-approved"></div> Aprobado</div>
+    <div class="legend-item"><div class="dot dot-edited"></div> Editado</div>
+    <div class="legend-item"><div class="dot dot-change"></div> Cambio solicitado</div>
+  </div>
+
+  <div class="posts-grid">
+    {% for post in posts %}
+    <div class="post-card {{ post.user_status }}" id="card-{{ post.id }}">
+      <div class="post-img">
+        {% if post.image_url %}
+          <img src="{{ post.image_url }}" alt="Día {{ post.day_number }}" loading="lazy">
+        {% else %}
+          📸
+        {% endif %}
+      </div>
+      <div class="post-body">
+        <div class="post-day">Día {{ post.day_number }}</div>
+        <div class="post-schedule">
+          📅 {{ post.scheduled_at|date:"D d M" }} · {{ post.scheduled_at|date:"H:i" }}
+        </div>
+        <div class="post-caption" id="caption-{{ post.id }}">{{ post.caption }}</div>
+        {% if post.hashtags %}
+        <div class="post-hashtags">{{ post.hashtags|join:" " }}</div>
+        {% endif %}
+        <div class="post-status status-{{ post.user_status }}" id="status-{{ post.id }}">
+          {% if post.user_status == 'approved' %}✓ Aprobado
+          {% elif post.user_status == 'edited' %}✏ Editado
+          {% elif post.user_status == 'change_requested' %}↺ Cambio solicitado
+          {% else %}○ Sin revisar{% endif %}
+        </div>
+        <div class="actions">
+          <button class="btn-action btn-approve" onclick="approvePost('{{ post.id }}')">✓ Aprobar</button>
+          <button class="btn-action btn-edit" onclick="startEdit('{{ post.id }}')">✏ Editar</button>
+          <button class="btn-action btn-regen" onclick="toggleRegen('{{ post.id }}')">↺ Cambio</button>
+          <button class="btn-action btn-save" id="save-{{ post.id }}" onclick="saveEdit('{{ post.id }}')">Guardar</button>
+        </div>
+        <div class="feedback-area" id="regen-{{ post.id }}">
+          <textarea id="note-{{ post.id }}" placeholder="Describe el cambio que quieres..."></textarea>
+          <button class="btn-send-regen" onclick="requestRegen('{{ post.id }}')">Regenerar con IA ✨</button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<button id="backToTop" title="Volver arriba">↑</button>
+
+<script>
+  const CSRF = '{{ csrf_token }}';
+
+  function showToast(msg, color) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.background = color || '#1a3a2a';
+    t.style.color = color ? '#1a1a1a' : '#4caf7d';
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  async function postAction(postId, payload) {
+    const res = await fetch(`/api/post/${postId}/action/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify(payload),
+    });
+    return res.json();
+  }
+
+  function setCardStatus(postId, status, label) {
+    const card = document.getElementById('card-' + postId);
+    card.className = 'post-card ' + status;
+    const statusEl = document.getElementById('status-' + postId);
+    statusEl.className = 'post-status status-' + status;
+    statusEl.textContent = label;
+  }
+
+  async function approvePost(postId) {
+    const data = await postAction(postId, { action: 'approve' });
+    if (data.status === 'ok') {
+      setCardStatus(postId, 'approved', '✓ Aprobado');
+      showToast('Post aprobado ✓');
+    }
+  }
+
+  function startEdit(postId) {
+    const cap = document.getElementById('caption-' + postId);
+    cap.contentEditable = 'true';
+    cap.focus();
+    document.getElementById('save-' + postId).style.display = 'block';
+  }
+
+  async function saveEdit(postId) {
+    const cap = document.getElementById('caption-' + postId);
+    const newCaption = cap.innerText.trim();
+    const data = await postAction(postId, { action: 'edit', value: newCaption });
+    if (data.status === 'ok') {
+      cap.contentEditable = 'false';
+      document.getElementById('save-' + postId).style.display = 'none';
+      setCardStatus(postId, 'edited', '✏ Editado');
+      showToast('Caption guardado ✏');
+    }
+  }
+
+  function toggleRegen(postId) {
+    const area = document.getElementById('regen-' + postId);
+    area.style.display = area.style.display === 'block' ? 'none' : 'block';
+  }
+
+  async function requestRegen(postId) {
+    const note = document.getElementById('note-' + postId).value.trim();
+    if (!note) { showToast('Escribe el feedback primero', '#f0c040'); return; }
+    const btn = document.querySelector(`#regen-${postId} .btn-send-regen`);
+    btn.textContent = 'Generando...';
+    btn.disabled = true;
+    const data = await postAction(postId, { action: 'regenerate', value: note });
+    btn.textContent = 'Regenerar con IA ✨';
+    btn.disabled = false;
+    if (data.status === 'ok') {
+      document.getElementById('caption-' + postId).textContent = data.caption;
+      document.getElementById('regen-' + postId).style.display = 'none';
+      setCardStatus(postId, 'change_requested', '↺ Cambio solicitado');
+      showToast('Caption regenerado ✨', '#f0c040');
+    }
+  }
+
+  const btn = document.getElementById('backToTop');
+  window.addEventListener('scroll', () => btn.classList.toggle('visible', scrollY > 300));
+  btn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+</script>
+</body>
+</html>

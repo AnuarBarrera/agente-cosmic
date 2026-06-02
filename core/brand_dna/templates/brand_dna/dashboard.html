@@ -74,7 +74,10 @@
           {% else %}Pendiente{% endif %}
         </span>
         {% if job.status == 'done' %}
-        <a href="{% url 'results' job.id %}" class="job-link">Ver resultados →</a>
+        <div style="display:flex;gap:10px;flex-direction:column;align-items:flex-end;">
+          <a href="{% url 'results' job.id %}" class="job-link">Ver resultados →</a>
+          <a href="{% url 'calendar_review' job.id %}" class="job-link" style="color:#4a9eff;">Revisar calendario →</a>
+        </div>
         {% endif %}
       </div>
       {% endfor %}

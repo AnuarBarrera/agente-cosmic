@@ -6,107 +6,286 @@
   <title>Analizando tu marca — Agente Cosmic</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #f0f0f0; min-height: 100vh; padding: 40px 20px; }
-    .container { max-width: 800px; margin: 0 auto; }
-    h1 { color: #e94560; margin-bottom: 8px; }
-    .subtitle { color: #aaa; margin-bottom: 32px; }
-    .progress-card { background: #1a1a2e; border-radius: 12px; padding: 28px; margin-bottom: 24px; }
-    .stage-list { list-style: none; }
-    .stage-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; color: #aaa; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #f0f0f0; min-height: 100vh; padding-top: 64px; }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: #1a1a2e; border-bottom: 1px solid #2a2a4a;
+      padding: 0 24px; height: 64px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .nav-brand { font-size: 1.2rem; font-weight: 700; color: #e94560; }
+    .nav-actions { display: flex; gap: 12px; align-items: center; }
+    .nav-btn {
+      padding: 7px 16px; border-radius: 8px; font-size: 0.85rem; font-weight: 600;
+      text-decoration: none; cursor: pointer; border: none;
+      transition: background 0.2s;
+    }
+    .nav-btn-ghost { background: transparent; color: #aaa; border: 1px solid #333; }
+    .nav-btn-ghost:hover { background: #2a2a4a; color: #f0f0f0; }
+    .nav-btn-primary { background: #e94560; color: #fff; }
+    .nav-btn-primary:hover { background: #c73652; }
+
+    /* ── MAIN ── */
+    .container { max-width: 820px; margin: 0 auto; padding: 40px 20px 80px; }
+    .page-title { font-size: 1.4rem; color: #f0f0f0; margin-bottom: 4px; }
+    .page-sub { color: #888; font-size: 0.9rem; margin-bottom: 32px; }
+
+    /* ── LOADING CARD ── */
+    .loading-card {
+      background: #1a1a2e; border-radius: 16px; padding: 40px 32px 32px;
+      margin-bottom: 24px; text-align: center;
+    }
+
+    /* ── CAT SCENE ── */
+    .cat-scene {
+      position: relative; height: 120px; margin: 0 auto 24px;
+      max-width: 480px; overflow: hidden;
+    }
+    .cat-run {
+      position: absolute; bottom: 0;
+      font-size: 3.2rem; line-height: 1;
+      animation: catRun 5s ease-in-out infinite;
+      white-space: nowrap;
+    }
+    .cat-type {
+      position: absolute; bottom: 0;
+      font-size: 3.2rem; line-height: 1;
+      animation: catType 5s ease-in-out infinite;
+      opacity: 0;
+      white-space: nowrap;
+    }
+    .stars {
+      position: absolute; top: 8px; left: 0; right: 0;
+      font-size: 1rem; text-align: center; opacity: 0;
+      animation: starsFloat 5s ease-in-out infinite;
+      color: #e94560;
+    }
+    @keyframes catRun {
+      0%   { left: -80px; opacity: 1; transform: scaleX(1); }
+      35%  { left: 38%; opacity: 1; transform: scaleX(1); }
+      40%  { left: 38%; opacity: 0; transform: scaleX(1); }
+      60%  { left: 38%; opacity: 0; transform: scaleX(1); }
+      65%  { left: 38%; opacity: 1; transform: scaleX(-1); }
+      100% { left: calc(100% + 80px); opacity: 1; transform: scaleX(-1); }
+    }
+    @keyframes catType {
+      0%   { left: 38%; opacity: 0; }
+      40%  { left: 38%; opacity: 1; }
+      60%  { left: 38%; opacity: 1; }
+      65%  { left: 38%; opacity: 0; }
+      100% { left: 38%; opacity: 0; }
+    }
+    @keyframes starsFloat {
+      0%   { opacity: 0; transform: translateY(0); }
+      42%  { opacity: 0; transform: translateY(0); }
+      50%  { opacity: 1; transform: translateY(-8px); }
+      58%  { opacity: 0; transform: translateY(-16px); }
+      100% { opacity: 0; }
+    }
+
+    /* ── LOADING MESSAGES ── */
+    .loading-msg {
+      font-size: 1.05rem; color: #e94560; font-weight: 600;
+      min-height: 28px; margin-bottom: 8px;
+      transition: opacity 0.4s;
+    }
+    .loading-sub {
+      font-size: 0.85rem; color: #666; margin-bottom: 28px;
+    }
+
+    /* ── STAGE LIST ── */
+    .stage-list { list-style: none; text-align: left; max-width: 340px; margin: 0 auto 20px; }
+    .stage-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; color: #555; font-size: 0.9rem;
+      border-bottom: 1px solid #222;
+      transition: color 0.3s;
+    }
+    .stage-item:last-child { border-bottom: none; }
     .stage-item.active { color: #f0f0f0; }
-    .stage-item.done { color: #4caf50; }
-    .stage-icon { width: 24px; text-align: center; }
-    .progress-bar-bg { background: #333; border-radius: 8px; height: 8px; margin-top: 16px; }
-    .progress-bar { background: #e94560; border-radius: 8px; height: 8px; transition: width 0.5s; }
-    .progress-text { text-align: right; font-size: 0.85rem; color: #aaa; margin-top: 6px; }
+    .stage-item.done { color: #4caf7d; }
+    .stage-icon { font-size: 1rem; width: 22px; text-align: center; }
+
+    /* ── PROGRESS BAR ── */
+    .progress-bar-bg { background: #2a2a4a; border-radius: 8px; height: 6px; margin: 0 0 6px; }
+    .progress-bar { background: linear-gradient(90deg, #e94560, #ff6b8a); border-radius: 8px; height: 6px; transition: width 0.6s ease; }
+    .progress-text { text-align: right; font-size: 0.8rem; color: #555; }
+
+    /* ── RESULTS ── */
     .results-section { display: none; }
     .dna-card { background: #1a1a2e; border-radius: 12px; padding: 28px; margin-bottom: 24px; }
-    .dna-card h2 { color: #e94560; margin-bottom: 16px; }
-    .dna-row { display: flex; gap: 8px; margin-bottom: 10px; }
-    .dna-label { color: #aaa; min-width: 110px; font-size: 0.9rem; }
+    .dna-card h2 { color: #e94560; margin-bottom: 16px; font-size: 1.2rem; }
+    .dna-row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+    .dna-label { color: #666; min-width: 110px; font-size: 0.85rem; padding-top: 2px; }
     .color-swatch { display: inline-block; width: 20px; height: 20px; border-radius: 4px; margin-right: 6px; vertical-align: middle; }
-    .calendar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+    .calendar-title { color: #e94560; font-size: 1.2rem; margin-bottom: 16px; }
+    .calendar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
     .post-card { background: #1a1a2e; border-radius: 10px; overflow: hidden; }
     .post-card img { width: 100%; aspect-ratio: 1; object-fit: cover; }
-    .post-card .post-body { padding: 14px; }
-    .post-card .day { font-size: 0.8rem; color: #e94560; margin-bottom: 6px; }
-    .post-card .caption { font-size: 0.9rem; color: #ddd; line-height: 1.4; }
-    .email-note { background: #1a2e1a; border: 1px solid #4caf50; border-radius: 10px; padding: 16px; margin-top: 24px; color: #aaa; }
+    .post-body { padding: 14px; }
+    .post-day { font-size: 0.78rem; color: #e94560; margin-bottom: 6px; font-weight: 600; }
+    .post-caption { font-size: 0.88rem; color: #ccc; line-height: 1.5; }
+    .email-note {
+      background: #0d2218; border: 1px solid #2d6a4f; border-radius: 10px;
+      padding: 16px 20px; color: #7ec8a4; font-size: 0.88rem; line-height: 1.6;
+    }
+
+    /* ── ERROR ── */
     .error-card { background: #2e1a1a; border: 1px solid #e94560; border-radius: 12px; padding: 28px; }
+    .error-card h2 { color: #e94560; margin-bottom: 12px; }
+
+    /* ── BACK TO TOP ── */
+    #backToTop {
+      position: fixed; bottom: 28px; right: 24px;
+      background: #e94560; color: #fff;
+      border: none; border-radius: 50%; width: 44px; height: 44px;
+      font-size: 1.2rem; cursor: pointer;
+      display: none; align-items: center; justify-content: center;
+      box-shadow: 0 4px 16px rgba(233,69,96,0.4);
+      transition: background 0.2s, transform 0.2s;
+      z-index: 99;
+    }
+    #backToTop:hover { background: #c73652; transform: translateY(-2px); }
+    #backToTop.visible { display: flex; }
   </style>
 </head>
 <body>
-<div class="container">
-  <h1>Agente Cosmic</h1>
-  <p class="subtitle">Analizando: <strong>{{ job.business_url }}</strong></p>
 
-  <div class="progress-card" id="progressCard">
+<!-- ── NAV ── -->
+<nav>
+  <span class="nav-brand">Agente Cosmic</span>
+  <div class="nav-actions">
+    <a href="{% url 'dashboard' %}" class="nav-btn nav-btn-ghost">Dashboard</a>
+    <a href="{% url 'landing' %}" class="nav-btn nav-btn-primary">+ Nuevo análisis</a>
+    <a href="{% url 'logout' %}" class="nav-btn nav-btn-ghost" style="font-size:0.8rem;">Salir</a>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-title">Analizando tu marca</div>
+  <div class="page-sub">{{ job.business_url }}</div>
+
+  <!-- ── LOADING ── -->
+  <div class="loading-card" id="progressCard">
+    <div class="cat-scene">
+      <div class="stars" id="stars">✨ analizando... ✨</div>
+      <div class="cat-run" id="catRun">🐱</div>
+      <div class="cat-type" id="catType">😸💻</div>
+    </div>
+
+    <div class="loading-msg" id="loadingMsg">Iniciando análisis...</div>
+    <div class="loading-sub" id="loadingSub">El Agente Cosmic está procesando tu marca</div>
+
     <ul class="stage-list" id="stageList">
-      <li class="stage-item" id="stage-web"><span class="stage-icon">o</span> Analizando sitio web</li>
-      <li class="stage-item" id="stage-logo"><span class="stage-icon">o</span> Analizando logo</li>
-      <li class="stage-item" id="stage-posts"><span class="stage-icon">o</span> Analizando posts anteriores</li>
-      <li class="stage-item" id="stage-content"><span class="stage-icon">o</span> Generando contenido</li>
+      <li class="stage-item" id="stage-web"><span class="stage-icon">○</span> Analizando sitio web</li>
+      <li class="stage-item" id="stage-logo"><span class="stage-icon">○</span> Analizando logo</li>
+      <li class="stage-item" id="stage-posts"><span class="stage-icon">○</span> Analizando posts anteriores</li>
+      <li class="stage-item" id="stage-content"><span class="stage-icon">○</span> Generando contenido</li>
     </ul>
-    <div class="progress-bar-bg"><div class="progress-bar" id="progressBar" style="width: 5%"></div></div>
+
+    <div class="progress-bar-bg"><div class="progress-bar" id="progressBar" style="width:5%"></div></div>
     <div class="progress-text" id="progressText">5%</div>
   </div>
 
+  <!-- ── RESULTS ── -->
   <div class="results-section" id="resultsSection">
     <div class="dna-card">
       <h2>ADN de Marca</h2>
       <div id="dnaContent"></div>
     </div>
-    <h2 style="margin-bottom:16px; color:#e94560;">Tu Calendario de Contenido</h2>
+    <div class="calendar-title">Tu Calendario de Contenido</div>
     <div class="calendar-grid" id="calendarGrid"></div>
     <div class="email-note">
-      Revisa tu correo — te enviamos el ADN completo y el contenido del Dia 1. Recibiras un email por dia durante 7 dias.
+      📬 Revisa tu correo — te enviamos el ADN completo y el contenido del Día 1.<br>
+      Recibirás un email cada mañana a las 7 AM durante 7 días.
+    </div>
+    <div style="text-align:center;margin-top:24px;">
+      <a id="calendarLink" href="/calendar/{{ job.id }}/" class="nav-btn nav-btn-primary" style="display:inline-block;padding:14px 32px;font-size:1rem;text-decoration:none;background:#e94560;color:#fff;border-radius:8px;font-weight:600;">
+        Revisar y aprobar mi calendario →
+      </a>
     </div>
   </div>
 
+  <!-- ── ERROR ── -->
   <div class="error-card" id="errorCard" style="display:none;">
-    <h2>Error en el analisis</h2>
+    <h2>Error en el análisis</h2>
     <p id="errorMessage" style="margin-top:12px; color:#aaa;"></p>
+    <a href="{% url 'landing' %}" class="nav-btn nav-btn-primary" style="display:inline-block;margin-top:20px;">Intentar de nuevo</a>
   </div>
 </div>
 
-<script>
-  const jobId = '{{ job.id }}';
-  const statusUrl = `/api/brand-dna/status/${jobId}/`;
-  const stageOrder = ['web', 'logo', 'posts', 'content', 'complete'];
-  let pollInterval;
+<!-- ── BACK TO TOP ── -->
+<button id="backToTop" title="Volver arriba">↑</button>
 
+<script>
+  // ── Mensajes rotativos del gatito ──
+  const catMsgs = [
+    ['🔍 Leyendo tu sitio web...', 'Escaneando contenido, colores e identidad visual'],
+    ['🎨 Detectando la paleta de marca...', 'Extrayendo colores y elementos del logo'],
+    ['📝 Analizando tu estilo de comunicación...', 'El agente está aprendiendo cómo hablas'],
+    ['✨ Construyendo tu ADN de marca...', 'Vertex AI está procesando toda la información'],
+    ['🖼 Generando imágenes para tus posts...', 'Cada imagen es creada especialmente para ti'],
+    ['📅 Armando el calendario de contenido...', 'Organizando 7 días de publicaciones'],
+    ['💌 Preparando tu primer email...', 'Casi listo, el contenido está por llegar'],
+  ];
+  let msgIdx = 0;
+  function rotateMsgs() {
+    const [main, sub] = catMsgs[msgIdx % catMsgs.length];
+    const msgEl = document.getElementById('loadingMsg');
+    const subEl = document.getElementById('loadingSub');
+    msgEl.style.opacity = 0;
+    setTimeout(function() {
+      msgEl.textContent = main;
+      subEl.textContent = sub;
+      msgEl.style.opacity = 1;
+    }, 300);
+    msgIdx++;
+  }
+  setInterval(rotateMsgs, 4000);
+
+  // ── Stage icons ──
+  const stageOrder = ['web', 'logo', 'posts', 'content', 'complete'];
   function updateStages(currentStage) {
     const idx = stageOrder.indexOf(currentStage);
-    stageOrder.forEach((s, i) => {
+    stageOrder.forEach(function(s, i) {
       const el = document.getElementById('stage-' + s);
       if (!el) return;
-      if (i < idx) { el.className = 'stage-item done'; el.querySelector('.stage-icon').textContent = 'v'; }
-      else if (i === idx) { el.className = 'stage-item active'; el.querySelector('.stage-icon').textContent = '>'; }
-      else { el.className = 'stage-item'; el.querySelector('.stage-icon').textContent = 'o'; }
+      const icon = el.querySelector('.stage-icon');
+      if (i < idx) { el.className = 'stage-item done'; icon.textContent = '✓'; }
+      else if (i === idx) { el.className = 'stage-item active'; icon.textContent = '▶'; }
+      else { el.className = 'stage-item'; icon.textContent = '○'; }
     });
   }
 
+  // ── Render results ──
   function renderDna(dna) {
     const colors = (dna.primary_colors || []).map(function(c) {
-      return '<span class="color-swatch" style="background:' + c + '"></span>' + c;
+      return '<span class="color-swatch" style="background:' + c + '" title="' + c + '"></span>' + c;
     }).join(' ');
     document.getElementById('dnaContent').innerHTML =
-      '<div class="dna-row"><span class="dna-label">Negocio</span><span>' + dna.business_name + '</span></div>' +
-      '<div class="dna-row"><span class="dna-label">Descripcion</span><span>' + dna.description + '</span></div>' +
-      '<div class="dna-row"><span class="dna-label">Audiencia</span><span>' + dna.audience + '</span></div>' +
-      '<div class="dna-row"><span class="dna-label">Tono</span><span>' + dna.tone + '</span></div>' +
+      '<div class="dna-row"><span class="dna-label">Negocio</span><span>' + (dna.business_name||'') + '</span></div>' +
+      '<div class="dna-row"><span class="dna-label">Descripción</span><span>' + (dna.description||'') + '</span></div>' +
+      '<div class="dna-row"><span class="dna-label">Audiencia</span><span>' + (dna.audience||'') + '</span></div>' +
+      '<div class="dna-row"><span class="dna-label">Tono</span><span>' + (dna.tone||'') + '</span></div>' +
       '<div class="dna-row"><span class="dna-label">Keywords</span><span>' + (dna.keywords||[]).join(', ') + '</span></div>' +
-      '<div class="dna-row"><span class="dna-label">Colores</span><span>' + (colors || 'No disponibles') + '</span></div>';
+      '<div class="dna-row"><span class="dna-label">Colores</span><span>' + (colors||'No disponibles') + '</span></div>';
   }
 
   function renderCalendar(posts) {
     document.getElementById('calendarGrid').innerHTML = posts.map(function(p) {
       return '<div class="post-card">' +
-        (p.image_url ? '<img src="' + p.image_url + '" alt="Dia ' + p.day_number + '" onerror="this.style.display=\'none\'">' : '') +
-        '<div class="post-body"><div class="day">Dia ' + p.day_number + ' - ' + p.suggested_time + '</div>' +
-        '<div class="caption">' + p.caption + '</div></div></div>';
+        (p.image_url ? '<img src="' + p.image_url + '" alt="Día ' + p.day_number + '" loading="lazy" onerror="this.style.display=\'none\'">' : '') +
+        '<div class="post-body"><div class="post-day">Día ' + p.day_number + ' · ' + p.suggested_time + '</div>' +
+        '<div class="post-caption">' + p.caption + '</div></div></div>';
     }).join('');
   }
+
+  // ── Polling ──
+  const jobId = '{{ job.id }}';
+  const statusUrl = '/api/brand-dna/status/' + jobId + '/';
+  let pollInterval;
 
   async function poll() {
     try {
@@ -116,10 +295,12 @@
       document.getElementById('progressBar').style.width = progress + '%';
       document.getElementById('progressText').textContent = progress + '%';
       updateStages(data.stage);
+
       if (data.status === 'done') {
         clearInterval(pollInterval);
         document.getElementById('progressCard').style.display = 'none';
-        document.getElementById('resultsSection').style.display = 'block';
+        const rs = document.getElementById('resultsSection');
+        rs.style.display = 'block';
         if (data.brand_dna) renderDna(data.brand_dna);
         if (data.calendar) renderCalendar(data.calendar);
       } else if (data.status === 'failed') {
@@ -133,6 +314,15 @@
 
   pollInterval = setInterval(poll, 3000);
   poll();
+
+  // ── Back to top ──
+  const btn = document.getElementById('backToTop');
+  window.addEventListener('scroll', function() {
+    btn.classList.toggle('visible', window.scrollY > 300);
+  });
+  btn.addEventListener('click', function() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
 </script>
 </body>
 </html>
