@@ -55,3 +55,22 @@ class TestSmartScheduleDates:
         result = smart_schedule_dates(dna, base_date=base, count=7)
         dates_only = [r.date() for r in result]
         assert len(dates_only) == len(set(dates_only))
+
+    def test_no_duplicate_dates_starting_sunday(self):
+        """Domingo como fecha base no produce duplicados."""
+        dna = MagicMock()
+        dna.tone = 'profesional'
+        dna.description = 'Empresa de software'
+        base = date(2026, 6, 7)  # domingo
+        result = smart_schedule_dates(dna, base_date=base, count=7)
+        dates_only = [r.date() for r in result]
+        assert len(dates_only) == len(set(dates_only))
+
+    def test_result_is_chronologically_ordered(self):
+        """Los datetimes deben estar en orden cronológico ascendente."""
+        dna = MagicMock()
+        dna.tone = 'tech'
+        dna.description = 'Empresa de software digital'
+        base = date(2026, 6, 2)
+        result = smart_schedule_dates(dna, base_date=base, count=7)
+        assert result == sorted(result)
