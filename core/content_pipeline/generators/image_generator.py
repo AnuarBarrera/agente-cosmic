@@ -309,7 +309,7 @@ class ImageGenerator:
                 args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
             )
             page = browser.new_page(viewport={'width': 1080, 'height': 1080})
-            page.set_content(html, wait_until='networkidle')
+            page.set_content(html, wait_until='domcontentloaded')
             png_bytes = page.screenshot(full_page=False)
             browser.close()
 
