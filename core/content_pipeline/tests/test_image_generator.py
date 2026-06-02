@@ -102,6 +102,36 @@ class TestExtractHeadline:
         assert len(gen._extract_headline("Hola mundo")) > 0
 
 
+class TestGenerateTextAsset:
+    def test_returns_valid_png_bytes(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        result = gen._generate_text_asset("Digitaliza tu negocio", ['#1a1a2e'])
+        assert result is not None
+        out = Image.open(io.BytesIO(result))
+        assert out.size == (1024, 512)
+        assert out.mode == 'RGB'
+
+    def test_background_is_exact_magenta(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        import numpy as np
+        gen = ImageGenerator(bucket_name='test-bucket')
+        result = gen._generate_text_asset("Hola Mundo", ['#ffffff'])
+        img = Image.open(io.BytesIO(result)).convert('RGB')
+        arr = np.array(img)
+        # Top-left corner should be magenta (255, 0, 255) — no text there
+        corner = arr[5, 5]
+        assert corner[0] == 255 and corner[1] == 0 and corner[2] == 255
+
+    def test_returns_none_on_exception(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        from unittest.mock import patch as _patch
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with _patch('core.content_pipeline.generators.image_generator.Image.new', side_effect=Exception('PIL error')):
+            result = gen._generate_text_asset("Test", [])
+        assert result is None
+
+
 class TestAnalyzeNegativeSpace:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',

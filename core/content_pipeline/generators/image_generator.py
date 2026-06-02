@@ -84,20 +84,79 @@ class ImageGenerator:
         return ' '.join(words[:5]) or caption[:30]
 
     def _generate_text_asset(self, headline: str, colors: list[str], max_retries: int = 2) -> bytes | None:
-        color_str = colors[0] if colors else '#ffffff'
-        prompt = (
-            f"High quality 3D rendered bold text saying exactly '{headline}' "
-            f"on a solid magenta background color #FF00FF. "
-            f"Text color: white or {color_str}. Modern bold font, centered. "
-            f"Nothing else in the image — only the text and the magenta background. "
-            f"High contrast, sharp edges. Square image."
-        )
-        for attempt in range(max_retries):
-            try:
-                return self._generate_with_vertex(prompt)
-            except Exception as e:
-                logger.warning(f"Text asset attempt {attempt + 1}/{max_retries} failed: {e}")
-        return None
+        """Render headline on exact magenta #FF00FF using PIL.
+
+        PIL guarantees exact (255,0,255) so remove_chroma_key works perfectly.
+        max_retries kept for caller compatibility but unused (no API call).
+        """
+        try:
+            W, H = 1024, 512
+            _DEJAVU = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+            text = headline.upper()
+            padding = 60
+            max_w = W - 2 * padding
+
+            # Find font size where text fits in 1 or 2 lines
+            font = None
+            lines = [text]
+            chosen_size = 80
+            dummy_img = Image.new('RGB', (1, 1))
+            dummy_draw = ImageDraw.Draw(dummy_img)
+
+            for size in range(110, 39, -10):
+                try:
+                    f = ImageFont.truetype(_DEJAVU, size=size)
+                except (OSError, IOError):
+                    f = ImageFont.load_default(size=size)
+                # Try single line
+                single_w = dummy_draw.textbbox((0, 0), text, font=f)[2]
+                if single_w <= max_w:
+                    font, lines, chosen_size = f, [text], size
+                    break
+                # Try 2-line split at word midpoint
+                words = text.split()
+                mid = max(1, len(words) // 2)
+                l1, l2 = ' '.join(words[:mid]), ' '.join(words[mid:])
+                if l1 and l2:
+                    w1 = dummy_draw.textbbox((0, 0), l1, font=f)[2]
+                    w2 = dummy_draw.textbbox((0, 0), l2, font=f)[2]
+                    if max(w1, w2) <= max_w:
+                        font, lines, chosen_size = f, [l1, l2], size
+                        break
+
+            if font is None:
+                try:
+                    font = ImageFont.truetype(_DEJAVU, size=40)
+                except (OSError, IOError):
+                    font = ImageFont.load_default()
+                lines = [text[:28]]
+                chosen_size = 40
+
+            img = Image.new('RGB', (W, H), (255, 0, 255))
+            draw = ImageDraw.Draw(img)
+
+            line_spacing = 18
+            bboxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
+            total_h = sum(b[3] - b[1] for b in bboxes) + line_spacing * (len(lines) - 1)
+            y = (H - total_h) // 2
+            shadow_off = max(3, chosen_size // 28)
+
+            for line, bb in zip(lines, bboxes):
+                lw = bb[2] - bb[0]
+                lh = bb[3] - bb[1]
+                x = (W - lw) // 2
+                # Dark shadow for depth
+                draw.text((x + shadow_off, y + shadow_off), line, font=font, fill=(20, 20, 20))
+                # White text
+                draw.text((x, y), line, font=font, fill=(255, 255, 255))
+                y += lh + line_spacing
+
+            out = io.BytesIO()
+            img.save(out, format='PNG')
+            return out.getvalue()
+        except Exception as e:
+            logger.error(f"PIL text asset generation failed: {e}")
+            return None
 
     def _analyze_negative_space(self, background_bytes: bytes) -> dict:
         _FALLBACK = {'x': 0.1, 'y': 0.6, 'width': 0.8}
