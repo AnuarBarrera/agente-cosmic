@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import time as _time
 import django_rq
 import google.genai as genai
 from django.conf import settings
@@ -187,7 +188,7 @@ def post_action_api(request, post_id):
                 caption=new_caption,
                 colors=brand_dna.primary_colors,
                 tone=brand_dna.tone,
-                filename=f"{job_id}-day{post.day_number}-v{post.user_note[:8].replace(' ','')}",
+                filename=f"{job_id}-day{post.day_number}-regen-{int(_time.time())}",
             )
             if generated:
                 new_image_url = generated

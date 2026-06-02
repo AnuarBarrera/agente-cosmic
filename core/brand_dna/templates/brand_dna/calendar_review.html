@@ -236,7 +236,8 @@
         const card = document.getElementById('card-' + postId);
         const imgEl = card.querySelector('.post-img img');
         const linkEl = card.querySelector('.post-img a');
-        if (imgEl) imgEl.src = data.image_url;
+        const freshUrl = data.image_url + '?t=' + Date.now();
+        if (imgEl) imgEl.src = freshUrl;
         if (linkEl) linkEl.href = data.image_url;
       }
       document.getElementById('regen-' + postId).style.display = 'none';
