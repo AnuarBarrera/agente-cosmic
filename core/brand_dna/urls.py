@@ -14,4 +14,6 @@ urlpatterns = [
     path('auth/google/', auth_views.google_login_view, name='google_login'),
     path('auth/google/callback/', auth_views.google_callback_view, name='google_callback'),
     path('dashboard/', auth_views.dashboard_view, name='dashboard'),
+    path('calendar/<uuid:job_id>/', views.calendar_review_view, name='calendar_review'),
+    path('api/post/<uuid:post_id>/action/', views.post_action_api, name='post_action_api'),
 ]

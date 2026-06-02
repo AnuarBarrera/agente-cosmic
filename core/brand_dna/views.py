@@ -1,15 +1,22 @@
+import json
+import logging
 import os
+import re
 import django_rq
+import google.genai as genai
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
+from django.views.decorators.http import require_POST
 from core.brand_dna.models import AnalysisJob, BrandDNA
+
+logger = logging.getLogger(__name__)
 
 
 def landing(request):
-    if request.user.is_authenticated:
-        return redirect('dashboard')
+    if not request.user.is_authenticated:
+        return redirect('login')
     return render(request, 'brand_dna/landing.html')
 
 
@@ -114,3 +121,89 @@ def status_api(request, job_id):
         'brand_dna': brand_dna_data,
         'calendar': calendar_data,
     })
+
+
+@login_required
+def calendar_review_view(request, job_id):
+    from core.content_pipeline.models import ContentPost
+    job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
+    brand_dna = getattr(job, 'brand_dna', None)
+    calendar = getattr(brand_dna, 'calendar', None) if brand_dna else None
+    posts = list(calendar.posts.order_by('day_number')) if calendar else []
+    return render(request, 'brand_dna/calendar_review.html', {
+        'job': job,
+        'brand_dna': brand_dna,
+        'posts': posts,
+    })
+
+
+@login_required
+@require_POST
+def post_action_api(request, post_id):
+    from core.content_pipeline.models import ContentPost
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'JSON inválido'}, status=400)
+
+    action = data.get('action')
+    value = data.get('value', '').strip()
+
+    post = get_object_or_404(
+        ContentPost.objects.select_related('calendar__brand_dna__job'),
+        id=post_id,
+        calendar__brand_dna__job__user=request.user,
+    )
+
+    if action == 'approve':
+        post.user_status = ContentPost.USER_STATUS_APPROVED
+        post.save(update_fields=['user_status'])
+        return JsonResponse({'status': 'ok'})
+
+    if action == 'edit':
+        if not value:
+            return JsonResponse({'error': 'Caption vacío'}, status=400)
+        post.caption = value
+        post.user_status = ContentPost.USER_STATUS_EDITED
+        post.save(update_fields=['caption', 'user_status'])
+        return JsonResponse({'status': 'ok', 'caption': post.caption})
+
+    if action == 'regenerate':
+        if not value:
+            return JsonResponse({'error': 'Feedback vacío'}, status=400)
+        new_caption = _regenerate_caption(post, value)
+        post.caption = new_caption
+        post.user_note = value
+        post.user_status = ContentPost.USER_STATUS_CHANGE_REQUESTED
+        post.save(update_fields=['caption', 'user_note', 'user_status'])
+        return JsonResponse({'status': 'ok', 'caption': new_caption})
+
+    return JsonResponse({'error': 'Acción desconocida'}, status=400)
+
+
+def _regenerate_caption(post, feedback: str) -> str:
+    brand_dna = post.calendar.brand_dna
+    prompt = (
+        f"Eres un experto en marketing de contenidos. Reescribe el siguiente post de redes sociales "
+        f"para la marca '{brand_dna.business_name}' considerando el feedback del cliente.\n\n"
+        f"Post original:\n{post.caption}\n\n"
+        f"Feedback del cliente: {feedback}\n\n"
+        f"Tono de la marca: {brand_dna.tone}\n"
+        f"Audiencia: {brand_dna.audience}\n\n"
+        f"Responde ÚNICAMENTE con el nuevo texto del post, sin comillas, sin explicaciones. "
+        f"Máximo {brand_dna.avg_caption_length} caracteres."
+    )
+    try:
+        client = genai.Client(
+            vertexai=True,
+            project=settings.GOOGLE_CLOUD_PROJECT,
+            location=settings.GOOGLE_CLOUD_LOCATION,
+        )
+        resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        new_caption = resp.text.strip().strip('"').strip("'")
+        raw = re.sub(r'^```.*?\n', '', new_caption, flags=re.DOTALL)
+        raw = re.sub(r'\n?```$', '', raw)
+        return raw.strip() or post.caption
+    except Exception as e:
+        logger.error(f"Caption regeneration error: {e}")
+        return post.caption
