@@ -1,18 +1,15 @@
 import base64
 import html as _html
-import io
 import json
 import logging
 import os
 import re
-import textwrap
 import time
 
 import google.genai as genai
 from google.cloud import storage
 from google.genai import types
 from django.conf import settings
-from PIL import Image, ImageDraw, ImageFont
 from playwright.sync_api import sync_playwright
 
 logger = logging.getLogger(__name__)
@@ -29,12 +26,11 @@ def _vertex_client():
     )
 
 
-
 class ImageGenerator:
     def __init__(self, bucket_name: str):
         self._bucket = bucket_name
 
-    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '') -> str:
+    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '') -> str:  # brand_name: forward-compat, not yet used in pipeline
         try:
             image_bytes = self._layered_pipeline(caption, colors, tone)
             return self._upload_to_storage(image_bytes, filename)
@@ -160,61 +156,6 @@ class ImageGenerator:
             browser.close()
 
         return png_bytes
-
-    # ------------------------------------------------------------------
-    # Low-level helpers (kept for fallback/legacy use)
-    # ------------------------------------------------------------------
-
-    def _build_prompt(self, caption: str, colors: list[str], tone: str) -> str:
-        color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
-        return (
-            f"Professional social media post image. Concept: {caption[:120]}. "
-            f"Use brand colors: {color_str}. Visual style: {tone}, clean, "
-            f"high quality, square format 1:1, photographic or illustrated."
-        )
-
-    def _overlay_text(self, image_bytes: bytes, caption: str) -> bytes:
-        if not caption or not caption.strip():
-            return image_bytes
-
-        img = Image.open(io.BytesIO(image_bytes)).convert('RGBA')
-        w, h = img.size
-
-        if w == 0 or h == 0:
-            return image_bytes
-
-        bar_h = int(h * 0.25)
-        overlay = Image.new('RGBA', (w, bar_h), (0, 0, 0, 0))
-        draw_overlay = ImageDraw.Draw(overlay)
-        for y in range(bar_h):
-            alpha = int(180 * (1 - y / bar_h))
-            draw_overlay.line([(0, y), (w, y)], fill=(0, 0, 0, alpha))
-
-        img.paste(overlay, (0, h - bar_h), overlay)
-
-        draw = ImageDraw.Draw(img)
-        font_size = max(22, w // 28)
-        _DEJAVU = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-        try:
-            font = ImageFont.truetype(_DEJAVU, size=font_size)
-        except (OSError, IOError):
-            try:
-                font = ImageFont.load_default(size=font_size)
-            except TypeError:
-                font = ImageFont.load_default()
-
-        padding = w // 20
-        max_chars = max(20, w // (font_size // 2))
-        lines = textwrap.wrap(caption[:240], width=max_chars)[:4]
-        text = '\n'.join(lines)
-
-        text_y = h - bar_h + padding
-        draw.text((padding + 2, text_y + 2), text, font=font, fill=(0, 0, 0, 200))
-        draw.text((padding, text_y), text, font=font, fill=(255, 255, 255, 255))
-
-        out = io.BytesIO()
-        img.convert('RGB').save(out, format='PNG', optimize=True)
-        return out.getvalue()
 
     def _generate_with_retry(self, prompt: str) -> bytes:
         last_error = None

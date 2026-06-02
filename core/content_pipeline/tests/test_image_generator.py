@@ -14,18 +14,6 @@ def _png_bytes(color=(30, 30, 60), size=(64, 64)) -> bytes:
 
 # ---- Existing tests (updated mocks) ----
 
-def test_build_prompt_includes_colors():
-    from core.content_pipeline.generators.image_generator import ImageGenerator
-    gen = ImageGenerator(bucket_name='test-bucket')
-    prompt = gen._build_prompt(
-        caption='Diseno web profesional para tu empresa',
-        colors=['#1a1a2e', '#e94560'],
-        tone='profesional',
-    )
-    assert '#1a1a2e' in prompt
-    assert 'profesional' in prompt
-
-
 @override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
     GOOGLE_CLOUD_LOCATION='us-central1',
@@ -61,22 +49,6 @@ def test_generate_returns_fallback_on_error():
             filename='test-img',
         )
     assert url == ''
-
-
-class TestOverlayText:
-    def test_overlay_produces_valid_png(self):
-        from core.content_pipeline.generators.image_generator import ImageGenerator
-        gen = ImageGenerator(bucket_name='test-bucket')
-        result = gen._overlay_text(_png_bytes(size=(1024, 1024)), "Caption de prueba")
-        out = Image.open(io.BytesIO(result))
-        assert out.size == (1024, 1024)
-
-    def test_overlay_handles_long_caption(self):
-        from core.content_pipeline.generators.image_generator import ImageGenerator
-        gen = ImageGenerator(bucket_name='test-bucket')
-        result = gen._overlay_text(_png_bytes(size=(1024, 1024)), "A" * 300)
-        assert len(result) > 0
-        assert Image.open(io.BytesIO(result)).size == (1024, 1024)
 
 
 # ---- New tests ----
