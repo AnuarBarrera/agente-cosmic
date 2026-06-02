@@ -3,6 +3,7 @@ import html as _html
 import json
 import logging
 import os
+import random
 import re
 import time
 
@@ -206,12 +207,20 @@ class ImageGenerator:
             logger.warning(f"Post content generation failed, using fallback: {e}")
         return _FALLBACK
 
+    _TEMPLATES = [
+        'instagram_post.html',         # lower third — texto abajo
+        'instagram_post_center.html',  # panel centrado glassmorphism
+        'instagram_post_top.html',     # upper third — texto arriba
+    ]
+
     def _render_html_template(self, background_bytes: bytes, content: dict, colors: list[str]) -> bytes:
-        """Inject Imagen 3 background + content into HTML template, render via Playwright → PNG."""
+        """Inject background + content into a randomly chosen HTML template, render via Playwright → PNG."""
+        template_name = random.choice(self._TEMPLATES)
         _TEMPLATE_PATH = os.path.normpath(os.path.join(
             os.path.dirname(__file__),
-            '..', 'templates', 'content_pipeline', 'instagram_post.html',
+            '..', 'templates', 'content_pipeline', template_name,
         ))
+        logger.info(f"Template seleccionado: {template_name}")
         with open(_TEMPLATE_PATH) as f:
             html = f.read()
 
