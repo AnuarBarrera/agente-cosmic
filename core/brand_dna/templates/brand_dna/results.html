@@ -202,7 +202,7 @@
       Recibirás un email cada mañana a las 7 AM durante 7 días.
     </div>
     <div style="text-align:center;margin-top:24px;">
-      <a id="calendarLink" href="/calendar/{{ job.id }}/" class="nav-btn nav-btn-primary" style="display:inline-block;padding:14px 32px;font-size:1rem;text-decoration:none;background:#e94560;color:#fff;border-radius:8px;font-weight:600;">
+      <a id="calendarLink" href="{% url 'calendar_review' job.id %}" class="nav-btn nav-btn-primary" style="display:inline-block;padding:14px 32px;font-size:1rem;text-decoration:none;background:#e94560;color:#fff;border-radius:8px;font-weight:600;">
         Revisar y aprobar mi calendario →
       </a>
     </div>
