@@ -81,9 +81,11 @@ class ImageGenerator:
     def _generate_background(self, caption: str, colors: list[str], tone: str) -> bytes:
         color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
         prompt = (
-            f"Clean professional photograph or illustration. "
-            f"Subject related to: {caption[:80]}. "
+            f"Clean professional photograph or stylized illustration. "
+            f"Theme: {caption[:80]}. "
             f"Dominant colors: {color_str}. Mood: {tone}. "
+            f"Focus on the product, service, environment, or concept — "
+            f"NOT a portrait or headshot. Show objects, spaces, or abstract visuals. "
             f"Square 1:1 format, high quality. "
             f"Absolutely NO text, NO letters, NO words, NO UI elements, "
             f"NO logos, NO design templates, NO social media template layout."
@@ -121,8 +123,10 @@ class ImageGenerator:
                 f"Caption: \"{caption[:200]}\"\n\n"
                 "1. Find the best spot in this image for a text bar overlay "
                 "(prefer lower third, flat or darker areas, avoid faces/focal points).\n"
-                "2. Write a SHORT punchy headline (3-5 words) that captures the key message "
-                "of the caption — must be grammatically complete, no mid-sentence cuts.\n\n"
+                "2. Write a SHORT punchy headline (3-5 words max) that captures the key message. "
+                "Rules: grammatically complete phrase, no mid-sentence cuts, "
+                "do NOT include brand names, URLs, company names, or hashtags — "
+                "only the core benefit or call to action.\n\n"
                 "Reply with ONLY this JSON (no markdown):\n"
                 "{\"x\": <left 0.0-1.0>, \"y\": <top 0.0-1.0>, "
                 "\"width\": <0.6-0.95>, \"headline\": \"<3-5 words>\"}"
