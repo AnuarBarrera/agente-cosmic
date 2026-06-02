@@ -65,13 +65,18 @@ class ImageGenerator:
         img.paste(overlay, (0, h - bar_h), overlay)
 
         draw = ImageDraw.Draw(img)
+        font_size = max(22, w // 28)
+        _DEJAVU = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
         try:
-            font = ImageFont.load_default(size=max(20, w // 32))
-        except TypeError:
-            font = ImageFont.load_default()
+            font = ImageFont.truetype(_DEJAVU, size=font_size)
+        except (OSError, IOError):
+            try:
+                font = ImageFont.load_default(size=font_size)
+            except TypeError:
+                font = ImageFont.load_default()
 
         padding = w // 20
-        max_chars = max(20, w // (max(20, w // 32) // 2))
+        max_chars = max(20, w // (font_size // 2))
         lines = textwrap.wrap(caption[:240], width=max_chars)[:4]
         text = '\n'.join(lines)
 
