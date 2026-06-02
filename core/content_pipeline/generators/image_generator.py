@@ -31,9 +31,9 @@ class ImageGenerator:
     def __init__(self, bucket_name: str):
         self._bucket = bucket_name
 
-    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', product_image_bytes: bytes = None) -> str:
+    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2) -> str:
         try:
-            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description, product_image_bytes=product_image_bytes)
+            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description, product_image_bytes=product_image_bytes, max_qc_retries=max_qc_retries)
             return self._upload_to_storage(image_bytes, filename)
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")
@@ -43,18 +43,18 @@ class ImageGenerator:
     # Layered pipeline
     # ------------------------------------------------------------------
 
-    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', product_image_bytes: bytes = None) -> bytes:
+    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2) -> bytes:
         if product_image_bytes:
             background_bytes = product_image_bytes
             kw_str = ', '.join((keywords or [])[:3])
             brand_context = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
             content = self._generate_post_content(caption, product_image_bytes=product_image_bytes, brand_context=brand_context)
         else:
-            background_bytes = self._generate_background(caption, colors, tone, keywords or [], description)
+            background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, max_qc_retries=max_qc_retries)
             content = self._generate_post_content(caption, product_image_bytes=None)
         return self._render_html_template(background_bytes, content, colors)
 
-    def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '') -> bytes:
+    def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', max_qc_retries: int = 2) -> bytes:
         color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
         # Ground Imagen 3 in the client's actual business context
         subject_hint = ''
@@ -80,12 +80,13 @@ class ImageGenerator:
             f"NO logos, NO templates, NO social media layouts."
         )
         last_bytes = None
-        for attempt in range(3):
+        total_attempts = max_qc_retries + 1
+        for attempt in range(total_attempts):
             last_bytes = self._generate_with_retry(prompt)
             if self._validate_background(last_bytes):
                 return last_bytes
-            if attempt < 2:
-                logger.warning(f"Background QC failed (attempt {attempt + 1}/3), regenerating...")
+            if attempt < max_qc_retries:
+                logger.warning(f"Background QC failed (attempt {attempt + 1}/{total_attempts}), regenerating...")
         logger.warning("Background QC: all retries exhausted, using last generated image")
         return last_bytes
 

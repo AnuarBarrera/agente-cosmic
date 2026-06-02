@@ -211,6 +211,7 @@ def post_action_api(request, post_id):
                 keywords=brand_dna.keywords,
                 description=brand_dna.description,
                 product_image_bytes=product_image_bytes,
+                max_qc_retries=0,  # regen es síncrono — sin reintentos QC para evitar timeout
             )
             if generated:
                 new_image_url = generated
