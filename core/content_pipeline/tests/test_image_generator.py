@@ -219,6 +219,62 @@ class TestGeneratePostContent:
         assert result['tag'] == 'MARKETING DIGITAL'
 
 
+class TestRenderHtmlTemplate:
+    def _make_mock_playwright(self, screenshot_bytes: bytes):
+        """Helper: builds a mock sync_playwright context that returns screenshot_bytes."""
+        mock_page = MagicMock()
+        mock_page.screenshot.return_value = screenshot_bytes
+        mock_browser = MagicMock()
+        mock_browser.new_page.return_value = mock_page
+        mock_pw_ctx = MagicMock()
+        mock_pw_ctx.chromium.launch.return_value = mock_browser
+        mock_pw = MagicMock()
+        mock_pw.__enter__ = MagicMock(return_value=mock_pw_ctx)
+        mock_pw.__exit__ = MagicMock(return_value=False)
+        return mock_pw, mock_page
+
+    def test_returns_screenshot_bytes(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_bg = _png_bytes()
+        fake_shot = _png_bytes(size=(1080, 1080))
+        content = {'headline': 'Web profesional', 'subtitle': 'Tu negocio en línea', 'cta': 'Ver más', 'tag': 'DISEÑO WEB'}
+        mock_pw, _ = self._make_mock_playwright(fake_shot)
+
+        with patch('core.content_pipeline.generators.image_generator.sync_playwright', return_value=mock_pw):
+            result = gen._render_html_template(fake_bg, content, ['#e94560'])
+
+        assert result == fake_shot
+
+    def test_injects_primary_color_into_html(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_bg = _png_bytes()
+        fake_shot = _png_bytes(size=(1080, 1080))
+        content = {'headline': 'Título', 'subtitle': 'Subtítulo', 'cta': 'Empieza', 'tag': 'TEST'}
+        mock_pw, mock_page = self._make_mock_playwright(fake_shot)
+
+        with patch('core.content_pipeline.generators.image_generator.sync_playwright', return_value=mock_pw):
+            gen._render_html_template(fake_bg, content, ['#ff5500'])
+
+        html_arg = mock_page.set_content.call_args[0][0]
+        assert '#ff5500' in html_arg
+
+    def test_uses_fallback_color_when_no_colors(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_bg = _png_bytes()
+        fake_shot = _png_bytes(size=(1080, 1080))
+        content = {'headline': 'Título', 'subtitle': 'Subtítulo', 'cta': 'Empieza', 'tag': 'TEST'}
+        mock_pw, mock_page = self._make_mock_playwright(fake_shot)
+
+        with patch('core.content_pipeline.generators.image_generator.sync_playwright', return_value=mock_pw):
+            gen._render_html_template(fake_bg, content, [])
+
+        html_arg = mock_page.set_content.call_args[0][0]
+        assert '#e94560' in html_arg  # fallback color
+
+
 class TestLayeredPipeline:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',

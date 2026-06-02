@@ -1,6 +1,9 @@
+import base64
+import html as _html
 import io
 import json
 import logging
+import os
 import random
 import re
 import textwrap
@@ -11,6 +14,7 @@ from google.cloud import storage
 from google.genai import types
 from django.conf import settings
 from PIL import Image, ImageDraw, ImageFont
+from playwright.sync_api import sync_playwright
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +283,37 @@ class ImageGenerator:
         except Exception as e:
             logger.error(f"PIL text asset generation failed: {e}")
             return None
+
+    def _render_html_template(self, background_bytes: bytes, content: dict, colors: list[str]) -> bytes:
+        """Inject Imagen 3 background + content into HTML template, render via Playwright → PNG."""
+        _TEMPLATE_PATH = os.path.normpath(os.path.join(
+            os.path.dirname(__file__),
+            '..', 'templates', 'content_pipeline', 'instagram_post.html',
+        ))
+        with open(_TEMPLATE_PATH) as f:
+            html = f.read()
+
+        bg_b64 = base64.b64encode(background_bytes).decode()
+        primary = colors[0] if colors else '#e94560'
+
+        html = html.replace('{{bg_data_url}}', f'data:image/png;base64,{bg_b64}')
+        html = html.replace('{{primary_color}}', primary)
+        html = html.replace('{{tag}}', _html.escape(content.get('tag', 'DESTACADO')))
+        html = html.replace('{{headline}}', _html.escape(content.get('headline', '')))
+        html = html.replace('{{subtitle}}', _html.escape(content.get('subtitle', '')))
+        html = html.replace('{{cta}}', _html.escape(content.get('cta', 'Ver más')))
+
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+            )
+            page = browser.new_page(viewport={'width': 1080, 'height': 1080})
+            page.set_content(html, wait_until='networkidle')
+            png_bytes = page.screenshot(full_page=False)
+            browser.close()
+
+        return png_bytes
 
     # ------------------------------------------------------------------
     # Low-level helpers (kept for fallback/legacy use)
