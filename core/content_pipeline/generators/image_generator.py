@@ -30,9 +30,9 @@ class ImageGenerator:
     def __init__(self, bucket_name: str):
         self._bucket = bucket_name
 
-    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '') -> str:
+    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', product_image_bytes: bytes = None) -> str:
         try:
-            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description)
+            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description, product_image_bytes=product_image_bytes)
             return self._upload_to_storage(image_bytes, filename)
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")
@@ -42,9 +42,13 @@ class ImageGenerator:
     # Layered pipeline
     # ------------------------------------------------------------------
 
-    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '') -> bytes:
-        background_bytes = self._generate_background(caption, colors, tone, keywords or [], description)
-        content = self._generate_post_content(caption)
+    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', product_image_bytes: bytes = None) -> bytes:
+        if product_image_bytes:
+            background_bytes = product_image_bytes
+            content = self._generate_post_content(caption, product_image_bytes=product_image_bytes)
+        else:
+            background_bytes = self._generate_background(caption, colors, tone, keywords or [], description)
+            content = self._generate_post_content(caption, product_image_bytes=None)
         return self._render_html_template(background_bytes, content, colors)
 
     def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '') -> bytes:

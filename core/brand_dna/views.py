@@ -196,6 +196,12 @@ def post_action_api(request, post_id):
             brand_dna = post.calendar.brand_dna
             job_id = str(brand_dna.job.id)
             image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+            product_image_bytes = None
+            if brand_dna.job.product_image_path:
+                prod_full = os.path.join(settings.MEDIA_ROOT, brand_dna.job.product_image_path)
+                if os.path.exists(prod_full):
+                    with open(prod_full, 'rb') as _f:
+                        product_image_bytes = _f.read()
             generated = image_gen.generate(
                 caption=new_caption,
                 colors=brand_dna.primary_colors,
@@ -204,6 +210,7 @@ def post_action_api(request, post_id):
                 brand_name=brand_dna.business_name,
                 keywords=brand_dna.keywords,
                 description=brand_dna.description,
+                product_image_bytes=product_image_bytes,
             )
             if generated:
                 new_image_url = generated

@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime as dt_datetime, timedelta, timezone as dt_timezone
 from django.conf import settings
 from django.utils import timezone
@@ -33,6 +34,14 @@ def content_generation_task(job_id: str) -> None:
 
         scheduled_dates = smart_schedule_dates(brand_dna, base_date=mexico_today, count=len(posts_data))
 
+        # Load product image bytes if client uploaded one
+        product_image_bytes = None
+        if job.product_image_path:
+            prod_full = os.path.join(settings.MEDIA_ROOT, job.product_image_path)
+            if os.path.exists(prod_full):
+                with open(prod_full, 'rb') as _f:
+                    product_image_bytes = _f.read()
+
         for i, post_data in enumerate(posts_data, start=1):
             hour, minute = map(int, post_data.get('suggested_time', '19:00').split(':'))
             scheduled = scheduled_dates[i - 1]
@@ -46,6 +55,7 @@ def content_generation_task(job_id: str) -> None:
                     brand_name=brand_dna.business_name,
                     keywords=brand_dna.keywords,
                     description=brand_dna.description,
+                    product_image_bytes=product_image_bytes,
                 )
             else:
                 image_url = ''
@@ -87,6 +97,12 @@ def send_daily_email_task(post_id: str) -> None:
         job_id = str(brand_dna.job.id)
         try:
             image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+            product_image_bytes = None
+            if brand_dna.job.product_image_path:
+                prod_full = os.path.join(settings.MEDIA_ROOT, brand_dna.job.product_image_path)
+                if os.path.exists(prod_full):
+                    with open(prod_full, 'rb') as _f:
+                        product_image_bytes = _f.read()
             post.image_url = image_gen.generate(
                 caption=post.caption,
                 colors=brand_dna.primary_colors,
@@ -95,6 +111,7 @@ def send_daily_email_task(post_id: str) -> None:
                 brand_name=brand_dna.business_name,
                 keywords=brand_dna.keywords,
                 description=brand_dna.description,
+                product_image_bytes=product_image_bytes,
             )
             post.save(update_fields=['image_url'])
         except Exception as img_err:

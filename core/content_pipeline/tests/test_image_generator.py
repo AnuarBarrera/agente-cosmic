@@ -345,3 +345,49 @@ class TestGenerateBackgroundQC:
              patch.object(gen, '_validate_background', return_value=False):
             result = gen._generate_background('Caption', ['#1a1a2e'], 'profesional')
         assert result == img3  # last attempt returned even if rejected
+
+
+class TestLayeredPipelineWithProduct:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_product_path_skips_imagen3_uses_product_as_background(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        product_img = _png_bytes((200, 150, 100))
+        fake_content = {'headline': 'Brilla distinto', 'subtitle': 'Plata artesanal', 'cta': 'Cómpralo', 'tag': 'JOYERÍA'}
+        fake_shot = _png_bytes((100, 100, 100), size=(1080, 1080))
+
+        with patch.object(gen, '_generate_background') as mock_bg, \
+             patch.object(gen, '_generate_post_content', return_value=fake_content) as mock_content, \
+             patch.object(gen, '_render_html_template', return_value=fake_shot) as mock_render:
+            result = gen._layered_pipeline('Collar artesanal', ['#c0c0c0'], 'elegante', product_image_bytes=product_img)
+
+        mock_bg.assert_not_called()
+        mock_content.assert_called_once_with('Collar artesanal', product_image_bytes=product_img)
+        mock_render.assert_called_once_with(product_img, fake_content, ['#c0c0c0'])
+        assert result == fake_shot
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_no_product_uses_imagen3_flow(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_bg = _png_bytes((30, 30, 60))
+        fake_content = {'headline': 'Hola mundo', 'subtitle': 'Mundo', 'cta': 'Ver', 'tag': 'TEST'}
+        fake_shot = _png_bytes((100, 100, 100), size=(1080, 1080))
+
+        with patch.object(gen, '_generate_background', return_value=fake_bg) as mock_bg, \
+             patch.object(gen, '_generate_post_content', return_value=fake_content) as mock_content, \
+             patch.object(gen, '_render_html_template', return_value=fake_shot):
+            gen._layered_pipeline('Caption', ['#1a1a2e'], 'profesional', product_image_bytes=None)
+
+        mock_bg.assert_called_once()
+        mock_content.assert_called_once_with('Caption', product_image_bytes=None)
