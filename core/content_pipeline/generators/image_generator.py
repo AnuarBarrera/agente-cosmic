@@ -207,10 +207,11 @@ class ImageGenerator:
         with open(_TEMPLATE_PATH) as f:
             html = f.read()
 
+        bg_mime = 'image/png' if background_bytes[:4] == b'\x89PNG' else 'image/jpeg'
         bg_b64 = base64.b64encode(background_bytes).decode()
         primary = colors[0] if colors else '#e94560'
 
-        html = html.replace('{{bg_data_url}}', f'data:image/png;base64,{bg_b64}')
+        html = html.replace('{{bg_data_url}}', f'data:{bg_mime};base64,{bg_b64}')
         html = html.replace('{{primary_color}}', primary)
         html = html.replace('{{tag}}', _html.escape(content.get('tag', 'DESTACADO')))
         html = html.replace('{{headline}}', _html.escape(content.get('headline', '')))
