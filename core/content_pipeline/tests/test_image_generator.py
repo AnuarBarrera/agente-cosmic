@@ -225,3 +225,83 @@ class TestLayeredPipeline:
             import pytest
             with pytest.raises(Exception, match='Playwright error'):
                 gen._layered_pipeline('Caption', ['#1a1a2e'], 'profesional')
+
+
+class TestValidateBackground:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_true_when_image_ok(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"has_text": false, "is_abstract_3d": false, "has_screen_content": false, "ok": true}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._validate_background(b'fake-png')
+        assert result is True
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_false_when_has_text(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"has_text": true, "is_abstract_3d": false, "has_screen_content": false, "ok": false}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._validate_background(b'fake-png')
+        assert result is False
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_true_on_api_error(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            result = gen._validate_background(b'fake-png')
+        assert result is True  # don't block pipeline on QC error
+
+
+class TestGenerateBackgroundQC:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_retries_until_valid_image(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        bad_img = _png_bytes((200, 50, 50))
+        good_img = _png_bytes((50, 200, 50))
+        with patch.object(gen, '_generate_with_retry', side_effect=[bad_img, bad_img, good_img]), \
+             patch.object(gen, '_validate_background', side_effect=[False, False, True]):
+            result = gen._generate_background('Caption de prueba', ['#1a1a2e'], 'profesional')
+        assert result == good_img
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_last_image_when_all_retries_fail(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        img1 = _png_bytes((200, 50, 50))
+        img2 = _png_bytes((50, 50, 200))
+        img3 = _png_bytes((50, 200, 200))
+        with patch.object(gen, '_generate_with_retry', side_effect=[img1, img2, img3]), \
+             patch.object(gen, '_validate_background', return_value=False):
+            result = gen._generate_background('Caption', ['#1a1a2e'], 'profesional')
+        assert result == img3  # last attempt returned even if rejected

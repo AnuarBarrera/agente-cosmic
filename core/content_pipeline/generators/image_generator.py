@@ -57,7 +57,7 @@ class ImageGenerator:
         elif description:
             subject_hint = f"Context: {description[:80]}. "
         prompt = (
-            f"Real-world stock photograph, natural lighting, shallow depth of field, DSLR camera quality. "
+            f"Real-world stock photograph, bright natural lighting, shallow depth of field, DSLR camera quality. "
             f"Subject: {caption[:80]}. "
             f"{subject_hint}"
             f"Color palette: {color_str}. "
@@ -67,11 +67,50 @@ class ImageGenerator:
             f"NO content, NO images, NO graphics inside any screen. "
             f"NOT a CGI render. NOT a 3D illustration. NOT a digital composite. "
             f"NOT abstract shapes. NOT floating objects. NOT a portrait. "
+            f"NOT minimalist. NOT dark moody lighting. "
             f"Square 1:1 format, photorealistic. "
             f"Absolutely NO text, NO letters, NO words, NO UI elements, "
             f"NO logos, NO templates, NO social media layouts."
         )
-        return self._generate_with_retry(prompt)
+        last_bytes = None
+        for attempt in range(3):
+            last_bytes = self._generate_with_retry(prompt)
+            if self._validate_background(last_bytes):
+                return last_bytes
+            if attempt < 2:
+                logger.warning(f"Background QC failed (attempt {attempt + 1}/3), regenerating...")
+        logger.warning("Background QC: all retries exhausted, using last generated image")
+        return last_bytes
+
+    def _validate_background(self, image_bytes: bytes) -> bool:
+        """Gemini reviews the generated image for forbidden elements. Returns True if ok."""
+        try:
+            client = _vertex_client()
+            image_part = types.Part.from_bytes(data=image_bytes, mime_type='image/png')
+            prompt = (
+                "Analyze this image strictly. Reply ONLY with this JSON (no markdown):\n"
+                "{\"has_text\": <bool>, \"is_abstract_3d\": <bool>, \"has_screen_content\": <bool>, \"ok\": <bool>}\n\n"
+                "has_text: true if ANY visible letters, words or text appear in the image.\n"
+                "is_abstract_3d: true if the image has floating 3D geometric shapes, abstract CGI objects, or surreal renders.\n"
+                "has_screen_content: true if any screen/monitor shows visible content (not blank or off).\n"
+                "ok: true ONLY if has_text=false AND is_abstract_3d=false AND has_screen_content=false."
+            )
+            resp = client.models.generate_content(
+                model=settings.VERTEX_TEXT_MODEL,
+                contents=[image_part, prompt],
+            )
+            raw = resp.text.strip()
+            match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                ok = bool(data.get('ok', True))
+                if not ok:
+                    flags = [k for k in ('has_text', 'is_abstract_3d', 'has_screen_content') if data.get(k)]
+                    logger.warning(f"Background QC rejected: {', '.join(flags)}")
+                return ok
+        except Exception as e:
+            logger.warning(f"Background QC error (assuming ok): {e}")
+        return True
 
     def _extract_headline(self, caption: str) -> str:
         """Fallback headline extraction when Gemini is unavailable."""
