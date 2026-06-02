@@ -57,18 +57,19 @@ class ImageGenerator:
         elif description:
             subject_hint = f"Context: {description[:80]}. "
         prompt = (
-            f"Professional lifestyle photography, authentic editorial style. "
+            f"Real-world stock photograph, natural lighting, shallow depth of field, DSLR camera quality. "
             f"Subject: {caption[:80]}. "
             f"{subject_hint}"
-            f"Environment colors: {color_str}. "
-            f"Show a real creative workspace, business scene, professional tools in use, "
-            f"or an authentic environment related to the business — "
-            f"natural lighting, photorealistic, high production value. "
-            f"NOT abstract 3D shapes. NOT floating geometric objects. NOT minimalist empty renders. "
-            f"NOT a portrait or headshot. "
-            f"Square 1:1 format. "
+            f"Color palette: {color_str}. "
+            f"Scene: authentic professional environment, real objects, real surfaces — "
+            f"desk, materials, tools, products, plants, coffee, notebooks. "
+            f"Any screens or monitors must show a BLANK or turned-off display — "
+            f"NO content, NO images, NO graphics inside any screen. "
+            f"NOT a CGI render. NOT a 3D illustration. NOT a digital composite. "
+            f"NOT abstract shapes. NOT floating objects. NOT a portrait. "
+            f"Square 1:1 format, photorealistic. "
             f"Absolutely NO text, NO letters, NO words, NO UI elements, "
-            f"NO logos, NO design templates, NO social media template layout."
+            f"NO logos, NO templates, NO social media layouts."
         )
         return self._generate_with_retry(prompt)
 
