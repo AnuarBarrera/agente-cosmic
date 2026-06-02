@@ -195,7 +195,6 @@ class ImageGenerator:
                     time.sleep(delay)
                 else:
                     raise
-        raise last_error
 
     def _generate_with_vertex(self, prompt: str) -> bytes:
         client = _vertex_client()

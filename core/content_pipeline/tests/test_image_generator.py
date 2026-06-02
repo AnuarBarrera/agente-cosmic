@@ -143,17 +143,24 @@ class TestLayeredPipeline:
     )
     def test_pipeline_composites_when_text_asset_succeeds(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
+        import core.content_pipeline.generators.layer_composer as lc_module
         gen = ImageGenerator(bucket_name='test-bucket')
         fake_bg = _png_bytes((30, 30, 60))
         fake_text = _png_bytes((255, 0, 255))
+        fake_composite = _png_bytes((100, 100, 100))
 
         with patch.object(gen, '_generate_background', return_value=fake_bg), \
              patch.object(gen, '_generate_text_asset', return_value=fake_text), \
-             patch.object(gen, '_analyze_negative_space', return_value={'x': 0.1, 'y': 0.6, 'width': 0.8}):
+             patch.object(gen, '_analyze_negative_space', return_value={'x': 0.1, 'y': 0.6, 'width': 0.8}), \
+             patch.object(lc_module, 'composite_layers', return_value=fake_composite) as mock_composite:
             result = gen._layered_pipeline('Caption de prueba', ['#1a1a2e'], 'profesional')
 
-        assert isinstance(result, bytes)
-        assert len(result) > 0
+        mock_composite.assert_called_once()
+        call_kwargs = mock_composite.call_args
+        assert call_kwargs.kwargs['x'] == 0.1
+        assert call_kwargs.kwargs['y'] == 0.6
+        assert call_kwargs.kwargs['width'] == 0.8
+        assert result == fake_composite
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
