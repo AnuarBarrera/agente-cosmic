@@ -160,7 +160,7 @@ GOOGLE_CLOUD_PROJECT = get_env('GOOGLE_CLOUD_PROJECT', default='agente-cosmic')
 GOOGLE_CLOUD_STORAGE_BUCKET = get_env('GOOGLE_CLOUD_STORAGE_BUCKET', default='agente-cosmic-assets')
 GOOGLE_CLOUD_LOCATION = get_env('GOOGLE_CLOUD_LOCATION', default='us-central1')
 VERTEX_TEXT_MODEL = 'publishers/google/models/gemini-2.5-flash'
-VERTEX_IMAGE_MODEL = 'publishers/google/models/gemini-2.5-flash-image'
+VERTEX_IMAGE_MODEL = 'imagen-3.0-generate-001'
 VERTEX_VERTEX_MODEL = 'publishers/google/models/gemini-2.5-flash'
 # GOOGLE_APPLICATION_CREDENTIALS se inyecta vía docker-compose (volumen ADC)
 

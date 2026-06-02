@@ -224,16 +224,24 @@
     const note = document.getElementById('note-' + postId).value.trim();
     if (!note) { showToast('Escribe el feedback primero', '#f0c040'); return; }
     const btn = document.querySelector(`#regen-${postId} .btn-send-regen`);
-    btn.textContent = 'Generando...';
+    btn.textContent = '🎨 Generando imagen y caption...';
     btn.disabled = true;
     const data = await postAction(postId, { action: 'regenerate', value: note });
     btn.textContent = 'Regenerar con IA ✨';
     btn.disabled = false;
     if (data.status === 'ok') {
       document.getElementById('caption-' + postId).textContent = data.caption;
+      // Actualizar imagen si el servidor generó una nueva
+      if (data.image_url) {
+        const card = document.getElementById('card-' + postId);
+        const imgEl = card.querySelector('.post-img img');
+        const linkEl = card.querySelector('.post-img a');
+        if (imgEl) imgEl.src = data.image_url;
+        if (linkEl) linkEl.href = data.image_url;
+      }
       document.getElementById('regen-' + postId).style.display = 'none';
       setCardStatus(postId, 'change_requested', '↺ Cambio solicitado');
-      showToast('Caption regenerado ✨', '#f0c040');
+      showToast('Caption e imagen regenerados ✨', '#f0c040');
     }
   }
 

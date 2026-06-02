@@ -104,8 +104,22 @@ class ImageGenerator:
 
     def _generate_with_vertex(self, prompt: str) -> bytes:
         client = _vertex_client()
+        model = settings.VERTEX_IMAGE_MODEL
+        if 'imagen' in model:
+            resp = client.models.generate_images(
+                model=model,
+                prompt=prompt,
+                config=types.GenerateImagesConfig(
+                    number_of_images=1,
+                    aspect_ratio='1:1',
+                ),
+            )
+            if resp.generated_images:
+                return resp.generated_images[0].image.image_bytes
+            raise ValueError("No image returned by Imagen")
+        # Fallback: Gemini multimodal
         resp = client.models.generate_content(
-            model=settings.VERTEX_IMAGE_MODEL,
+            model=model,
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_modalities=['IMAGE', 'TEXT']

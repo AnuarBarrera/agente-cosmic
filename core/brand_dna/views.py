@@ -175,8 +175,31 @@ def post_action_api(request, post_id):
         post.caption = new_caption
         post.user_note = value
         post.user_status = ContentPost.USER_STATUS_CHANGE_REQUESTED
-        post.save(update_fields=['caption', 'user_note', 'user_status'])
-        return JsonResponse({'status': 'ok', 'caption': new_caption})
+
+        # Regenerar imagen con el nuevo caption
+        new_image_url = post.image_url
+        try:
+            from core.content_pipeline.generators.image_generator import ImageGenerator
+            brand_dna = post.calendar.brand_dna
+            job_id = str(brand_dna.job.id)
+            image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+            generated = image_gen.generate(
+                caption=new_caption,
+                colors=brand_dna.primary_colors,
+                tone=brand_dna.tone,
+                filename=f"{job_id}-day{post.day_number}-v{post.user_note[:8].replace(' ','')}",
+            )
+            if generated:
+                new_image_url = generated
+                post.image_url = new_image_url
+                post.save(update_fields=['caption', 'user_note', 'user_status', 'image_url'])
+            else:
+                post.save(update_fields=['caption', 'user_note', 'user_status'])
+        except Exception as img_err:
+            logger.error(f"Image regeneration error for post {post_id}: {img_err}")
+            post.save(update_fields=['caption', 'user_note', 'user_status'])
+
+        return JsonResponse({'status': 'ok', 'caption': new_caption, 'image_url': new_image_url})
 
     return JsonResponse({'error': 'Acción desconocida'}, status=400)
 
