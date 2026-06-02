@@ -272,6 +272,46 @@ class TestValidateBackground:
         assert result is True  # don't block pipeline on QC error
 
 
+class TestGeneratePostContentWithProduct:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_multimodal_call_when_product_image_provided(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_image = _png_bytes()
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"headline":"Brilla distinto","subtitle":"Plata 925 hecha a mano para ti","cta":"Cómpralo ahora","tag":"JOYERÍA"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._generate_post_content('Collar artesanal de plata', product_image_bytes=fake_image)
+        call_args = mock_vc.return_value.models.generate_content.call_args
+        contents = call_args.kwargs.get('contents') or (call_args.args[1] if len(call_args.args) > 1 else None)
+        assert isinstance(contents, list), "Multimodal call must pass contents as list [image_part, prompt]"
+        assert result['headline'] == 'Brilla distinto'
+        assert result['tag'] == 'JOYERÍA'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_text_only_call_when_no_product_image(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"headline":"Impulsa tu negocio","subtitle":"Tecnología que funciona para ti","cta":"Empieza hoy","tag":"TECNOLOGÍA"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._generate_post_content('Soluciones tecnológicas', product_image_bytes=None)
+        call_args = mock_vc.return_value.models.generate_content.call_args
+        contents = call_args.kwargs.get('contents') or (call_args.args[1] if len(call_args.args) > 1 else None)
+        assert isinstance(contents, str), "Text-only call must pass contents as string"
+        assert result['headline'] == 'Impulsa tu negocio'
+
+
 class TestGenerateBackgroundQC:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',

@@ -130,8 +130,8 @@ class ImageGenerator:
             selected.pop()
         return ' '.join(selected) or clean[:25]
 
-    def _generate_post_content(self, caption: str) -> dict:
-        """Text-only Gemini call → {headline, subtitle, cta, tag} for HTML template."""
+    def _generate_post_content(self, caption: str, product_image_bytes: bytes = None) -> dict:
+        """Gemini generates {headline, subtitle, cta, tag}. Multimodal if product_image_bytes provided."""
         _FALLBACK = {
             'headline': self._extract_headline(caption),
             'subtitle': (caption[:120] if caption else '').strip(),
@@ -140,20 +140,37 @@ class ImageGenerator:
         }
         try:
             client = _vertex_client()
-            prompt = (
-                f"Caption del post: \"{caption[:300]}\"\n\n"
-                "Genera el contenido para un post de Instagram con estos 4 elementos:\n"
-                "1. headline: 3-5 palabras. Frase gancho, memorable. Sin nombres de marca, URLs, hashtags.\n"
-                "2. subtitle: 8-15 palabras. Amplía el headline con el beneficio clave. Español correcto.\n"
-                "3. cta: 2-4 palabras. Llamada a la acción directa. (Ej: 'Empieza hoy', 'Solicita tu demo')\n"
-                "4. tag: 1-3 palabras EN MAYÚSCULAS. Categoría del sector. (Ej: 'DISEÑO WEB', 'NUTRICIÓN')\n\n"
-                "REGLAS: Español impecable. Sin inventar palabras. Sin duplicar letras.\n"
-                "Responde ÚNICAMENTE este JSON (sin markdown):\n"
-                "{\"headline\":\"...\",\"subtitle\":\"...\",\"cta\":\"...\",\"tag\":\"...\"}"
-            )
+            if product_image_bytes:
+                mime = 'image/png' if product_image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+                image_part = types.Part.from_bytes(data=product_image_bytes, mime_type=mime)
+                prompt = (
+                    f"Caption del post: \"{caption[:300]}\"\n\n"
+                    "Observa este producto en la imagen y genera el contenido para un post de Instagram:\n"
+                    "1. headline: 3-5 palabras. Frase gancho sobre este producto específico. Sin nombres de marca.\n"
+                    "2. subtitle: 8-15 palabras. Describe el atractivo o beneficio de este producto.\n"
+                    "3. cta: 2-4 palabras. Llamada a la acción. (Ej: 'Cómpralo ahora', 'Pide el tuyo')\n"
+                    "4. tag: 1-3 palabras EN MAYÚSCULAS. Categoría del producto. (Ej: 'JOYERÍA', 'MODA', 'GASTRONOMÍA')\n\n"
+                    "REGLAS: Español impecable. Sin inventar palabras.\n"
+                    "Responde ÚNICAMENTE este JSON (sin markdown):\n"
+                    "{\"headline\":\"...\",\"subtitle\":\"...\",\"cta\":\"...\",\"tag\":\"...\"}"
+                )
+                contents = [image_part, prompt]
+            else:
+                prompt = (
+                    f"Caption del post: \"{caption[:300]}\"\n\n"
+                    "Genera el contenido para un post de Instagram con estos 4 elementos:\n"
+                    "1. headline: 3-5 palabras. Frase gancho, memorable. Sin nombres de marca, URLs, hashtags.\n"
+                    "2. subtitle: 8-15 palabras. Amplía el headline con el beneficio clave. Español correcto.\n"
+                    "3. cta: 2-4 palabras. Llamada a la acción directa. (Ej: 'Empieza hoy', 'Solicita tu demo')\n"
+                    "4. tag: 1-3 palabras EN MAYÚSCULAS. Categoría del sector. (Ej: 'DISEÑO WEB', 'NUTRICIÓN')\n\n"
+                    "REGLAS: Español impecable. Sin inventar palabras. Sin duplicar letras.\n"
+                    "Responde ÚNICAMENTE este JSON (sin markdown):\n"
+                    "{\"headline\":\"...\",\"subtitle\":\"...\",\"cta\":\"...\",\"tag\":\"...\"}"
+                )
+                contents = prompt
             resp = client.models.generate_content(
                 model=settings.VERTEX_TEXT_MODEL,
-                contents=prompt,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=(
                         "Eres 'Cosmic', Director Creativo de Agente Cosmic. "
