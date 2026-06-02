@@ -81,11 +81,12 @@ class ImageGenerator:
     def _generate_background(self, caption: str, colors: list[str], tone: str) -> bytes:
         color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
         prompt = (
-            f"Professional social media post image. "
-            f"Topic: {caption[:100]}. "
-            f"Use these brand colors as dominant palette: {color_str}. "
-            f"Tone: {tone}. Square 1:1 format, high quality. "
-            f"No text, no letters, no words anywhere in the image."
+            f"Clean professional photograph or illustration. "
+            f"Subject related to: {caption[:80]}. "
+            f"Dominant colors: {color_str}. Mood: {tone}. "
+            f"Square 1:1 format, high quality. "
+            f"Absolutely NO text, NO letters, NO words, NO UI elements, "
+            f"NO logos, NO design templates, NO social media template layout."
         )
         return self._generate_with_retry(prompt)
 
