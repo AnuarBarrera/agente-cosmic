@@ -190,6 +190,8 @@ def post_action_api(request, post_id):
                 tone=brand_dna.tone,
                 filename=f"{job_id}-day{post.day_number}-regen-{int(_time.time())}",
                 brand_name=brand_dna.business_name,
+                keywords=brand_dna.keywords,
+                description=brand_dna.description,
             )
             if generated:
                 new_image_url = generated

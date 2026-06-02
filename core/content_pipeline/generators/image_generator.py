@@ -30,9 +30,9 @@ class ImageGenerator:
     def __init__(self, bucket_name: str):
         self._bucket = bucket_name
 
-    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '') -> str:  # brand_name: forward-compat, not yet used in pipeline
+    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '') -> str:
         try:
-            image_bytes = self._layered_pipeline(caption, colors, tone)
+            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description)
             return self._upload_to_storage(image_bytes, filename)
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")
@@ -42,19 +42,27 @@ class ImageGenerator:
     # Layered pipeline
     # ------------------------------------------------------------------
 
-    def _layered_pipeline(self, caption: str, colors: list[str], tone: str) -> bytes:
-        background_bytes = self._generate_background(caption, colors, tone)
+    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '') -> bytes:
+        background_bytes = self._generate_background(caption, colors, tone, keywords or [], description)
         content = self._generate_post_content(caption)
         return self._render_html_template(background_bytes, content, colors)
 
-    def _generate_background(self, caption: str, colors: list[str], tone: str) -> bytes:
+    def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '') -> bytes:
         color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
+        # Ground Imagen 3 in the client's actual business context
+        subject_hint = ''
+        kw = [k for k in (keywords or []) if k][:4]
+        if kw:
+            subject_hint = f"Show: {', '.join(kw)}. "
+        elif description:
+            subject_hint = f"Context: {description[:80]}. "
         prompt = (
             f"Clean professional photograph or stylized illustration. "
             f"Theme: {caption[:80]}. "
+            f"{subject_hint}"
             f"Dominant colors: {color_str}. Mood: {tone}. "
-            f"Focus on the product, service, environment, or concept — "
-            f"NOT a portrait or headshot. Show objects, spaces, or abstract visuals. "
+            f"Focus on real objects, products, workspaces or environments related to the business — "
+            f"NOT a portrait or headshot. NOT abstract 3D shapes or floating geometric objects. "
             f"Square 1:1 format, high quality. "
             f"Absolutely NO text, NO letters, NO words, NO UI elements, "
             f"NO logos, NO design templates, NO social media template layout."
