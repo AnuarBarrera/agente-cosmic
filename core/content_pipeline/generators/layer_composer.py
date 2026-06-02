@@ -56,8 +56,8 @@ def composite_layers(
     paste_x = int(x * bw)
     paste_y = int(y * bh)
     # Clamp so the pasted layer stays within canvas bounds
-    paste_x = min(paste_x, bw - text_layer.width)
-    paste_y = min(paste_y, bh - text_layer.height)
+    paste_x = max(0, min(paste_x, bw - text_layer.width))
+    paste_y = max(0, min(paste_y, bh - text_layer.height))
 
     result = bg.copy()
     result.paste(text_layer, (paste_x, paste_y), text_layer)
