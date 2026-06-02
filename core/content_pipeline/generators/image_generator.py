@@ -57,13 +57,16 @@ class ImageGenerator:
         elif description:
             subject_hint = f"Context: {description[:80]}. "
         prompt = (
-            f"Clean professional photograph or stylized illustration. "
-            f"Theme: {caption[:80]}. "
+            f"Professional lifestyle photography, authentic editorial style. "
+            f"Subject: {caption[:80]}. "
             f"{subject_hint}"
-            f"Dominant colors: {color_str}. Mood: {tone}. "
-            f"Focus on real objects, products, workspaces or environments related to the business — "
-            f"NOT a portrait or headshot. NOT abstract 3D shapes or floating geometric objects. "
-            f"Square 1:1 format, high quality. "
+            f"Environment colors: {color_str}. "
+            f"Show a real creative workspace, business scene, professional tools in use, "
+            f"or an authentic environment related to the business — "
+            f"natural lighting, photorealistic, high production value. "
+            f"NOT abstract 3D shapes. NOT floating geometric objects. NOT minimalist empty renders. "
+            f"NOT a portrait or headshot. "
+            f"Square 1:1 format. "
             f"Absolutely NO text, NO letters, NO words, NO UI elements, "
             f"NO logos, NO design templates, NO social media template layout."
         )
