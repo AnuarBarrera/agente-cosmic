@@ -65,10 +65,13 @@ class TestCompositeLayers:
         out = Image.open(io.BytesIO(result))
         assert out.size == (128, 128)
 
-    def test_composite_clamps_x_y_within_image(self):
+    def test_composite_with_out_of_bounds_coords(self):
         from core.content_pipeline.generators.layer_composer import composite_layers
         bg_bytes = _solid_image_bytes((30, 30, 60), size=(128, 128))
         text_bytes = _magenta_with_white_center(size=64)
-        # Should not raise even with x=0.95 (text asset goes off edge)
+        # Should not raise even when coords push asset towards the edge
         result = composite_layers(bg_bytes, text_bytes, x=0.95, y=0.95, width=0.8)
+        # Output must still be a valid full-size image
+        out = Image.open(io.BytesIO(result))
+        assert out.size == (128, 128)
         assert len(result) > 0

@@ -22,7 +22,7 @@ def remove_chroma_key(
         + (arr[:, :, 2] - kb) ** 2
     )
     arr[:, :, 3] = np.where(dist < tolerance, 0, arr[:, :, 3])
-    return Image.fromarray(arr.astype(np.uint8), 'RGBA')
+    return Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), 'RGBA')
 
 
 def composite_layers(
@@ -37,6 +37,7 @@ def composite_layers(
 
     x, y, width are in [0, 1] relative to background dimensions.
     Returns PNG bytes.
+    Output is always RGB (alpha flattened).
     """
     bg = Image.open(io.BytesIO(background_bytes)).convert('RGBA')
     bw, bh = bg.size
@@ -54,6 +55,9 @@ def composite_layers(
 
     paste_x = int(x * bw)
     paste_y = int(y * bh)
+    # Clamp so the pasted layer stays within canvas bounds
+    paste_x = min(paste_x, bw - text_layer.width)
+    paste_y = min(paste_y, bh - text_layer.height)
 
     result = bg.copy()
     result.paste(text_layer, (paste_x, paste_y), text_layer)
