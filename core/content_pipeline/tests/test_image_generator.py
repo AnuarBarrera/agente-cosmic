@@ -311,6 +311,30 @@ class TestGeneratePostContentWithProduct:
         assert isinstance(contents, str), "Text-only call must pass contents as string"
         assert result['headline'] == 'Impulsa tu negocio'
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_brand_context_included_in_multimodal_prompt(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_image = _png_bytes()
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"headline":"Tu marca brilla","subtitle":"Identidad que vende","cta":"Hablemos","tag":"BRANDING"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            gen._generate_post_content(
+                'Post sobre branding',
+                product_image_bytes=fake_image,
+                brand_context='Agencia de branding. Tono: profesional.',
+            )
+        call_args = mock_vc.return_value.models.generate_content.call_args
+        contents = call_args.kwargs.get('contents') or (call_args.args[1] if len(call_args.args) > 1 else None)
+        assert isinstance(contents, list)
+        prompt_text = contents[1]  # second element is the text prompt
+        assert 'Agencia de branding' in prompt_text, "brand_context must appear in the multimodal prompt"
+
 
 class TestGenerateBackgroundQC:
     @override_settings(
@@ -367,7 +391,10 @@ class TestLayeredPipelineWithProduct:
             result = gen._layered_pipeline('Collar artesanal', ['#c0c0c0'], 'elegante', product_image_bytes=product_img)
 
         mock_bg.assert_not_called()
-        mock_content.assert_called_once_with('Collar artesanal', product_image_bytes=product_img)
+        mock_content.assert_called_once()
+        call_kwargs = mock_content.call_args.kwargs
+        assert call_kwargs['product_image_bytes'] == product_img
+        assert 'brand_context' in call_kwargs and len(call_kwargs['brand_context']) > 0
         mock_render.assert_called_once_with(product_img, fake_content, ['#c0c0c0'])
         assert result == fake_shot
 

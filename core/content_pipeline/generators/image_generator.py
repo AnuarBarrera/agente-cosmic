@@ -45,7 +45,9 @@ class ImageGenerator:
     def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', product_image_bytes: bytes = None) -> bytes:
         if product_image_bytes:
             background_bytes = product_image_bytes
-            content = self._generate_post_content(caption, product_image_bytes=product_image_bytes)
+            kw_str = ', '.join((keywords or [])[:3])
+            brand_context = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
+            content = self._generate_post_content(caption, product_image_bytes=product_image_bytes, brand_context=brand_context)
         else:
             background_bytes = self._generate_background(caption, colors, tone, keywords or [], description)
             content = self._generate_post_content(caption, product_image_bytes=None)
@@ -134,7 +136,7 @@ class ImageGenerator:
             selected.pop()
         return ' '.join(selected) or clean[:25]
 
-    def _generate_post_content(self, caption: str, product_image_bytes: bytes = None) -> dict:
+    def _generate_post_content(self, caption: str, product_image_bytes: bytes = None, brand_context: str = '') -> dict:
         """Gemini generates {headline, subtitle, cta, tag}. Multimodal if product_image_bytes provided."""
         _FALLBACK = {
             'headline': self._extract_headline(caption),
@@ -148,12 +150,18 @@ class ImageGenerator:
                 mime = 'image/png' if product_image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
                 image_part = types.Part.from_bytes(data=product_image_bytes, mime_type=mime)
                 prompt = (
-                    f"Caption del post: \"{caption[:300]}\"\n\n"
-                    "Observa este producto en la imagen y genera el contenido para un post de Instagram:\n"
-                    "1. headline: 3-5 palabras. Frase gancho sobre este producto específico. Sin nombres de marca.\n"
-                    "2. subtitle: 8-15 palabras. Describe el atractivo o beneficio de este producto.\n"
-                    "3. cta: 2-4 palabras. Llamada a la acción. (Ej: 'Cómpralo ahora', 'Pide el tuyo')\n"
-                    "4. tag: 1-3 palabras EN MAYÚSCULAS. Categoría del producto. (Ej: 'JOYERÍA', 'MODA', 'GASTRONOMÍA')\n\n"
+                    f"ADN de marca: {brand_context}\n"
+                    f"Caption del post (refleja la propuesta de la marca): \"{caption[:200]}\"\n\n"
+                    "Hay una imagen adjunta que se usará como FONDO VISUAL del post.\n"
+                    "Tu tarea: genera copy que comunique la propuesta de valor DE LA MARCA,\n"
+                    "usando la imagen como contexto o punto de conexión — NO como tema principal.\n"
+                    "Si la imagen conecta naturalmente con la marca, úsala. Si no, el copy habla de la marca\n"
+                    "y el visual simplemente acompaña.\n\n"
+                    "Genera 4 elementos:\n"
+                    "1. headline: 3-5 palabras. Frase gancho que represente la marca. Sin nombres de marca.\n"
+                    "2. subtitle: 8-15 palabras. Beneficio clave o propuesta de valor de la marca.\n"
+                    "3. cta: 2-4 palabras. Llamada a la acción acorde a la marca.\n"
+                    "4. tag: 1-3 palabras EN MAYÚSCULAS. Sector o categoría de la marca.\n\n"
                     "REGLAS: Español impecable. Sin inventar palabras.\n"
                     "Responde ÚNICAMENTE este JSON (sin markdown):\n"
                     "{\"headline\":\"...\",\"subtitle\":\"...\",\"cta\":\"...\",\"tag\":\"...\"}"
