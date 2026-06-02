@@ -82,13 +82,15 @@ class TestOverlayText:
 # ---- New tests ----
 
 class TestExtractHeadline:
-    def test_returns_first_five_meaningful_words(self):
+    def test_returns_words_without_trailing_connectors(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         headline = gen._extract_headline(
             "Descubre el sabor auténtico de nuestra panadería artesanal #panaderia #food"
         )
-        assert headline == "Descubre el sabor auténtico de"
+        # Trailing connector "de" is stripped — result is a grammatically clean phrase
+        assert headline == "Descubre el sabor auténtico"
+        assert not headline.endswith(' de')
 
     def test_skips_hashtags(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
@@ -132,7 +134,7 @@ class TestGenerateTextAsset:
         assert result is None
 
 
-class TestAnalyzeNegativeSpace:
+class TestAnalyzeBackground:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
         GOOGLE_CLOUD_LOCATION='us-central1',
@@ -143,9 +145,10 @@ class TestAnalyzeNegativeSpace:
         gen = ImageGenerator(bucket_name='test-bucket')
         with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
-            result = gen._analyze_negative_space(b'fake')
-        assert 'x' in result and 'y' in result and 'width' in result
+            result = gen._analyze_background(b'fake', 'Tu negocio necesita una web')
+        assert 'x' in result and 'y' in result and 'width' in result and 'headline' in result
         assert 0.0 <= result['x'] <= 1.0
+        assert len(result['headline']) > 0
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
@@ -157,10 +160,12 @@ class TestAnalyzeNegativeSpace:
         gen = ImageGenerator(bucket_name='test-bucket')
         with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
             mock_resp = MagicMock()
-            mock_resp.text = '{"x": 0.1, "y": 0.65, "width": 0.8}'
+            mock_resp.text = '{"x": 0.05, "y": 0.62, "width": 0.9, "headline": "Tu Web En 48h"}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
-            result = gen._analyze_negative_space(b'fake')
-        assert result == {'x': 0.1, 'y': 0.65, 'width': 0.8}
+            result = gen._analyze_background(b'fake', 'Tu negocio necesita una web YA')
+        assert result['x'] == 0.05
+        assert result['y'] == 0.62
+        assert result['headline'] == 'Tu Web En 48h'
 
 
 class TestLayeredPipeline:
@@ -181,7 +186,7 @@ class TestLayeredPipeline:
 
         with patch.object(gen, '_generate_background', return_value=fake_bg), \
              patch.object(gen, '_generate_text_asset', return_value=fake_text), \
-             patch.object(gen, '_analyze_negative_space', return_value={'x': 0.1, 'y': 0.6, 'width': 0.8}), \
+             patch.object(gen, '_analyze_background', return_value={'x': 0.1, 'y': 0.6, 'width': 0.8, 'headline': 'Caption de prueba'}), \
              patch.object(lc_module, 'composite_layers', return_value=fake_composite) as mock_composite:
             result = gen._layered_pipeline('Caption de prueba', ['#1a1a2e'], 'profesional')
 
@@ -206,7 +211,7 @@ class TestLayeredPipeline:
 
         with patch.object(gen, '_generate_background', return_value=fake_bg), \
              patch.object(gen, '_generate_text_asset', return_value=None), \
-             patch.object(gen, '_analyze_negative_space', return_value={'x': 0.1, 'y': 0.6, 'width': 0.8}):
+             patch.object(gen, '_analyze_background', return_value={'x': 0.1, 'y': 0.6, 'width': 0.8, 'headline': 'Caption de prueba'}):
             result = gen._layered_pipeline('Caption', ['#1a1a2e'], 'profesional')
 
         assert result == fake_bg

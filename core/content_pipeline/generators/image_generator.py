@@ -26,6 +26,16 @@ def _vertex_client():
     )
 
 
+def _darken_color(hex_color: str) -> tuple:
+    """Convert #RRGGBB to a darkened (R, G, B) suitable as text backing."""
+    h = hex_color.lstrip('#')
+    try:
+        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+        return (max(10, r // 3), max(10, g // 3), max(10, b // 3))
+    except (ValueError, IndexError):
+        return (15, 15, 40)
+
+
 class ImageGenerator:
     def __init__(self, bucket_name: str):
         self._bucket = bucket_name
@@ -47,10 +57,11 @@ class ImageGenerator:
 
         background_bytes = self._generate_background(caption, colors, tone)
 
-        headline = self._extract_headline(caption)
-        text_asset_bytes = self._generate_text_asset(headline, colors)
+        # Combined Gemini call: placement coords + AI-crafted headline
+        analysis = self._analyze_background(background_bytes, caption)
+        headline = analysis['headline']
 
-        placement = self._analyze_negative_space(background_bytes)
+        text_asset_bytes = self._generate_text_asset(headline, colors)
 
         rotation = random.uniform(-5.0, 5.0) if random.random() < 0.4 else 0.0
 
@@ -58,36 +69,88 @@ class ImageGenerator:
             return composite_layers(
                 background_bytes=background_bytes,
                 text_asset_bytes=text_asset_bytes,
-                x=placement['x'],
-                y=placement['y'],
-                width=placement['width'],
+                x=analysis['x'],
+                y=analysis['y'],
+                width=analysis['width'],
                 rotation_deg=rotation,
             )
 
-        logger.warning("Text asset failed all retries — returning background only")
+        logger.warning("Text asset failed — returning background only")
         return background_bytes
 
     def _generate_background(self, caption: str, colors: list[str], tone: str) -> bytes:
         color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
         prompt = (
-            f"Minimalist abstract background for social media. "
-            f"Visual concept: {caption[:80]}. "
-            f"Brand colors: {color_str}. Style: {tone}. "
-            f"CRITICAL: absolutely no text, no words, no letters, no numbers anywhere. "
-            f"Leave a significant area of flat or low-complexity negative space for text overlay. "
-            f"Square format 1:1, professional, high quality."
+            f"Professional social media post image. "
+            f"Topic: {caption[:100]}. "
+            f"Use these brand colors as dominant palette: {color_str}. "
+            f"Tone: {tone}. Square 1:1 format, high quality. "
+            f"No text, no letters, no words anywhere in the image."
         )
         return self._generate_with_retry(prompt)
 
     def _extract_headline(self, caption: str) -> str:
-        words = [w for w in caption.split() if not w.startswith('#')]
-        return ' '.join(words[:5]) or caption[:30]
+        """Fallback headline extraction when Gemini is unavailable."""
+        clean = ' '.join(w for w in caption.split() if not w.startswith('#'))
+        # Take first complete sentence if short enough
+        sentences = re.split(r'(?<=[.!?])\s+', clean)
+        first = sentences[0].strip() if sentences else clean
+        words = first.split()
+        if len(words) <= 5:
+            return first or caption[:30]
+        # Long sentence: take 4 words, drop trailing connectors
+        _CONNECTORS = {'de', 'que', 'la', 'el', 'los', 'las', 'un', 'una', 'y',
+                       'o', 'pero', 'con', 'por', 'para', 'sin', 'su', 'lo', 'al',
+                       'del', 'se', 'en', 'a', 'es', 'no', 'si', 'le', 'tu', 'te'}
+        selected = words[:4]
+        while selected and selected[-1].lower().strip('¡¿.,!?') in _CONNECTORS:
+            selected.pop()
+        return ' '.join(selected) or clean[:25]
+
+    def _analyze_background(self, background_bytes: bytes, caption: str) -> dict:
+        """Ask Gemini for text placement coords AND a punchy 3-5 word headline."""
+        _FALLBACK = {
+            'x': 0.05, 'y': 0.62, 'width': 0.9,
+            'headline': self._extract_headline(caption),
+        }
+        try:
+            client = _vertex_client()
+            image_part = types.Part.from_bytes(data=background_bytes, mime_type='image/png')
+            prompt = (
+                f"Caption: \"{caption[:200]}\"\n\n"
+                "1. Find the best spot in this image for a text bar overlay "
+                "(prefer lower third, flat or darker areas, avoid faces/focal points).\n"
+                "2. Write a SHORT punchy headline (3-5 words) that captures the key message "
+                "of the caption — must be grammatically complete, no mid-sentence cuts.\n\n"
+                "Reply with ONLY this JSON (no markdown):\n"
+                "{\"x\": <left 0.0-1.0>, \"y\": <top 0.0-1.0>, "
+                "\"width\": <0.6-0.95>, \"headline\": \"<3-5 words>\"}"
+            )
+            resp = client.models.generate_content(
+                model=settings.VERTEX_TEXT_MODEL,
+                contents=[image_part, prompt],
+            )
+            raw = resp.text.strip()
+            match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                headline = str(data.get('headline', '')).strip()
+                return {
+                    'x': max(0.0, min(0.9, float(data.get('x', 0.05)))),
+                    'y': max(0.0, min(0.85, float(data.get('y', 0.62)))),
+                    'width': max(0.6, min(0.95, float(data.get('width', 0.9)))),
+                    'headline': headline if headline else self._extract_headline(caption),
+                }
+        except Exception as e:
+            logger.warning(f"Background analysis failed, using fallback: {e}")
+        return _FALLBACK
 
     def _generate_text_asset(self, headline: str, colors: list[str], max_retries: int = 2) -> bytes | None:
-        """Render headline on exact magenta #FF00FF using PIL.
+        """Render headline on exact magenta #FF00FF using PIL with dark backing rectangle.
 
         PIL guarantees exact (255,0,255) so remove_chroma_key works perfectly.
-        max_retries kept for caller compatibility but unused (no API call).
+        The dark backing rectangle survives chroma key and ensures text legibility.
+        max_retries kept for caller compatibility (no API call needed).
         """
         try:
             W, H = 1024, 512
@@ -96,24 +159,23 @@ class ImageGenerator:
             padding = 60
             max_w = W - 2 * padding
 
-            # Find font size where text fits in 1 or 2 lines
+            dummy_img = Image.new('RGB', (1, 1))
+            dummy_draw = ImageDraw.Draw(dummy_img)
+
+            # Find font size: try single line, then 2-line split
             font = None
             lines = [text]
             chosen_size = 80
-            dummy_img = Image.new('RGB', (1, 1))
-            dummy_draw = ImageDraw.Draw(dummy_img)
 
             for size in range(110, 39, -10):
                 try:
                     f = ImageFont.truetype(_DEJAVU, size=size)
                 except (OSError, IOError):
                     f = ImageFont.load_default(size=size)
-                # Try single line
                 single_w = dummy_draw.textbbox((0, 0), text, font=f)[2]
                 if single_w <= max_w:
                     font, lines, chosen_size = f, [text], size
                     break
-                # Try 2-line split at word midpoint
                 words = text.split()
                 mid = max(1, len(words) // 2)
                 l1, l2 = ' '.join(words[:mid]), ' '.join(words[mid:])
@@ -132,22 +194,30 @@ class ImageGenerator:
                 lines = [text[:28]]
                 chosen_size = 40
 
-            img = Image.new('RGB', (W, H), (255, 0, 255))
+            img = Image.new('RGB', (W, H), (255, 0, 255))  # magenta — removed by chroma key
             draw = ImageDraw.Draw(img)
 
             line_spacing = 18
             bboxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
             total_h = sum(b[3] - b[1] for b in bboxes) + line_spacing * (len(lines) - 1)
-            y = (H - total_h) // 2
-            shadow_off = max(3, chosen_size // 28)
+            y_start = (H - total_h) // 2
 
+            # Dark backing rectangle — NOT magenta so it survives chroma key
+            backing = _darken_color(colors[0]) if colors else (15, 15, 40)
+            rect_pad_x, rect_pad_y = padding - 30, 24
+            draw.rectangle(
+                [rect_pad_x, y_start - rect_pad_y,
+                 W - rect_pad_x, y_start + total_h + rect_pad_y],
+                fill=backing,
+            )
+
+            y = y_start
+            shadow_off = max(2, chosen_size // 30)
             for line, bb in zip(lines, bboxes):
                 lw = bb[2] - bb[0]
                 lh = bb[3] - bb[1]
                 x = (W - lw) // 2
-                # Dark shadow for depth
-                draw.text((x + shadow_off, y + shadow_off), line, font=font, fill=(20, 20, 20))
-                # White text
+                draw.text((x + shadow_off, y + shadow_off), line, font=font, fill=(0, 0, 0))
                 draw.text((x, y), line, font=font, fill=(255, 255, 255))
                 y += lh + line_spacing
 
@@ -157,34 +227,6 @@ class ImageGenerator:
         except Exception as e:
             logger.error(f"PIL text asset generation failed: {e}")
             return None
-
-    def _analyze_negative_space(self, background_bytes: bytes) -> dict:
-        _FALLBACK = {'x': 0.1, 'y': 0.6, 'width': 0.8}
-        try:
-            client = _vertex_client()
-            image_part = types.Part.from_bytes(data=background_bytes, mime_type='image/png')
-            prompt = (
-                "Analyze this image and find the best rectangular area for a text overlay. "
-                "The area should have low visual complexity (flat color, negative space, or blur). "
-                "Return ONLY a JSON object — no explanation, no markdown: "
-                '{"x": <left edge 0.0-1.0>, "y": <top edge 0.0-1.0>, "width": <width 0.4-0.9>}'
-            )
-            resp = client.models.generate_content(
-                model=settings.VERTEX_TEXT_MODEL,
-                contents=[image_part, prompt],
-            )
-            raw = resp.text.strip()
-            match = re.search(r'\{[^}]+\}', raw)
-            if match:
-                data = json.loads(match.group())
-                return {
-                    'x': max(0.0, min(0.9, float(data.get('x', 0.1)))),
-                    'y': max(0.0, min(0.85, float(data.get('y', 0.6)))),
-                    'width': max(0.4, min(0.95, float(data.get('width', 0.8)))),
-                }
-        except Exception as e:
-            logger.warning(f"Negative space analysis failed, using fallback: {e}")
-        return _FALLBACK
 
     # ------------------------------------------------------------------
     # Low-level helpers (kept for fallback/legacy use)
