@@ -24,12 +24,20 @@ def can_create_calendar(user) -> tuple[bool, int]:
 
 
 def can_regenerate(post, user) -> tuple[bool, int]:
+    """Límite de regeneraciones por calendario completo (suma de todos los posts)."""
+    from django.db.models import Sum
     plan = get_user_plan(user)
-    remaining = max(0, plan.max_post_regenerations - post.regen_count)
+    calendar = post.calendar
+    total_used = calendar.posts.aggregate(total=Sum('regen_count'))['total'] or 0
+    remaining = max(0, plan.max_post_regenerations - total_used)
     return remaining > 0, remaining
 
 
 def can_edit(post, user) -> tuple[bool, int]:
+    """Límite de ediciones por calendario completo (suma de todos los posts)."""
+    from django.db.models import Sum
     plan = get_user_plan(user)
-    remaining = max(0, plan.max_post_edits - post.edit_count)
+    calendar = post.calendar
+    total_used = calendar.posts.aggregate(total=Sum('edit_count'))['total'] or 0
+    remaining = max(0, plan.max_post_edits - total_used)
     return remaining > 0, remaining

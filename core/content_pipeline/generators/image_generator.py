@@ -233,9 +233,13 @@ class ImageGenerator:
             prompt = (
                 "Analyze this image strictly. Reply ONLY with this JSON (no markdown):\n"
                 "{\"has_text\": <bool>, \"is_abstract_3d\": <bool>, \"has_screen_content\": <bool>, \"ok\": <bool>}\n\n"
-                "has_text: true if ANY visible letters, words or text appear in the image.\n"
+                "has_text: true if ANY readable letters, words, numbers or text appear ANYWHERE in the image — "
+                "including text on signs, labels, books, packaging, walls, or any surface. "
+                "Even partial words or blurry text count. Be very strict.\n"
                 "is_abstract_3d: true if the image has floating 3D geometric shapes, abstract CGI objects, or surreal renders.\n"
-                "has_screen_content: true if any screen/monitor shows visible content (not blank or off).\n"
+                "has_screen_content: true if any computer monitor, laptop screen, phone screen, TV, or digital display "
+                "shows visible content — including websites, text, images, graphics, UI elements, or any non-blank content. "
+                "A screen must be completely BLACK or clearly turned off to not count. Be very strict.\n"
                 "ok: true ONLY if has_text=false AND is_abstract_3d=false AND has_screen_content=false."
             )
             resp = client.models.generate_content(

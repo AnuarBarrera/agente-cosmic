@@ -117,6 +117,12 @@
     <div class="legend-item"><div class="dot dot-change"></div> Cambio solicitado</div>
   </div>
 
+  <div id="calendar-limits" style="display:flex;gap:24px;align-items:center;padding:10px 16px;background:#1a1a2e;border-radius:8px;margin-bottom:16px;font-size:0.82rem;color:#aaa;">
+    <span>Límites del calendario:</span>
+    <span id="regens-counter">🔄 Cambios usados: <strong id="regens-used">{{ total_regens }}</strong> / {{ max_regenerations }}</span>
+    <span id="edits-counter">✏ Ediciones usadas: <strong id="edits-used">{{ total_edits }}</strong> / {{ max_edits }}</span>
+  </div>
+
   <div class="posts-grid">
     {% for post in posts %}
     <div class="post-card {{ post.user_status }}" id="card-{{ post.id }}">
@@ -149,9 +155,6 @@
           <button class="btn-action btn-edit" onclick="startEdit('{{ post.id }}')">✏ Editar</button>
           <button class="btn-action btn-regen" onclick="toggleRegen('{{ post.id }}')">↺ Cambio</button>
           <button class="btn-action btn-save" id="save-{{ post.id }}" onclick="saveEdit('{{ post.id }}')">Guardar</button>
-          <span style="font-size:11px;color:#888;margin-left:4px;" id="limits-{{ post.id }}">
-            Edits: {{ post.edit_count }}/{{ max_edits }} · Regens: {{ post.regen_count }}/{{ max_regenerations }}
-          </span>
         </div>
         <div class="feedback-area" id="regen-{{ post.id }}">
           <textarea id="note-{{ post.id }}" placeholder="Describe el cambio que quieres..."></textarea>
@@ -230,6 +233,10 @@
       document.getElementById('save-' + postId).style.display = 'none';
       setCardStatus(postId, 'edited', '✏ Editado');
       showToast('Caption guardado ✏');
+      if (data.remaining_edits !== undefined) {
+        const maxEdits = parseInt(document.getElementById('edits-used').parentElement.textContent.match(/\/ (\d+)/)[1]);
+        document.getElementById('edits-used').textContent = maxEdits - data.remaining_edits;
+      }
     }
   }
 
@@ -271,6 +278,10 @@
       document.getElementById('regen-' + postId).style.display = 'none';
       setCardStatus(postId, 'change_requested', '↺ Cambio solicitado');
       showToast('Caption e imagen regenerados ✨', '#f0c040');
+      if (data.remaining_regens !== undefined) {
+        const maxRegens = parseInt(document.getElementById('regens-used').parentElement.textContent.match(/\/ (\d+)/)[1]);
+        document.getElementById('regens-used').textContent = maxRegens - data.remaining_regens;
+      }
     }
   }
 

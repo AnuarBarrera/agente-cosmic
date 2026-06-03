@@ -67,6 +67,11 @@ class TestCanCreateCalendar(TestCase):
 
 
 class TestCanRegenerate(TestCase):
+    def _make_post(self, total_regens):
+        post = MagicMock()
+        post.calendar.posts.aggregate.return_value = {'total': total_regens}
+        return post
+
     def test_allowed_when_under_limit(self):
         from core.brand_dna.rate_limits import can_regenerate
         from core.tenant_management.models import Plan
@@ -77,8 +82,7 @@ class TestCanRegenerate(TestCase):
         )
         user = MagicMock()
         user.tenant = None
-        post = MagicMock()
-        post.regen_count = 1
+        post = self._make_post(total_regens=1)
         allowed, remaining = can_regenerate(post, user)
         assert allowed is True
         assert remaining == 1
@@ -93,14 +97,18 @@ class TestCanRegenerate(TestCase):
         )
         user = MagicMock()
         user.tenant = None
-        post = MagicMock()
-        post.regen_count = 2
+        post = self._make_post(total_regens=2)
         allowed, remaining = can_regenerate(post, user)
         assert allowed is False
         assert remaining == 0
 
 
 class TestCanEdit(TestCase):
+    def _make_post(self, total_edits):
+        post = MagicMock()
+        post.calendar.posts.aggregate.return_value = {'total': total_edits}
+        return post
+
     def test_allowed_when_under_limit(self):
         from core.brand_dna.rate_limits import can_edit
         from core.tenant_management.models import Plan
@@ -111,8 +119,7 @@ class TestCanEdit(TestCase):
         )
         user = MagicMock()
         user.tenant = None
-        post = MagicMock()
-        post.edit_count = 0
+        post = self._make_post(total_edits=0)
         allowed, remaining = can_edit(post, user)
         assert allowed is True
         assert remaining == 2
@@ -127,8 +134,7 @@ class TestCanEdit(TestCase):
         )
         user = MagicMock()
         user.tenant = None
-        post = MagicMock()
-        post.edit_count = 2
+        post = self._make_post(total_edits=2)
         allowed, remaining = can_edit(post, user)
         assert allowed is False
         assert remaining == 0

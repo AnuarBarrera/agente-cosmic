@@ -46,6 +46,7 @@ class AnalysisJob(models.Model):
         related_name='analysis_jobs',
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'brand_dna_analysis_job'

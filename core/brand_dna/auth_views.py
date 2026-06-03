@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import secrets
 import logging
 from django.conf import settings
@@ -15,6 +17,15 @@ _GOOGLE_SCOPES = [
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/userinfo.profile',
 ]
+
+def _pkce_pair():
+    """Genera code_verifier y code_challenge (S256) para PKCE."""
+    verifier = secrets.token_urlsafe(32)
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()
+    ).rstrip(b'=').decode()
+    return verifier, challenge
+
 
 _GOOGLE_CLIENT_CONFIG = lambda: {
     'web': {
@@ -82,7 +93,9 @@ def google_login_view(request):
     from google_auth_oauthlib.flow import Flow
 
     state = secrets.token_urlsafe(32)
+    code_verifier, code_challenge = _pkce_pair()
     request.session['google_oauth_state'] = state
+    request.session['google_oauth_code_verifier'] = code_verifier
 
     flow = Flow.from_client_config(_GOOGLE_CLIENT_CONFIG(), scopes=_GOOGLE_SCOPES)
     flow.redirect_uri = settings.GOOGLE_OAUTH_REDIRECT_URI
@@ -91,6 +104,8 @@ def google_login_view(request):
         state=state,
         access_type='online',
         prompt='select_account',
+        code_challenge=code_challenge,
+        code_challenge_method='S256',
     )
     return redirect(auth_url)
 
@@ -110,13 +125,15 @@ def google_callback_view(request):
     if not code:
         return redirect('login')
 
+    code_verifier = request.session.pop('google_oauth_code_verifier', None)
+
     try:
         flow = Flow.from_client_config(
             _GOOGLE_CLIENT_CONFIG(), scopes=_GOOGLE_SCOPES, state=state
         )
         flow.redirect_uri = settings.GOOGLE_OAUTH_REDIRECT_URI
-        # Usar code= directamente para evitar problemas con detección de esquema HTTP/HTTPS
-        flow.fetch_token(code=code)
+        # Incluye code_verifier para completar el handshake PKCE
+        flow.fetch_token(code=code, code_verifier=code_verifier)
         credentials = flow.credentials
 
         id_info = id_token.verify_oauth2_token(
@@ -150,7 +167,7 @@ def google_callback_view(request):
 def dashboard_view(request):
     jobs = (
         AnalysisJob.objects
-        .filter(user=request.user)
+        .filter(user=request.user, deleted_at__isnull=True)
         .select_related('brand_dna')
         .order_by('-created_at')[:20]
     )
