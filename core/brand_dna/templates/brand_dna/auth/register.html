@@ -35,6 +35,20 @@
   <div class="subtitle">Crea tu cuenta gratis</div>
 
   <div class="card">
+    {% if registration_closed %}
+    <div style="text-align:center;padding:16px 0;">
+      <div style="font-size:2rem;margin-bottom:12px;">🚀</div>
+      <div style="font-weight:600;font-size:1rem;margin-bottom:8px;">Estamos en fase beta</div>
+      <div style="color:#aaa;font-size:0.9rem;line-height:1.5;">
+        Por el momento el acceso está limitado a usuarios invitados.<br>
+        Si tienes una invitación, escríbenos a <a href="mailto:contacto.neia@gmail.com" style="color:#e94560;">contacto.neia@gmail.com</a>
+      </div>
+      <div class="footer-link" style="margin-top:20px;">
+        ¿Ya tienes cuenta? <a href="{% url 'login' %}">Iniciar sesión</a>
+      </div>
+    </div>
+    {% else %}
+
     {% if form.non_field_errors %}
     <div class="error-box">{{ form.non_field_errors|join:', ' }}</div>
     {% endif %}
@@ -90,6 +104,7 @@
     <div class="footer-link">
       ¿Ya tienes cuenta? <a href="{% url 'login' %}">Iniciar sesión</a>
     </div>
+    {% endif %}
   </div>
 </body>
 </html>

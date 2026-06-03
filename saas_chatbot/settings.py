@@ -441,6 +441,9 @@ SESSION_TIMEOUT_SECONDS = 3600  # 1 hour
 SESSION_INACTIVITY_TIMEOUT = 1800  # 30 minutes
 
 # Request size limits and timeouts (Security Settings)
+# Beta access limit — remove once out of testing phase
+MAX_REGISTERED_USERS = int(os.getenv('MAX_REGISTERED_USERS', '30'))
+
 MAX_REQUEST_SIZE = 10 * 1024 * 1024     # 10MB maximum request size
 MAX_JSON_SIZE = 5 * 1024 * 1024         # 5MB maximum JSON payload
 MAX_FILE_SIZE = 50 * 1024 * 1024        # 50MB maximum file upload

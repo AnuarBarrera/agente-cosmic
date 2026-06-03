@@ -38,16 +38,32 @@ _GOOGLE_CLIENT_CONFIG = lambda: {
 }
 
 
+def _is_registration_open():
+    from django.conf import settings as s
+    limit = getattr(s, 'MAX_REGISTERED_USERS', 30)
+    return User.objects.count() < limit
+
+
 def register_view(request):
     if request.user.is_authenticated:
         return redirect('dashboard')
 
+    if not _is_registration_open():
+        return render(request, 'brand_dna/auth/register.html', {
+            'form': None,
+            'registration_closed': True,
+        })
+
     if request.method == 'POST':
         form = RegisterForm(request.POST)
         if form.is_valid():
+            if not _is_registration_open():
+                return render(request, 'brand_dna/auth/register.html', {
+                    'form': None,
+                    'registration_closed': True,
+                })
             email = form.cleaned_data['email']
             password = form.cleaned_data['password1']
-            # set_password() inside create_user() uses PBKDF2-SHA256 + random salt
             user = User.objects.create_user(
                 email=email,
                 password=password,
@@ -151,6 +167,11 @@ def google_callback_view(request):
         return redirect('login')
 
     # Buscar o crear usuario — contraseña no utilizable para cuentas OAuth
+    existing = User.objects.filter(email=email).first()
+    if existing is None and not _is_registration_open():
+        logger.warning(f'Google OAuth: registro bloqueado — límite de usuarios alcanzado ({email})')
+        return redirect('login')
+
     user, created = User.objects.get_or_create(
         email=email,
         defaults={'username': email, 'display_name': name},
