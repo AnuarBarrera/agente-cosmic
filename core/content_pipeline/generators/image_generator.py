@@ -47,28 +47,31 @@ class ImageGenerator:
         if product_image_bytes:
             kw_str = ', '.join((keywords or [])[:3])
             brand_context = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
-            background_bytes = self._replace_product_background(product_image_bytes, caption, colors, tone)
+            background_bytes = self._generate_product_scene(product_image_bytes, caption, colors, tone)
             content = self._generate_post_content(caption, product_image_bytes=product_image_bytes, brand_context=brand_context)
         else:
             background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, max_qc_retries=max_qc_retries)
             content = self._generate_post_content(caption, product_image_bytes=None)
         return self._render_html_template(background_bytes, content, colors)
 
-    def _replace_product_background(self, product_image_bytes: bytes, caption: str, colors: list[str], tone: str) -> bytes:
-        """Imagen 3 inpainting: detecta el producto automáticamente y reemplaza el fondo con escena publicitaria.
-        Usa MASK_MODE_BACKGROUND para que Imagen 3 genere la máscara — sin rembg ni procesamiento manual.
+    def _generate_product_scene(self, product_image_bytes: bytes, caption: str, colors: list[str], tone: str) -> bytes:
+        """Imagen 3 genera una foto lifestyle completa: persona usando el producto en escena real.
+        El producto referenciado aparece en la nueva imagen siendo usado naturalmente.
         Fallback: devuelve la imagen original si la API falla.
         """
         mime = 'image/png' if product_image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
-        color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
+        color_str = ', '.join(colors[:3]) if colors else 'warm natural tones'
         prompt = (
-            f"Professional advertising background scene. "
-            f"Elegant real-world environment, shallow depth of field, DSLR studio quality. "
+            f"Professional lifestyle photograph. A person naturally using or holding this exact product. "
+            f"The product is clearly visible and central — someone drinking from this mug, wearing this item, "
+            f"using this object in their daily life. "
+            f"Scene: authentic real-world environment, natural interaction, editorial photography quality. "
+            f"DSLR camera, shallow depth of field, beautiful natural lighting. "
             f"Mood: {tone}. Color palette: {color_str}. "
             f"Context: {caption[:80]}. "
-            f"Authentic surfaces and materials — wood, marble, fabric, plants, soft bokeh. "
-            f"NOT white background. NOT plain studio. NOT abstract 3D. NOT floating objects. "
-            f"Photorealistic. Absolutely NO text, NO letters, NO logos."
+            f"NOT a catalog shot. NOT floating product on plain background. NOT studio white. "
+            f"Square 1:1 format. Photorealistic. "
+            f"Absolutely NO text, NO letters, NO logos, NO UI elements."
         )
         try:
             client = _vertex_client()
@@ -76,39 +79,27 @@ class ImageGenerator:
                 model=settings.VERTEX_IMAGE_EDIT_MODEL,
                 prompt=prompt,
                 reference_images=[
-                    types.RawReferenceImage(
+                    types.SubjectReferenceImage(
                         reference_image=types.Image(image_bytes=product_image_bytes, mime_type=mime),
                         reference_id=1,
-                    ),
-                    types.MaskReferenceImage(
-                        reference_id=2,
-                        config=types.MaskReferenceConfig(
-                            mask_mode=types.MaskReferenceMode.MASK_MODE_BACKGROUND,
-                            mask_dilation=0.03,
+                        config=types.SubjectReferenceConfig(
+                            subject_type=types.SubjectReferenceType.SUBJECT_TYPE_PRODUCT,
                         ),
-                    ),
+                    )
                 ],
                 config=types.EditImageConfig(
-                    edit_mode=types.EditMode.EDIT_MODE_INPAINT_INSERTION,
+                    edit_mode=types.EditMode.EDIT_MODE_PRODUCT_IMAGE,
                     number_of_images=1,
                     aspect_ratio='1:1',
                 ),
             )
             if resp.generated_images:
-                logger.info("Product background replaced via inpainting (MASK_MODE_BACKGROUND)")
+                logger.info("Product lifestyle scene generated (SubjectReference PRODUCT_IMAGE)")
                 return resp.generated_images[0].image.image_bytes
             logger.warning("edit_image returned no images, falling back to product image")
         except Exception as e:
-            logger.warning(f"Product background replacement failed (falling back to product image): {e}")
+            logger.warning(f"Product scene generation failed (falling back to product image): {e}")
         return product_image_bytes
-
-    def _decide_pipeline(self, product_image_bytes: bytes) -> str:
-        """Reservado para uso futuro. Actualmente no se usa — _replace_product_background es el path único."""
-        return 'B'
-
-    def _generate_lifestyle_shot(self, product_image_bytes: bytes, caption: str, tone: str) -> bytes:
-        """Alias de _replace_product_background para compatibilidad con tests existentes."""
-        return self._replace_product_background(product_image_bytes, caption, [], tone)
 
     def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', max_qc_retries: int = 2) -> bytes:
         color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
