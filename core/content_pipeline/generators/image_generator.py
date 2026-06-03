@@ -189,31 +189,69 @@ class ImageGenerator:
             logger.warning(f"SVG overlay fallido (omitiendo): {e}")
         return ''
 
-    def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', max_qc_retries: int = 2) -> bytes:
-        color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
-        # Ground Imagen 3 in the client's actual business context
-        subject_hint = ''
-        kw = [k for k in (keywords or []) if k][:4]
-        if kw:
-            subject_hint = f"Show: {', '.join(kw)}. "
-        elif description:
-            subject_hint = f"Context: {description[:80]}. "
-        prompt = (
-            f"Real-world stock photograph, bright natural lighting, shallow depth of field, DSLR camera quality. "
-            f"Subject: {caption[:80]}. "
-            f"{subject_hint}"
-            f"Color palette: {color_str}. "
-            f"Scene: authentic professional environment, real objects, real surfaces — "
-            f"desk, materials, tools, products, plants, coffee, notebooks. "
-            f"Any screens or monitors must show a BLANK or turned-off display — "
-            f"NO content, NO images, NO graphics inside any screen. "
-            f"NOT a CGI render. NOT a 3D illustration. NOT a digital composite. "
-            f"NOT abstract shapes. NOT floating objects. NOT a portrait. "
-            f"NOT minimalist. NOT dark moody lighting. "
-            f"Square 1:1 format, photorealistic. "
-            f"Absolutely NO text, NO letters, NO words, NO UI elements, "
-            f"NO logos, NO templates, NO social media layouts."
+    _SCENE_FALLBACKS = [
+        "warm coffee shop interior, wooden tables, ambient light, steam from cups, cozy atmosphere",
+        "outdoor urban street scene, city architecture, natural daylight, people in motion blur",
+        "lush tropical plants and leaves, natural textures, soft green light filtering through",
+        "modern kitchen counter, fresh fruits and ingredients, warm morning light",
+        "beach or coastal scene, sand and waves, golden hour light, natural calm",
+        "vibrant local market, colorful products, warm candid atmosphere, authentic textures",
+        "creative studio workspace with paints, fabrics and textures — no screens",
+        "rooftop terrace at sunset, city skyline far in background, warm bokeh",
+        "minimalist zen garden, stones, water, natural wood textures, soft diffused light",
+        "artisanal workshop with hands working on materials, tools, warm focused light",
+    ]
+
+    def _analyze_brand_scene(self, caption: str, keywords: list[str], description: str, tone: str, colors: list[str]) -> str:
+        """Gemini Art Director: analiza la marca y genera prompt de escena lifestyle creativa.
+        Evita explícitamente escenas de oficina, laptops y escritorios."""
+        color_str = ', '.join(colors[:3]) if colors else 'warm neutrals'
+        kw_str = ', '.join(keywords[:4]) if keywords else ''
+        brand_ctx = description[:120] if description else caption[:120]
+        fallback_scene = random.choice(self._SCENE_FALLBACKS)
+        _FALLBACK = (
+            f"Real-world lifestyle photograph, {fallback_scene}. "
+            f"Natural lighting, shallow depth of field. Color palette: {color_str}. Mood: {tone}. "
+            f"NO laptops, NO computers, NO phones, NO desk, NO office, NO keyboard. "
+            f"NO text, NO logos, NO UI elements. Square 1:1 format. Photorealistic."
         )
+        try:
+            client = _vertex_client()
+            prompt = (
+                f"You are an Art Director creating Instagram post backgrounds for brand advertising.\n"
+                f"Brand: {brand_ctx}. Keywords: {kw_str}. Tone: {tone}. Colors: {color_str}.\n\n"
+                f"Generate ONE Imagen 3 prompt (max 80 words) for a LIFESTYLE BACKGROUND PHOTO.\n"
+                f"Rules:\n"
+                f"- Choose a creative real-world scene that EVOKES the brand's values emotionally\n"
+                f"- ABSOLUTELY NO offices, laptops, computers, desks, keyboards, or screens\n"
+                f"- Think: where do this brand's CUSTOMERS live their lives? Coffee shops? Outdoors? Home?\n"
+                f"- The scene should feel aspirational and authentic — real textures, natural light, depth\n"
+                f"- Vary the scene type: nature, urban, food, home, travel, craft, market, garden, etc.\n\n"
+                f"End with: 'Natural lighting. Photorealistic. NO laptops. NO computers. NO text. NO logos.'\n"
+                f"Return ONLY the prompt text, no explanations."
+            )
+            resp = client.models.generate_content(
+                model=settings.VERTEX_TEXT_MODEL,
+                contents=prompt,
+            )
+            result = resp.text.strip().strip('"').strip("'")
+            if len(result) > 20:
+                logger.info(f"Brand scene prompt: {result[:120]}...")
+                return result
+        except Exception as e:
+            logger.warning(f"Brand scene analysis failed (fallback): {e}")
+        return _FALLBACK
+
+    def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', max_qc_retries: int = 2) -> bytes:
+        scene_prompt = self._analyze_brand_scene(caption, keywords or [], description, tone, colors)
+        # Hard constraints appended regardless of what Gemini generated
+        prompt = (
+            f"{scene_prompt} "
+            f"DSLR camera quality, shallow depth of field, photorealistic. "
+            f"NOT a CGI render. NOT a 3D illustration. NOT abstract shapes. NOT minimalist. "
+            f"Absolutely NO text, NO letters, NO words, NO logos, NO UI elements anywhere."
+        )
+        logger.info(f"Background prompt (first 150): {prompt[:150]}")
         last_bytes = None
         total_attempts = max_qc_retries + 1
         for attempt in range(total_attempts):
@@ -221,8 +259,15 @@ class ImageGenerator:
             if self._validate_background(last_bytes):
                 return last_bytes
             if attempt < max_qc_retries:
-                logger.warning(f"Background QC failed (attempt {attempt + 1}/{total_attempts}), regenerating...")
-        logger.warning("Background QC: all retries exhausted, using last generated image")
+                logger.warning(f"Background QC failed (attempt {attempt + 1}/{total_attempts}), regenerando con nueva escena...")
+                scene_prompt = self._analyze_brand_scene(caption, keywords or [], description, tone, colors)
+                prompt = (
+                    f"{scene_prompt} "
+                    f"DSLR camera quality, shallow depth of field, photorealistic. "
+                    f"NOT a CGI render. NOT abstract. "
+                    f"Absolutely NO text, NO letters, NO words, NO logos, NO UI elements anywhere."
+                )
+        logger.warning("Background QC: reintentos agotados, usando última imagen generada")
         return last_bytes
 
     def _validate_background(self, image_bytes: bytes) -> bool:
@@ -251,9 +296,11 @@ class ImageGenerator:
             if match:
                 data = json.loads(match.group())
                 ok = bool(data.get('ok', True))
-                if not ok:
+                if ok:
+                    logger.info(f"Background QC OK: {data}")
+                else:
                     flags = [k for k in ('has_text', 'is_abstract_3d', 'has_screen_content') if data.get(k)]
-                    logger.warning(f"Background QC rejected: {', '.join(flags)}")
+                    logger.warning(f"Background QC REJECTED: {', '.join(flags)} | full={data}")
                 return ok
         except Exception as e:
             logger.warning(f"Background QC error (assuming ok): {e}")
