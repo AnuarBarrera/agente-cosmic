@@ -27,16 +27,28 @@
     .feature { text-align: center; max-width: 160px; }
     .feature .icon { font-size: 2rem; margin-bottom: 8px; }
     .feature p { font-size: 0.85rem; color: #aaa; }
+    .l-nav { background:#1a1a2e; padding:14px 32px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #2a2a4a; }
+    .l-nav-brand { font-size:1.2rem; font-weight:700; color:#e94560; }
+    .l-nav-user { display:flex; gap:16px; align-items:center; font-size:0.9rem; color:#aaa; }
+    .l-nav-user a { text-decoration:none; }
+    .l-nav-user .link-dashboard { color:#e94560; }
+    .l-nav-user .link-logout { color:#aaa; }
+    @media (max-width: 640px) {
+      .l-nav { padding: 10px 16px; flex-wrap: wrap; gap: 6px; }
+      .l-nav-brand { flex: 1; font-size: 1rem; }
+      .l-nav-user { font-size: 0.82rem; gap: 10px; }
+      .l-nav-email { display: none; }
+    }
   </style>
 </head>
 <body>
-  <nav style="background:#1a1a2e;padding:14px 32px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #2a2a4a;">
-    <span style="font-size:1.2rem;font-weight:700;color:#e94560;">Agente Cosmic</span>
+  <nav class="l-nav">
+    <span class="l-nav-brand">Agente Cosmic</span>
     {% if user.is_authenticated %}
-    <div style="display:flex;gap:16px;align-items:center;font-size:0.9rem;color:#aaa;">
-      <span>{{ user.email }}</span>
-      <a href="{% url 'dashboard' %}" style="color:#e94560;text-decoration:none;">Dashboard</a>
-      <a href="{% url 'logout' %}" style="color:#aaa;text-decoration:none;">Salir</a>
+    <div class="l-nav-user">
+      <span class="l-nav-email">{{ user.email }}</span>
+      <a href="{% url 'dashboard' %}" class="link-dashboard">Dashboard</a>
+      <a href="{% url 'logout' %}" class="link-logout">Salir</a>
     </div>
     {% endif %}
   </nav>

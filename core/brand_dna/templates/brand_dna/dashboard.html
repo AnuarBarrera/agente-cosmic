@@ -12,6 +12,12 @@
     .nav-user { display: flex; align-items: center; gap: 16px; font-size: 0.9rem; color: #aaa; }
     .nav-user a { color: #aaa; text-decoration: none; }
     .nav-user a:hover { color: #e94560; }
+    @media (max-width: 640px) {
+      nav { padding: 12px 16px; flex-wrap: wrap; gap: 6px; }
+      .nav-brand { font-size: 1.1rem; flex: 1; }
+      .nav-user { font-size: 0.78rem; gap: 10px; }
+      .nav-email { display: none; }
+    }
     .container { max-width: 800px; margin: 40px auto; padding: 0 20px; }
     h1 { font-size: 1.6rem; margin-bottom: 8px; }
     .welcome { color: #aaa; font-size: 0.95rem; margin-bottom: 32px; }
@@ -39,7 +45,7 @@
   <nav>
     <div class="nav-brand">Agente Cosmic</div>
     <div class="nav-user">
-      <span>{{ user.email }}</span>
+      <span class="nav-email">{{ user.email }}</span>
       <a href="{% url 'logout' %}">Cerrar sesión</a>
     </div>
   </nav>
