@@ -117,10 +117,16 @@
     <div class="legend-item"><div class="dot dot-change"></div> Cambio solicitado</div>
   </div>
 
-  <div id="calendar-limits" style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:10px 16px;background:#1a1a2e;border-radius:8px;margin-bottom:16px;font-size:0.82rem;color:#aaa;">
-    <span style="font-weight:600;color:#f0f0f0;white-space:nowrap;">Límites del calendario:</span>
-    <span id="regens-counter" style="white-space:nowrap;">🔄 Cambios: <strong id="regens-used">{{ total_regens }}</strong> / {{ max_regenerations }}</span>
-    <span id="edits-counter" style="white-space:nowrap;">✏ Ediciones: <strong id="edits-used">{{ total_edits }}</strong> / {{ max_edits }}</span>
+  <div id="calendar-limits" style="background:#1a1a2e;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:0.82rem;">
+    <div style="color:#aaa;margin-bottom:8px;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;">Límites del calendario</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <span id="regens-counter" style="display:inline-flex;align-items:center;gap:6px;background:#12122a;border:1px solid #2a2a4a;border-radius:20px;padding:4px 12px;white-space:nowrap;">
+        🔄 <span>Cambios</span> <strong id="regens-used" style="color:#f0f0f0;">{{ total_regens }}</strong><span style="color:#555;">/{{ max_regenerations }}</span>
+      </span>
+      <span id="edits-counter" style="display:inline-flex;align-items:center;gap:6px;background:#12122a;border:1px solid #2a2a4a;border-radius:20px;padding:4px 12px;white-space:nowrap;">
+        ✏️ <span>Ediciones</span> <strong id="edits-used" style="color:#f0f0f0;">{{ total_edits }}</strong><span style="color:#555;">/{{ max_edits }}</span>
+      </span>
+    </div>
   </div>
 
   <div class="posts-grid">
