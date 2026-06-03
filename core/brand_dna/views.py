@@ -165,15 +165,8 @@ def calendar_review_view(request, job_id):
 @login_required
 @require_POST
 def delete_calendar_api(request, job_id):
-    from core.content_pipeline.models import ContentCalendar
     job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
-    brand_dna = getattr(job, 'brand_dna', None)
-    if not brand_dna:
-        return JsonResponse({'error': 'No existe Brand DNA para este job'}, status=404)
-    calendar = getattr(brand_dna, 'calendar', None)
-    if not calendar:
-        return JsonResponse({'error': 'No hay calendario que eliminar'}, status=404)
-    calendar.delete()
+    job.delete()
     return JsonResponse({'status': 'ok'})
 
 
