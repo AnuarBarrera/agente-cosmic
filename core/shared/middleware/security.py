@@ -46,10 +46,12 @@ class SecurityHeadersMiddleware(MiddlewareMixin):
             response['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
 
         # Prevent Cloudflare and browsers from caching dynamic HTML pages
+        # 'private' tells Cloudflare explicitly this response must not be cached at edge
         content_type = response.get('Content-Type', '')
         if 'text/html' in content_type:
-            response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response['Cache-Control'] = 'private, no-store, no-cache, must-revalidate, max-age=0'
             response['Pragma'] = 'no-cache'
+            response['Surrogate-Control'] = 'no-store'
             response['Vary'] = 'Cookie'
 
         return response
