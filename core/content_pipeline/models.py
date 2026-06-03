@@ -50,6 +50,8 @@ class ContentPost(models.Model):
         max_length=20, choices=USER_STATUS_CHOICES, default='pending'
     )
     user_note = models.TextField(blank=True, default='')
+    regen_count = models.PositiveIntegerField(default=0)
+    edit_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = 'content_pipeline_post'
