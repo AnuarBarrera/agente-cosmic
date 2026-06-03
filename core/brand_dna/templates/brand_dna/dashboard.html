@@ -50,6 +50,16 @@
 
     <a href="{% url 'landing' %}" class="btn-new">+ Nuevo análisis</a>
 
+    <div style="display:inline-flex;align-items:center;gap:8px;padding:8px 16px;background:#1a1a2e;border-radius:8px;margin-bottom:24px;font-size:0.82rem;color:#aaa;margin-left:12px;">
+      📅 Calendarios esta semana:
+      <strong style="color:{% if used_this_week >= max_calendars %}#e94560{% else %}#f0f0f0{% endif %};">
+        {{ used_this_week }}/{{ max_calendars }}
+      </strong>
+      {% if used_this_week >= max_calendars %}
+      <span style="color:#e94560;font-size:0.75rem;">· límite alcanzado</span>
+      {% endif %}
+    </div>
+
     {% if jobs %}
       {% for job in jobs %}
       <div class="job-card">

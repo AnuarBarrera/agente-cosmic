@@ -165,13 +165,21 @@ def google_callback_view(request):
 
 @login_required
 def dashboard_view(request):
+    from datetime import timedelta
+    from django.utils import timezone
+    from core.brand_dna.rate_limits import get_user_plan
     jobs = (
         AnalysisJob.objects
         .filter(user=request.user, deleted_at__isnull=True)
         .select_related('brand_dna')
         .order_by('-created_at')[:20]
     )
+    week_ago = timezone.now() - timedelta(days=7)
+    used_this_week = AnalysisJob.objects.filter(user=request.user, created_at__gte=week_ago).count()
+    plan = get_user_plan(request.user)
     return render(request, 'brand_dna/dashboard.html', {
         'jobs': jobs,
         'user': request.user,
+        'used_this_week': used_this_week,
+        'max_calendars': plan.max_calendars_per_week,
     })

@@ -172,13 +172,13 @@
 <script>
   const CSRF = '{{ csrf_token }}';
 
-  function showToast(msg, color) {
+  function showToast(msg, color, duration) {
     const t = document.getElementById('toast');
     t.textContent = msg;
     t.style.background = color || '#1a3a2a';
-    t.style.color = color ? '#1a1a1a' : '#4caf7d';
+    t.style.color = color === '#e74c3c' ? '#fff' : (color ? '#1a1a1a' : '#4caf7d');
     t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 2500);
+    setTimeout(() => t.classList.remove('show'), duration || 2500);
   }
 
   async function postAction(postId, payload) {
@@ -223,7 +223,7 @@
     });
     const data = await res.json();
     if (res.status === 429) {
-      showToast(data.error, '#e74c3c');
+      showToast(data.error, '#e74c3c', 5000);
       cap.contentEditable = 'false';
       document.getElementById('save-' + postId).style.display = 'none';
       return;
@@ -260,7 +260,7 @@
     btn.textContent = 'Regenerar con IA ✨';
     btn.disabled = false;
     if (res.status === 429) {
-      showToast(data.error, '#e74c3c');
+      showToast(data.error, '#e74c3c', 5000);
       document.getElementById('regen-' + postId).style.display = 'none';
       return;
     }
