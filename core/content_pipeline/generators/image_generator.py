@@ -47,22 +47,43 @@ class ImageGenerator:
         if product_image_bytes:
             kw_str = ', '.join((keywords or [])[:3])
             brand_context = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
-            background_bytes, svg_overlay = self._generate_product_scene(product_image_bytes, caption, colors, tone)
+            background_bytes, svg_overlay = self._generate_product_scene(
+                product_image_bytes, caption, colors, tone, max_qc_retries=max_qc_retries
+            )
             content = self._generate_post_content(caption, product_image_bytes=product_image_bytes, brand_context=brand_context)
+            result = self._render_html_template(background_bytes, content, colors, svg_overlay=svg_overlay)
+            if max_qc_retries > 0 and svg_overlay and not self._validate_final_image(result):
+                logger.warning("Final QC falló — reintentando sin SVG overlay")
+                result = self._render_html_template(background_bytes, content, colors, svg_overlay='')
+            return result
         else:
             background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, max_qc_retries=max_qc_retries)
             content = self._generate_post_content(caption, product_image_bytes=None)
             svg_overlay = ''
         return self._render_html_template(background_bytes, content, colors, svg_overlay=svg_overlay)
 
-    def _generate_product_scene(self, product_image_bytes: bytes, caption: str, colors: list[str], tone: str) -> tuple[bytes, str]:
-        """Pipeline agéntico de 3 pasos:
+    def _generate_product_scene(self, product_image_bytes: bytes, caption: str, colors: list[str], tone: str, max_qc_retries: int = 2) -> tuple[bytes, str]:
+        """Pipeline agéntico de 3 pasos con QC en la escena generada:
         1. Gemini Director de Arte → prompt de entorno premium específico para este producto
-        2. Imagen 3 BGSWAP → producto pixel-perfect sobre ese entorno
+        2. Imagen 3 BGSWAP → producto pixel-perfect sobre ese entorno (con reintento si QC falla)
         3. Gemini Iluminador → SVG overlay de sombra/luz para armonizar (solo si BGSWAP tuvo éxito)
         """
         env_prompt = self._analyze_product_style(product_image_bytes, caption, colors, tone)
-        scene_bytes, bgswap_ok = self._bgswap_product(product_image_bytes, env_prompt)
+        total_attempts = max_qc_retries + 1
+        scene_bytes, bgswap_ok = product_image_bytes, False
+        for attempt in range(total_attempts):
+            candidate_bytes, candidate_ok = self._bgswap_product(product_image_bytes, env_prompt)
+            if not candidate_ok:
+                scene_bytes, bgswap_ok = product_image_bytes, False
+                break
+            if max_qc_retries == 0 or self._validate_background(candidate_bytes):
+                scene_bytes, bgswap_ok = candidate_bytes, True
+                break
+            if attempt < max_qc_retries:
+                logger.warning(f"Scene QC falló (intento {attempt + 1}/{total_attempts}), reintentando BGSWAP...")
+            else:
+                logger.warning("Scene QC: reintentos agotados, usando última escena generada")
+                scene_bytes, bgswap_ok = candidate_bytes, True
         svg_overlay = self._generate_svg_overlay(scene_bytes, colors) if bgswap_ok else ''
         return scene_bytes, svg_overlay
 
@@ -232,6 +253,40 @@ class ImageGenerator:
                 return ok
         except Exception as e:
             logger.warning(f"Background QC error (assuming ok): {e}")
+        return True
+
+    def _validate_final_image(self, image_bytes: bytes) -> bool:
+        """QC del post renderizado final. Detecta texto en fondo e sombras incorrectas. Retorna True si es aceptable."""
+        try:
+            client = _vertex_client()
+            image_part = types.Part.from_bytes(data=image_bytes, mime_type='image/png')
+            prompt = (
+                "Analyze this social media advertising image strictly.\n"
+                "NOTE: The image intentionally has a designed text overlay (headline, subtitle, CTA button) — "
+                "IGNORE that foreground text, it is part of the design.\n\n"
+                "Check ONLY these issues and reply with this JSON (no markdown):\n"
+                "{\"has_background_text\": <bool>, \"has_shadow_artifacts\": <bool>, \"ok\": <bool>}\n\n"
+                "has_background_text: true if the BACKGROUND photo/scene contains visible text, words, signs, "
+                "watermarks, or logos (not the designed overlay text in foreground).\n"
+                "has_shadow_artifacts: true if there are obviously misplaced, unnatural, or excessively dark "
+                "shadow blobs that look like AI artifacts rather than realistic product shadows.\n"
+                "ok: true ONLY if has_background_text=false AND has_shadow_artifacts=false."
+            )
+            resp = client.models.generate_content(
+                model=settings.VERTEX_TEXT_MODEL,
+                contents=[image_part, prompt],
+            )
+            raw = resp.text.strip()
+            match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                ok = bool(data.get('ok', True))
+                if not ok:
+                    flags = [k for k in ('has_background_text', 'has_shadow_artifacts') if data.get(k)]
+                    logger.warning(f"Final image QC rechazado: {', '.join(flags)}")
+                return ok
+        except Exception as e:
+            logger.warning(f"Final image QC error (asumiendo ok): {e}")
         return True
 
     def _extract_headline(self, caption: str) -> str:

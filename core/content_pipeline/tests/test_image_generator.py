@@ -390,10 +390,11 @@ class TestLayeredPipelineWithProduct:
         with patch.object(gen, '_generate_product_scene', return_value=(scene_img, fake_svg)) as mock_scene, \
              patch.object(gen, '_generate_background') as mock_bg, \
              patch.object(gen, '_generate_post_content', return_value=fake_content) as mock_content, \
-             patch.object(gen, '_render_html_template', return_value=fake_shot) as mock_render:
+             patch.object(gen, '_render_html_template', return_value=fake_shot) as mock_render, \
+             patch.object(gen, '_validate_final_image', return_value=True):
             result = gen._layered_pipeline('Collar artesanal', ['#c0c0c0'], 'elegante', product_image_bytes=product_img)
 
-        mock_scene.assert_called_once_with(product_img, 'Collar artesanal', ['#c0c0c0'], 'elegante')
+        mock_scene.assert_called_once_with(product_img, 'Collar artesanal', ['#c0c0c0'], 'elegante', max_qc_retries=2)
         mock_bg.assert_not_called()
         mock_content.assert_called_once()
         call_kwargs = mock_content.call_args.kwargs
@@ -401,6 +402,55 @@ class TestLayeredPipelineWithProduct:
         assert 'brand_context' in call_kwargs and len(call_kwargs['brand_context']) > 0
         mock_render.assert_called_once_with(scene_img, fake_content, ['#c0c0c0'], svg_overlay=fake_svg)
         assert result == fake_shot
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_final_qc_fail_rerenders_without_svg(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        product_img = _png_bytes((200, 150, 100))
+        scene_img = _png_bytes((100, 180, 140))
+        fake_svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080"></svg>'
+        fake_content = {'headline': 'Test', 'subtitle': 'Sub', 'cta': 'CTA', 'tag': 'TAG'}
+        render_with_svg = _png_bytes((200, 50, 50), size=(1080, 1080))
+        render_no_svg = _png_bytes((50, 200, 50), size=(1080, 1080))
+
+        with patch.object(gen, '_generate_product_scene', return_value=(scene_img, fake_svg)), \
+             patch.object(gen, '_generate_post_content', return_value=fake_content), \
+             patch.object(gen, '_render_html_template', side_effect=[render_with_svg, render_no_svg]) as mock_render, \
+             patch.object(gen, '_validate_final_image', return_value=False):
+            result = gen._layered_pipeline('Caption', ['#c0c0c0'], 'elegante', product_image_bytes=product_img)
+
+        assert mock_render.call_count == 2
+        second_call = mock_render.call_args_list[1]
+        assert second_call.kwargs.get('svg_overlay') == '' or second_call.args[-1] == ''
+        assert result == render_no_svg
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_final_qc_skipped_when_max_qc_retries_zero(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        product_img = _png_bytes()
+        fake_svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080"></svg>'
+        fake_content = {'headline': 'Test', 'subtitle': 'Sub', 'cta': 'CTA', 'tag': 'TAG'}
+        fake_shot = _png_bytes((100, 100, 100), size=(1080, 1080))
+
+        with patch.object(gen, '_generate_product_scene', return_value=(_png_bytes(), fake_svg)), \
+             patch.object(gen, '_generate_post_content', return_value=fake_content), \
+             patch.object(gen, '_render_html_template', return_value=fake_shot), \
+             patch.object(gen, '_validate_final_image') as mock_qc:
+            gen._layered_pipeline('Caption', ['#c0c0c0'], 'elegante', product_image_bytes=product_img, max_qc_retries=0)
+
+        mock_qc.assert_not_called()  # QC disabled para UI (max_qc_retries=0)
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
@@ -440,6 +490,7 @@ class TestGenerateProductScene:
 
         with patch.object(gen, '_analyze_product_style', return_value='premium env prompt'), \
              patch.object(gen, '_bgswap_product', return_value=(scene_img, True)), \
+             patch.object(gen, '_validate_background', return_value=True), \
              patch.object(gen, '_generate_svg_overlay', return_value=fake_svg):
             result = gen._generate_product_scene(product_img, 'Collar artesanal', ['#c0c0c0'], 'elegante')
 
@@ -459,13 +510,55 @@ class TestGenerateProductScene:
         product_img = _png_bytes()
 
         with patch.object(gen, '_analyze_product_style', return_value='env prompt'), \
-             patch.object(gen, '_bgswap_product', return_value=(product_img, False)) as mock_bgswap, \
+             patch.object(gen, '_bgswap_product', return_value=(product_img, False)), \
              patch.object(gen, '_generate_svg_overlay') as mock_svg:
             scene_bytes, svg = gen._generate_product_scene(product_img, 'Caption', [], 'pro')
 
         mock_svg.assert_not_called()  # SVG no se genera si BGSWAP falló
         assert scene_bytes == product_img
         assert svg == ''
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_EDIT_MODEL='imagen-3.0-capability-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_scene_qc_retries_bgswap_on_fail(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        product_img = _png_bytes((200, 150, 100))
+        bad_scene = _png_bytes((200, 50, 50))
+        good_scene = _png_bytes((50, 200, 50))
+
+        with patch.object(gen, '_analyze_product_style', return_value='env prompt'), \
+             patch.object(gen, '_bgswap_product', side_effect=[(bad_scene, True), (good_scene, True)]) as mock_bgswap, \
+             patch.object(gen, '_validate_background', side_effect=[False, True]), \
+             patch.object(gen, '_generate_svg_overlay', return_value=''):
+            scene_bytes, _ = gen._generate_product_scene(product_img, 'Caption', [], 'pro', max_qc_retries=2)
+
+        assert mock_bgswap.call_count == 2  # reintentó BGSWAP al fallar QC
+        assert scene_bytes == good_scene
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_EDIT_MODEL='imagen-3.0-capability-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_scene_qc_skipped_when_max_qc_retries_zero(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        product_img = _png_bytes()
+        scene_img = _png_bytes((100, 180, 140))
+
+        with patch.object(gen, '_analyze_product_style', return_value='env prompt'), \
+             patch.object(gen, '_bgswap_product', return_value=(scene_img, True)), \
+             patch.object(gen, '_validate_background') as mock_validate, \
+             patch.object(gen, '_generate_svg_overlay', return_value=''):
+            gen._generate_product_scene(product_img, 'Caption', [], 'pro', max_qc_retries=0)
+
+        mock_validate.assert_not_called()  # QC desactivado para UI
 
 
 class TestBgswapProduct:
@@ -537,3 +630,63 @@ class TestGenerateSvgOverlay:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             result = gen._generate_svg_overlay(_png_bytes(), [])
         assert result == ''
+
+
+class TestValidateFinalImage:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_true_when_image_is_clean(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"has_background_text": false, "has_shadow_artifacts": false, "ok": true}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._validate_final_image(_png_bytes())
+        assert result is True
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_false_when_shadow_artifacts_detected(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"has_background_text": false, "has_shadow_artifacts": true, "ok": false}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._validate_final_image(_png_bytes())
+        assert result is False
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_false_when_background_text_detected(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"has_background_text": true, "has_shadow_artifacts": false, "ok": false}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._validate_final_image(_png_bytes())
+        assert result is False
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_true_on_api_error(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            result = gen._validate_final_image(_png_bytes())
+        assert result is True  # no bloquear pipeline si QC falla
