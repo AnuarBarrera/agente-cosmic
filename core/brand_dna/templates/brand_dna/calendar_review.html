@@ -117,10 +117,10 @@
     <div class="legend-item"><div class="dot dot-change"></div> Cambio solicitado</div>
   </div>
 
-  <div id="calendar-limits" style="display:flex;gap:24px;align-items:center;padding:10px 16px;background:#1a1a2e;border-radius:8px;margin-bottom:16px;font-size:0.82rem;color:#aaa;">
-    <span>Límites del calendario:</span>
-    <span id="regens-counter">🔄 Cambios usados: <strong id="regens-used">{{ total_regens }}</strong> / {{ max_regenerations }}</span>
-    <span id="edits-counter">✏ Ediciones usadas: <strong id="edits-used">{{ total_edits }}</strong> / {{ max_edits }}</span>
+  <div id="calendar-limits" style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:10px 16px;background:#1a1a2e;border-radius:8px;margin-bottom:16px;font-size:0.82rem;color:#aaa;">
+    <span style="font-weight:600;color:#f0f0f0;white-space:nowrap;">Límites del calendario:</span>
+    <span id="regens-counter" style="white-space:nowrap;">🔄 Cambios: <strong id="regens-used">{{ total_regens }}</strong> / {{ max_regenerations }}</span>
+    <span id="edits-counter" style="white-space:nowrap;">✏ Ediciones: <strong id="edits-used">{{ total_edits }}</strong> / {{ max_edits }}</span>
   </div>
 
   <div class="posts-grid">
