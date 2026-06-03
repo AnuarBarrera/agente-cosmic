@@ -39,7 +39,7 @@
     .post-img img { width: 100%; height: 100%; object-fit: cover; }
     .post-body { padding: 16px; }
     .post-day { font-size: 0.78rem; color: #e94560; font-weight: 700; margin-bottom: 4px; }
-    .post-schedule { font-size: 0.75rem; color: #555; margin-bottom: 10px; }
+    .post-schedule { font-size: 0.75rem; color: #888; margin-bottom: 10px; }
     .post-caption { font-size: 0.85rem; color: #ccc; line-height: 1.5; margin-bottom: 12px; }
     .post-caption[contenteditable="true"] {
       border: 1px solid #e94560; border-radius: 6px; padding: 6px 8px;
@@ -132,7 +132,7 @@
       <div class="post-body">
         <div class="post-day">Día {{ post.day_number }}</div>
         <div class="post-schedule">
-          📅 {{ post.scheduled_at|date:"D d M" }} · {{ post.scheduled_at|date:"H:i" }}
+          📅 {{ post.scheduled_at|date:"D d M" }} · 📧 {{ post.scheduled_at|date:"H:i" }}h
         </div>
         <div class="post-caption" id="caption-{{ post.id }}">{{ post.caption }}</div>
         {% if post.hashtags %}
