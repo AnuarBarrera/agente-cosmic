@@ -46,6 +46,12 @@
     <p>Da la URL de tu negocio y genera automaticamente 7 dias de contenido listo para publicar — posts, imagenes y mas.</p>
   </div>
 
+  {% if error %}
+  <div style="background:#3a1a1a;border:1px solid #c0392b;color:#e74c3c;padding:16px 20px;border-radius:10px;margin-bottom:20px;max-width:600px;margin-left:auto;margin-right:auto;">
+    ⚠️ {{ error }}
+  </div>
+  {% endif %}
+
   <div class="form-card">
     <form method="POST" action="/analizar/" enctype="multipart/form-data">
       {% csrf_token %}

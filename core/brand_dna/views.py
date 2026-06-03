@@ -26,6 +26,14 @@ def analyze_submit(request):
     if request.method != 'POST':
         return redirect('landing')
 
+    from core.brand_dna.rate_limits import can_create_calendar, get_user_plan
+    allowed, remaining = can_create_calendar(request.user)
+    if not allowed:
+        plan = get_user_plan(request.user)
+        return render(request, 'brand_dna/landing.html', {
+            'error': f'Límite alcanzado: máximo {plan.max_calendars_per_week} calendarios por semana. Vuelve en 7 días o contacta soporte para ampliar tu plan.',
+        })
+
     email = request.user.email
     business_url = request.POST.get('business_url', '').strip()
     posts_text = request.POST.get('posts_text', '').strip()
