@@ -91,6 +91,9 @@ def content_generation_task(job_id: str) -> None:
 
 def send_daily_email_task(post_id: str) -> None:
     post = ContentPost.objects.select_related('calendar__brand_dna__job').get(id=post_id)
+    if post.calendar.brand_dna.job.deleted_at is not None:
+        logger.info(f"Post {post_id} omitido — calendario eliminado por el usuario")
+        return
     # Genera la imagen justo antes de enviar (solo si no fue generada antes)
     if not post.image_url:
         brand_dna = post.calendar.brand_dna
