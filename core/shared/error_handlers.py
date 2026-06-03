@@ -339,8 +339,12 @@ def handler403(request, exception):
 def handler404(request, exception):
     """Custom 404 error handler"""
     error_id = SecureErrorHandler.log_error(exception, request)
+    accept = request.META.get('HTTP_ACCEPT', '')
+    if 'text/html' in accept and 'application/json' not in accept:
+        from django.shortcuts import render
+        return render(request, '404.html', status=404)
     return JsonResponse(
-        SecureErrorHandler.create_error_response(exception, request, 404, 
+        SecureErrorHandler.create_error_response(exception, request, 404,
             SecureErrorHandler.GENERIC_MESSAGES['not_found']),
         status=404
     )
