@@ -44,7 +44,14 @@ class SecurityHeadersMiddleware(MiddlewareMixin):
         # Only add HSTS in production with HTTPS
         if not settings.DEBUG and request.is_secure():
             response['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
-        
+
+        # Prevent Cloudflare and browsers from caching dynamic HTML pages
+        content_type = response.get('Content-Type', '')
+        if 'text/html' in content_type:
+            response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response['Pragma'] = 'no-cache'
+            response['Vary'] = 'Cookie'
+
         return response
 
 
