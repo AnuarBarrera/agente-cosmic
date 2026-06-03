@@ -439,7 +439,7 @@ class TestGenerateProductScene:
         fake_svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080"></svg>'
 
         with patch.object(gen, '_analyze_product_style', return_value='premium env prompt'), \
-             patch.object(gen, '_bgswap_product', return_value=scene_img), \
+             patch.object(gen, '_bgswap_product', return_value=(scene_img, True)), \
              patch.object(gen, '_generate_svg_overlay', return_value=fake_svg):
             result = gen._generate_product_scene(product_img, 'Collar artesanal', ['#c0c0c0'], 'elegante')
 
@@ -453,16 +453,17 @@ class TestGenerateProductScene:
         VERTEX_IMAGE_EDIT_MODEL='imagen-3.0-capability-001',
         VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
     )
-    def test_bgswap_fallback_still_returns_tuple(self):
+    def test_bgswap_fallback_skips_svg_overlay(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         product_img = _png_bytes()
 
         with patch.object(gen, '_analyze_product_style', return_value='env prompt'), \
-             patch.object(gen, '_bgswap_product', return_value=product_img), \
-             patch.object(gen, '_generate_svg_overlay', return_value=''):
+             patch.object(gen, '_bgswap_product', return_value=(product_img, False)) as mock_bgswap, \
+             patch.object(gen, '_generate_svg_overlay') as mock_svg:
             scene_bytes, svg = gen._generate_product_scene(product_img, 'Caption', [], 'pro')
 
+        mock_svg.assert_not_called()  # SVG no se genera si BGSWAP falló
         assert scene_bytes == product_img
         assert svg == ''
 
@@ -482,11 +483,13 @@ class TestBgswapProduct:
             mock_generated = MagicMock()
             mock_generated.image.image_bytes = scene_img
             mock_vc.return_value.models.edit_image.return_value.generated_images = [mock_generated]
-            result = gen._bgswap_product(product_img, 'luxury marble pedestal, warm lighting')
-        assert result == scene_img
+            result_bytes, ok = gen._bgswap_product(product_img, 'luxury marble pedestal, warm lighting')
+        assert result_bytes == scene_img
+        assert ok is True
         call_kwargs = mock_vc.return_value.models.edit_image.call_args.kwargs
-        from google.genai.types import EditMode
+        from google.genai.types import EditMode, MaskReferenceMode
         assert call_kwargs['config'].edit_mode == EditMode.EDIT_MODE_BGSWAP
+        assert len(call_kwargs['reference_images']) == 2  # RawReferenceImage + MaskReferenceImage
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
@@ -499,8 +502,9 @@ class TestBgswapProduct:
         product_img = _png_bytes()
         with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
             mock_vc.return_value.models.edit_image.side_effect = Exception('API error')
-            result = gen._bgswap_product(product_img, 'some prompt')
-        assert result == product_img
+            result_bytes, ok = gen._bgswap_product(product_img, 'some prompt')
+        assert result_bytes == product_img
+        assert ok is False
 
 
 class TestGenerateSvgOverlay:

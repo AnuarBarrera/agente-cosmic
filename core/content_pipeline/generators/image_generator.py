@@ -59,11 +59,11 @@ class ImageGenerator:
         """Pipeline agéntico de 3 pasos:
         1. Gemini Director de Arte → prompt de entorno premium específico para este producto
         2. Imagen 3 BGSWAP → producto pixel-perfect sobre ese entorno
-        3. Gemini Iluminador → SVG overlay de sombra/luz para armonizar
+        3. Gemini Iluminador → SVG overlay de sombra/luz para armonizar (solo si BGSWAP tuvo éxito)
         """
         env_prompt = self._analyze_product_style(product_image_bytes, caption, colors, tone)
-        scene_bytes = self._bgswap_product(product_image_bytes, env_prompt)
-        svg_overlay = self._generate_svg_overlay(scene_bytes, colors)
+        scene_bytes, bgswap_ok = self._bgswap_product(product_image_bytes, env_prompt)
+        svg_overlay = self._generate_svg_overlay(scene_bytes, colors) if bgswap_ok else ''
         return scene_bytes, svg_overlay
 
     def _analyze_product_style(self, product_image_bytes: bytes, caption: str, colors: list[str], tone: str) -> str:
@@ -101,8 +101,10 @@ class ImageGenerator:
             logger.warning(f"Product style analysis failed (using fallback): {e}")
         return _FALLBACK
 
-    def _bgswap_product(self, product_image_bytes: bytes, environment_prompt: str) -> bytes:
-        """Imagen 3 BGSWAP: mantiene el producto exacto y reemplaza el fondo con el entorno del Director de Arte."""
+    def _bgswap_product(self, product_image_bytes: bytes, environment_prompt: str) -> tuple[bytes, bool]:
+        """Imagen 3 BGSWAP: mantiene el producto exacto y reemplaza el fondo con el entorno del Director de Arte.
+        Retorna (image_bytes, success). MASK_MODE_BACKGROUND para que Imagen 3 detecte el fondo automáticamente.
+        """
         mime = 'image/png' if product_image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
         try:
             client = _vertex_client()
@@ -114,6 +116,12 @@ class ImageGenerator:
                         reference_image=types.Image(image_bytes=product_image_bytes, mime_type=mime),
                         reference_id=1,
                     ),
+                    types.MaskReferenceImage(
+                        reference_id=2,
+                        config=types.MaskReferenceConfig(
+                            mask_mode=types.MaskReferenceMode.MASK_MODE_BACKGROUND,
+                        ),
+                    ),
                 ],
                 config=types.EditImageConfig(
                     edit_mode=types.EditMode.EDIT_MODE_BGSWAP,
@@ -123,11 +131,11 @@ class ImageGenerator:
             )
             if resp.generated_images:
                 logger.info("BGSWAP exitoso — producto sobre entorno premium")
-                return resp.generated_images[0].image.image_bytes
+                return resp.generated_images[0].image.image_bytes, True
             logger.warning("BGSWAP sin imágenes, usando foto original")
         except Exception as e:
             logger.warning(f"BGSWAP fallido (usando foto original): {e}")
-        return product_image_bytes
+        return product_image_bytes, False
 
     def _generate_svg_overlay(self, image_bytes: bytes, colors: list[str]) -> str:
         """Gemini Iluminador: genera SVG de sombra/luz para armonizar el producto con el nuevo fondo."""
