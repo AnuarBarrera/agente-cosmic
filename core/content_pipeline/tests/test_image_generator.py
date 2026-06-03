@@ -643,7 +643,7 @@ class TestValidateFinalImage:
         gen = ImageGenerator(bucket_name='test-bucket')
         with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
             mock_resp = MagicMock()
-            mock_resp.text = '{"has_background_text": false, "has_shadow_artifacts": false, "ok": true}'
+            mock_resp.text = '{"has_background_text": false, "has_shadow_artifacts": false, "plain_white_background": false, "ok": true}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
             result = gen._validate_final_image(_png_bytes())
         assert result is True
@@ -658,7 +658,7 @@ class TestValidateFinalImage:
         gen = ImageGenerator(bucket_name='test-bucket')
         with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
             mock_resp = MagicMock()
-            mock_resp.text = '{"has_background_text": false, "has_shadow_artifacts": true, "ok": false}'
+            mock_resp.text = '{"has_background_text": false, "has_shadow_artifacts": true, "plain_white_background": false, "ok": false}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
             result = gen._validate_final_image(_png_bytes())
         assert result is False
@@ -673,7 +673,22 @@ class TestValidateFinalImage:
         gen = ImageGenerator(bucket_name='test-bucket')
         with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
             mock_resp = MagicMock()
-            mock_resp.text = '{"has_background_text": true, "has_shadow_artifacts": false, "ok": false}'
+            mock_resp.text = '{"has_background_text": true, "has_shadow_artifacts": false, "plain_white_background": false, "ok": false}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._validate_final_image(_png_bytes())
+        assert result is False
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_false_when_plain_white_background(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"has_background_text": false, "has_shadow_artifacts": false, "plain_white_background": true, "ok": false}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
             result = gen._validate_final_image(_png_bytes())
         assert result is False

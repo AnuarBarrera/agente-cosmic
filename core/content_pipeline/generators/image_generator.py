@@ -167,12 +167,12 @@ class ImageGenerator:
             primary = colors[0] if colors else '#ffffff'
             prompt = (
                 f"Analyze this product advertising image. Generate an SVG transparent overlay (1080x1080) that:\n"
-                f"1. Adds a subtle soft shadow ellipse below the product (dark fill, opacity 0.15-0.20)\n"
-                f"2. Adds a gentle ambient light gradient matching the scene's dominant light direction\n"
-                f"3. Applies a very soft color wash using {primary} at opacity 0.05-0.08 to harmonize\n\n"
+                f"1. Adds ONLY a gentle ambient light gradient matching the scene's dominant light direction\n"
+                f"2. Applies a very soft color wash using {primary} at opacity 0.04-0.06 to harmonize\n\n"
                 f"Rules:\n"
-                f"- Use ONLY: <defs>, <rect>, <ellipse>, <radialGradient>, <linearGradient> elements\n"
-                f"- All fills must use opacity 0.25 or lower — barely visible, purely atmospheric\n"
+                f"- Use ONLY: <defs>, <rect>, <radialGradient>, <linearGradient> elements\n"
+                f"- NO shadow ellipses, NO dark blobs, NO ellipse elements\n"
+                f"- All fills must use opacity 0.10 or lower — barely visible, purely atmospheric\n"
                 f"- No solid opaque fills. SVG root has no background-color.\n"
                 f"- Return ONLY valid SVG starting with <svg and ending with </svg>. No markdown."
             )
@@ -256,21 +256,24 @@ class ImageGenerator:
         return True
 
     def _validate_final_image(self, image_bytes: bytes) -> bool:
-        """QC del post renderizado final. Detecta texto en fondo e sombras incorrectas. Retorna True si es aceptable."""
+        """QC del post renderizado final. Detecta problemas técnicos y calidad estética. Retorna True si es aceptable."""
         try:
             client = _vertex_client()
             image_part = types.Part.from_bytes(data=image_bytes, mime_type='image/png')
             prompt = (
-                "Analyze this social media advertising image strictly.\n"
-                "NOTE: The image intentionally has a designed text overlay (headline, subtitle, CTA button) — "
+                "Analyze this social media advertising post image strictly.\n"
+                "NOTE: The image intentionally has a designed text overlay (headline, subtitle, CTA) — "
                 "IGNORE that foreground text, it is part of the design.\n\n"
-                "Check ONLY these issues and reply with this JSON (no markdown):\n"
-                "{\"has_background_text\": <bool>, \"has_shadow_artifacts\": <bool>, \"ok\": <bool>}\n\n"
-                "has_background_text: true if the BACKGROUND photo/scene contains visible text, words, signs, "
-                "watermarks, or logos (not the designed overlay text in foreground).\n"
-                "has_shadow_artifacts: true if there are obviously misplaced, unnatural, or excessively dark "
-                "shadow blobs that look like AI artifacts rather than realistic product shadows.\n"
-                "ok: true ONLY if has_background_text=false AND has_shadow_artifacts=false."
+                "Reply ONLY with this JSON (no markdown):\n"
+                "{\"has_background_text\": <bool>, \"has_shadow_artifacts\": <bool>, "
+                "\"plain_white_background\": <bool>, \"ok\": <bool>}\n\n"
+                "has_background_text: true if the BACKGROUND scene contains visible text, signs, or watermarks.\n"
+                "has_shadow_artifacts: true if there are unnatural dark blobs or shadow ellipses that look "
+                "like AI artifacts — especially a dark oval/circle in the center or bottom of the image.\n"
+                "plain_white_background: true if the background behind the product is plain white, solid grey, "
+                "or a simple flat color with no depth, texture, or environmental context. "
+                "A professional advertising image must have an interesting background, not a plain studio backdrop.\n"
+                "ok: true ONLY if has_background_text=false AND has_shadow_artifacts=false AND plain_white_background=false."
             )
             resp = client.models.generate_content(
                 model=settings.VERTEX_TEXT_MODEL,
