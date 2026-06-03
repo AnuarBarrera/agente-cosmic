@@ -184,18 +184,34 @@ def post_action_api(request, post_id):
     if action == 'edit':
         if not value:
             return JsonResponse({'error': 'Caption vacío'}, status=400)
+        from core.brand_dna.rate_limits import can_edit
+        allowed, remaining = can_edit(post, request.user)
+        if not allowed:
+            return JsonResponse({
+                'error': 'Límite de ediciones alcanzado para este post (máximo 2).',
+                'limit_reached': True,
+            }, status=429)
         post.caption = value
         post.user_status = ContentPost.USER_STATUS_EDITED
-        post.save(update_fields=['caption', 'user_status'])
-        return JsonResponse({'status': 'ok', 'caption': post.caption})
+        post.edit_count += 1
+        post.save(update_fields=['caption', 'user_status', 'edit_count'])
+        return JsonResponse({'status': 'ok', 'caption': post.caption, 'remaining_edits': remaining - 1})
 
     if action == 'regenerate':
         if not value:
             return JsonResponse({'error': 'Feedback vacío'}, status=400)
+        from core.brand_dna.rate_limits import can_regenerate
+        allowed, remaining = can_regenerate(post, request.user)
+        if not allowed:
+            return JsonResponse({
+                'error': 'Límite de regeneraciones alcanzado para este post (máximo 2).',
+                'limit_reached': True,
+            }, status=429)
         new_caption = _regenerate_caption(post, value)
         post.caption = new_caption
         post.user_note = value
         post.user_status = ContentPost.USER_STATUS_CHANGE_REQUESTED
+        post.regen_count += 1
 
         # Regenerar imagen con el nuevo caption
         new_image_url = post.image_url
@@ -224,14 +240,19 @@ def post_action_api(request, post_id):
             if generated:
                 new_image_url = generated
                 post.image_url = new_image_url
-                post.save(update_fields=['caption', 'user_note', 'user_status', 'image_url'])
+                post.save(update_fields=['caption', 'user_note', 'user_status', 'image_url', 'regen_count'])
             else:
-                post.save(update_fields=['caption', 'user_note', 'user_status'])
+                post.save(update_fields=['caption', 'user_note', 'user_status', 'regen_count'])
         except Exception as img_err:
             logger.error(f"Image regeneration error for post {post_id}: {img_err}")
-            post.save(update_fields=['caption', 'user_note', 'user_status'])
+            post.save(update_fields=['caption', 'user_note', 'user_status', 'regen_count'])
 
-        return JsonResponse({'status': 'ok', 'caption': new_caption, 'image_url': new_image_url})
+        return JsonResponse({
+            'status': 'ok',
+            'caption': new_caption,
+            'image_url': new_image_url,
+            'remaining_regens': remaining - 1,
+        })
 
     return JsonResponse({'error': 'Acción desconocida'}, status=400)
 
