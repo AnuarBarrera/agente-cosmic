@@ -96,6 +96,10 @@
   <div class="nav-actions">
     <a href="{% url 'dashboard' %}" class="nav-btn nav-btn-ghost">Dashboard</a>
     <a href="{% url 'landing' %}" class="nav-btn nav-btn-primary">+ Nuevo análisis</a>
+    <button onclick="deleteCalendar('{{ job.id }}')"
+            style="background:#3a1a1a;color:#e74c3c;border:1px solid #c0392b;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:14px;">
+      🗑 Eliminar calendario
+    </button>
     <a href="{% url 'logout' %}" class="nav-btn nav-btn-ghost" style="font-size:0.8rem;">Salir</a>
   </div>
 </nav>
@@ -145,6 +149,9 @@
           <button class="btn-action btn-edit" onclick="startEdit('{{ post.id }}')">✏ Editar</button>
           <button class="btn-action btn-regen" onclick="toggleRegen('{{ post.id }}')">↺ Cambio</button>
           <button class="btn-action btn-save" id="save-{{ post.id }}" onclick="saveEdit('{{ post.id }}')">Guardar</button>
+          <span style="font-size:11px;color:#888;margin-left:4px;" id="limits-{{ post.id }}">
+            Edits: {{ post.edit_count }}/{{ max_edits }} · Regens: {{ post.regen_count }}/{{ max_regenerations }}
+          </span>
         </div>
         <div class="feedback-area" id="regen-{{ post.id }}">
           <textarea id="note-{{ post.id }}" placeholder="Describe el cambio que quieres..."></textarea>
@@ -206,7 +213,18 @@
   async function saveEdit(postId) {
     const cap = document.getElementById('caption-' + postId);
     const newCaption = cap.innerText.trim();
-    const data = await postAction(postId, { action: 'edit', value: newCaption });
+    const res = await fetch(`/api/post/${postId}/action/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ action: 'edit', value: newCaption }),
+    });
+    const data = await res.json();
+    if (res.status === 429) {
+      showToast(data.error, '#e74c3c');
+      cap.contentEditable = 'false';
+      document.getElementById('save-' + postId).style.display = 'none';
+      return;
+    }
     if (data.status === 'ok') {
       cap.contentEditable = 'false';
       document.getElementById('save-' + postId).style.display = 'none';
@@ -226,9 +244,19 @@
     const btn = document.querySelector(`#regen-${postId} .btn-send-regen`);
     btn.textContent = '🎨 Generando imagen y caption...';
     btn.disabled = true;
-    const data = await postAction(postId, { action: 'regenerate', value: note });
+    const res = await fetch(`/api/post/${postId}/action/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ action: 'regenerate', value: note }),
+    });
+    const data = await res.json();
     btn.textContent = 'Regenerar con IA ✨';
     btn.disabled = false;
+    if (res.status === 429) {
+      showToast(data.error, '#e74c3c');
+      document.getElementById('regen-' + postId).style.display = 'none';
+      return;
+    }
     if (data.status === 'ok') {
       document.getElementById('caption-' + postId).textContent = data.caption;
       // Actualizar imagen si el servidor generó una nueva
@@ -249,6 +277,21 @@
   const btn = document.getElementById('backToTop');
   window.addEventListener('scroll', () => btn.classList.toggle('visible', scrollY > 300));
   btn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+
+  async function deleteCalendar(jobId) {
+    if (!confirm('¿Eliminar este calendario? Se borrarán todos los posts. Esta acción no se puede deshacer.')) return;
+    const res = await fetch(`/api/calendar/${jobId}/delete/`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': CSRF },
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      showToast('Calendario eliminado', '#e74c3c');
+      setTimeout(() => window.location.href = '/dashboard/', 1500);
+    } else {
+      showToast(data.error || 'Error al eliminar', '#e74c3c');
+    }
+  }
 </script>
 </body>
 </html>

@@ -147,14 +147,18 @@ def status_api(request, job_id):
 @login_required
 def calendar_review_view(request, job_id):
     from core.content_pipeline.models import ContentPost
+    from core.brand_dna.rate_limits import get_user_plan
     job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
     brand_dna = getattr(job, 'brand_dna', None)
     calendar = getattr(brand_dna, 'calendar', None) if brand_dna else None
     posts = list(calendar.posts.order_by('day_number')) if calendar else []
+    plan = get_user_plan(request.user)
     return render(request, 'brand_dna/calendar_review.html', {
         'job': job,
         'brand_dna': brand_dna,
         'posts': posts,
+        'max_regenerations': plan.max_post_regenerations,
+        'max_edits': plan.max_post_edits,
     })
 
 
