@@ -16,6 +16,15 @@ from playwright.sync_api import sync_playwright
 logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 3
+
+
+def _detect_mime(image_bytes: bytes) -> str:
+    """Detecta el MIME type por magic bytes (PNG, WebP, JPEG)."""
+    if image_bytes[:4] == b'\x89PNG':
+        return 'image/png'
+    if image_bytes[:4] == b'RIFF' and image_bytes[8:12] == b'WEBP':
+        return 'image/webp'
+    return 'image/jpeg'
 _RETRY_DELAYS = [10, 20, 40]
 
 
@@ -98,7 +107,7 @@ class ImageGenerator:
         )
         try:
             client = _vertex_client()
-            mime = 'image/png' if product_image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+            mime = _detect_mime(product_image_bytes)
             image_part = types.Part.from_bytes(data=product_image_bytes, mime_type=mime)
             prompt = (
                 f"You are an Art Director for premium brand advertising.\n"
@@ -126,7 +135,7 @@ class ImageGenerator:
         """Imagen 3 BGSWAP: mantiene el producto exacto y reemplaza el fondo con el entorno del Director de Arte.
         Retorna (image_bytes, success). MASK_MODE_BACKGROUND para que Imagen 3 detecte el fondo automáticamente.
         """
-        mime = 'image/png' if product_image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+        mime = _detect_mime(product_image_bytes)
         try:
             client = _vertex_client()
             resp = client.models.edit_image(
@@ -162,7 +171,7 @@ class ImageGenerator:
         """Gemini Iluminador: genera SVG de sombra/luz para armonizar el producto con el nuevo fondo."""
         try:
             client = _vertex_client()
-            mime = 'image/png' if image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+            mime = _detect_mime(image_bytes)
             image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime)
             primary = colors[0] if colors else '#ffffff'
             prompt = (
@@ -372,7 +381,7 @@ class ImageGenerator:
         try:
             client = _vertex_client()
             if product_image_bytes:
-                mime = 'image/png' if product_image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+                mime = _detect_mime(product_image_bytes)
                 image_part = types.Part.from_bytes(data=product_image_bytes, mime_type=mime)
                 prompt = (
                     f"ADN de marca: {brand_context}\n"
@@ -448,7 +457,7 @@ class ImageGenerator:
         with open(_TEMPLATE_PATH) as f:
             html = f.read()
 
-        bg_mime = 'image/png' if background_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+        bg_mime = _detect_mime(background_bytes)
         bg_b64 = base64.b64encode(background_bytes).decode()
         primary = colors[0] if colors else '#e94560'
 

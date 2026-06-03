@@ -12,6 +12,7 @@ from core.content_pipeline.generators.image_generator import ImageGenerator
 from core.content_pipeline.email_sender import EmailSender
 from core.content_pipeline.scheduler import schedule_daily_emails
 from core.content_pipeline.smart_scheduler import smart_schedule_dates
+from core.content_pipeline.image_utils import normalize_image
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def content_generation_task(job_id: str) -> None:
             prod_full = os.path.join(settings.MEDIA_ROOT, job.product_image_path)
             if os.path.exists(prod_full):
                 with open(prod_full, 'rb') as _f:
-                    product_image_bytes = _f.read()
+                    product_image_bytes = normalize_image(_f.read())
 
         for i, post_data in enumerate(posts_data, start=1):
             hour, minute = map(int, post_data.get('suggested_time', '19:00').split(':'))
@@ -105,7 +106,7 @@ def send_daily_email_task(post_id: str) -> None:
                 prod_full = os.path.join(settings.MEDIA_ROOT, brand_dna.job.product_image_path)
                 if os.path.exists(prod_full):
                     with open(prod_full, 'rb') as _f:
-                        product_image_bytes = _f.read()
+                        product_image_bytes = normalize_image(_f.read())
             post.image_url = image_gen.generate(
                 caption=post.caption,
                 colors=brand_dna.primary_colors,
