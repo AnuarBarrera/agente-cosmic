@@ -204,7 +204,7 @@ class TestLayeredPipeline:
              patch.object(gen, '_render_html_template', return_value=fake_shot) as mock_render:
             result = gen._layered_pipeline('Caption de prueba', ['#1a1a2e'], 'profesional')
 
-        mock_render.assert_called_once_with(fake_bg, fake_content, ['#1a1a2e'])
+        mock_render.assert_called_once_with(fake_bg, fake_content, ['#1a1a2e'], svg_overlay='')
         assert result == fake_shot
 
     @override_settings(
@@ -383,10 +383,11 @@ class TestLayeredPipelineWithProduct:
         gen = ImageGenerator(bucket_name='test-bucket')
         product_img = _png_bytes((200, 150, 100))
         scene_img = _png_bytes((100, 180, 140))
+        fake_svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080"></svg>'
         fake_content = {'headline': 'Brilla distinto', 'subtitle': 'Plata artesanal', 'cta': 'Cómpralo', 'tag': 'JOYERÍA'}
         fake_shot = _png_bytes((100, 100, 100), size=(1080, 1080))
 
-        with patch.object(gen, '_generate_product_scene', return_value=scene_img) as mock_scene, \
+        with patch.object(gen, '_generate_product_scene', return_value=(scene_img, fake_svg)) as mock_scene, \
              patch.object(gen, '_generate_background') as mock_bg, \
              patch.object(gen, '_generate_post_content', return_value=fake_content) as mock_content, \
              patch.object(gen, '_render_html_template', return_value=fake_shot) as mock_render:
@@ -398,7 +399,7 @@ class TestLayeredPipelineWithProduct:
         call_kwargs = mock_content.call_args.kwargs
         assert call_kwargs['product_image_bytes'] == product_img
         assert 'brand_context' in call_kwargs and len(call_kwargs['brand_context']) > 0
-        mock_render.assert_called_once_with(scene_img, fake_content, ['#c0c0c0'])
+        mock_render.assert_called_once_with(scene_img, fake_content, ['#c0c0c0'], svg_overlay=fake_svg)
         assert result == fake_shot
 
     @override_settings(
@@ -428,6 +429,49 @@ class TestGenerateProductScene:
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
         GOOGLE_CLOUD_LOCATION='us-central1',
         VERTEX_IMAGE_EDIT_MODEL='imagen-3.0-capability-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_scene_and_svg_tuple(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        product_img = _png_bytes((200, 150, 100))
+        scene_img = _png_bytes((100, 180, 140))
+        fake_svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080"></svg>'
+
+        with patch.object(gen, '_analyze_product_style', return_value='premium env prompt'), \
+             patch.object(gen, '_bgswap_product', return_value=scene_img), \
+             patch.object(gen, '_generate_svg_overlay', return_value=fake_svg):
+            result = gen._generate_product_scene(product_img, 'Collar artesanal', ['#c0c0c0'], 'elegante')
+
+        assert isinstance(result, tuple) and len(result) == 2
+        assert result[0] == scene_img
+        assert result[1] == fake_svg
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_EDIT_MODEL='imagen-3.0-capability-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_bgswap_fallback_still_returns_tuple(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        product_img = _png_bytes()
+
+        with patch.object(gen, '_analyze_product_style', return_value='env prompt'), \
+             patch.object(gen, '_bgswap_product', return_value=product_img), \
+             patch.object(gen, '_generate_svg_overlay', return_value=''):
+            scene_bytes, svg = gen._generate_product_scene(product_img, 'Caption', [], 'pro')
+
+        assert scene_bytes == product_img
+        assert svg == ''
+
+
+class TestBgswapProduct:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_EDIT_MODEL='imagen-3.0-capability-001',
     )
     def test_returns_scene_bytes_on_success(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
@@ -438,55 +482,54 @@ class TestGenerateProductScene:
             mock_generated = MagicMock()
             mock_generated.image.image_bytes = scene_img
             mock_vc.return_value.models.edit_image.return_value.generated_images = [mock_generated]
-            result = gen._generate_product_scene(product_img, 'Collar artesanal', ['#c0c0c0'], 'elegante')
+            result = gen._bgswap_product(product_img, 'luxury marble pedestal, warm lighting')
         assert result == scene_img
         call_kwargs = mock_vc.return_value.models.edit_image.call_args.kwargs
-        assert call_kwargs['model'] == 'imagen-3.0-capability-001'
-        assert 'person' in call_kwargs['prompt'].lower() or 'lifestyle' in call_kwargs['prompt'].lower()
+        from google.genai.types import EditMode
+        assert call_kwargs['config'].edit_mode == EditMode.EDIT_MODE_BGSWAP
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
         GOOGLE_CLOUD_LOCATION='us-central1',
         VERTEX_IMAGE_EDIT_MODEL='imagen-3.0-capability-001',
     )
-    def test_falls_back_to_product_image_on_api_error(self):
+    def test_falls_back_to_product_on_api_error(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         product_img = _png_bytes()
         with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
             mock_vc.return_value.models.edit_image.side_effect = Exception('API error')
-            result = gen._generate_product_scene(product_img, 'Caption', [], 'profesional')
+            result = gen._bgswap_product(product_img, 'some prompt')
         assert result == product_img
+
+
+class TestGenerateSvgOverlay:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_svg_string_on_success(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080"><ellipse cx="540" cy="900" rx="200" ry="30" fill="black" opacity="0.18"/></svg>'
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = fake_svg
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._generate_svg_overlay(_png_bytes(), ['#c0c0c0'])
+        assert result.startswith('<svg')
+        assert result.endswith('</svg>')
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
         GOOGLE_CLOUD_LOCATION='us-central1',
-        VERTEX_IMAGE_EDIT_MODEL='imagen-3.0-capability-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
     )
-    def test_falls_back_to_product_image_on_empty_response(self):
+    def test_returns_empty_string_on_api_error(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        product_img = _png_bytes()
         with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
-            mock_vc.return_value.models.edit_image.return_value.generated_images = []
-            result = gen._generate_product_scene(product_img, 'Caption', [], 'profesional')
-        assert result == product_img
-
-    @override_settings(
-        GOOGLE_CLOUD_PROJECT='agente-cosmic',
-        GOOGLE_CLOUD_LOCATION='us-central1',
-        VERTEX_IMAGE_EDIT_MODEL='imagen-3.0-capability-001',
-    )
-    def test_uses_subject_reference_product_image_mode(self):
-        from core.content_pipeline.generators.image_generator import ImageGenerator
-        gen = ImageGenerator(bucket_name='test-bucket')
-        product_img = _png_bytes()
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
-            mock_vc.return_value.models.edit_image.side_effect = Exception('stop early')
-            gen._generate_product_scene(product_img, 'Caption', [], 'pro')
-        call_kwargs = mock_vc.return_value.models.edit_image.call_args.kwargs
-        config = call_kwargs['config']
-        from google.genai.types import EditMode
-        assert config.edit_mode == EditMode.EDIT_MODE_PRODUCT_IMAGE
-        ref_images = call_kwargs['reference_images']
-        assert len(ref_images) == 1  # SubjectReferenceImage
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            result = gen._generate_svg_overlay(_png_bytes(), [])
+        assert result == ''

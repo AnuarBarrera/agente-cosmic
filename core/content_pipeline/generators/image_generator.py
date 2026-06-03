@@ -47,59 +47,118 @@ class ImageGenerator:
         if product_image_bytes:
             kw_str = ', '.join((keywords or [])[:3])
             brand_context = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
-            background_bytes = self._generate_product_scene(product_image_bytes, caption, colors, tone)
+            background_bytes, svg_overlay = self._generate_product_scene(product_image_bytes, caption, colors, tone)
             content = self._generate_post_content(caption, product_image_bytes=product_image_bytes, brand_context=brand_context)
         else:
             background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, max_qc_retries=max_qc_retries)
             content = self._generate_post_content(caption, product_image_bytes=None)
-        return self._render_html_template(background_bytes, content, colors)
+            svg_overlay = ''
+        return self._render_html_template(background_bytes, content, colors, svg_overlay=svg_overlay)
 
-    def _generate_product_scene(self, product_image_bytes: bytes, caption: str, colors: list[str], tone: str) -> bytes:
-        """Imagen 3 genera una foto lifestyle completa: persona usando el producto en escena real.
-        El producto referenciado aparece en la nueva imagen siendo usado naturalmente.
-        Fallback: devuelve la imagen original si la API falla.
+    def _generate_product_scene(self, product_image_bytes: bytes, caption: str, colors: list[str], tone: str) -> tuple[bytes, str]:
+        """Pipeline agéntico de 3 pasos:
+        1. Gemini Director de Arte → prompt de entorno premium específico para este producto
+        2. Imagen 3 BGSWAP → producto pixel-perfect sobre ese entorno
+        3. Gemini Iluminador → SVG overlay de sombra/luz para armonizar
         """
-        mime = 'image/png' if product_image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
-        color_str = ', '.join(colors[:3]) if colors else 'warm natural tones'
-        prompt = (
-            f"Professional lifestyle photograph. A person naturally using or holding this exact product. "
-            f"The product is clearly visible and central — someone drinking from this mug, wearing this item, "
-            f"using this object in their daily life. "
-            f"Scene: authentic real-world environment, natural interaction, editorial photography quality. "
-            f"DSLR camera, shallow depth of field, beautiful natural lighting. "
-            f"Mood: {tone}. Color palette: {color_str}. "
-            f"Context: {caption[:80]}. "
-            f"NOT a catalog shot. NOT floating product on plain background. NOT studio white. "
-            f"Square 1:1 format. Photorealistic. "
-            f"Absolutely NO text, NO letters, NO logos, NO UI elements."
+        env_prompt = self._analyze_product_style(product_image_bytes, caption, colors, tone)
+        scene_bytes = self._bgswap_product(product_image_bytes, env_prompt)
+        svg_overlay = self._generate_svg_overlay(scene_bytes, colors)
+        return scene_bytes, svg_overlay
+
+    def _analyze_product_style(self, product_image_bytes: bytes, caption: str, colors: list[str], tone: str) -> str:
+        """Gemini Director de Arte: analiza el producto y genera prompt de entorno premium para Imagen 3."""
+        color_str = ', '.join(colors[:3]) if colors else 'warm neutrals'
+        _FALLBACK = (
+            f"Professional editorial product photography background. "
+            f"Elegant real-world environment: wooden surface, marble, or lifestyle context. "
+            f"Natural lighting, shallow depth of field, warm bokeh. Mood: {tone}. "
+            f"NOT white background. NOT abstract. NOT 3D render. Absolutely NO text, NO logos."
         )
+        try:
+            client = _vertex_client()
+            mime = 'image/png' if product_image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+            image_part = types.Part.from_bytes(data=product_image_bytes, mime_type=mime)
+            prompt = (
+                f"You are an Art Director for premium brand advertising.\n"
+                f"Analyze this product image and generate a specific Imagen 3 prompt (max 100 words) "
+                f"for the BACKGROUND ENVIRONMENT ONLY — where this product would look spectacular.\n"
+                f"Brand context: {caption[:80]}. Color palette: {color_str}. Mood: {tone}.\n\n"
+                f"Describe: surface/pedestal/setting, lighting style, atmosphere, complementary textures.\n"
+                f"Do NOT mention the product itself — only the environment that showcases it.\n"
+                f"End with: 'NOT abstract. NOT 3D render. Absolutely NO text, NO logos.'\n"
+                f"Return ONLY the prompt text, no explanations."
+            )
+            resp = client.models.generate_content(
+                model=settings.VERTEX_TEXT_MODEL,
+                contents=[image_part, prompt],
+            )
+            result = resp.text.strip().strip('"').strip("'")
+            if result:
+                logger.info(f"Art Director env prompt: {result[:100]}...")
+                return result
+        except Exception as e:
+            logger.warning(f"Product style analysis failed (using fallback): {e}")
+        return _FALLBACK
+
+    def _bgswap_product(self, product_image_bytes: bytes, environment_prompt: str) -> bytes:
+        """Imagen 3 BGSWAP: mantiene el producto exacto y reemplaza el fondo con el entorno del Director de Arte."""
+        mime = 'image/png' if product_image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
         try:
             client = _vertex_client()
             resp = client.models.edit_image(
                 model=settings.VERTEX_IMAGE_EDIT_MODEL,
-                prompt=prompt,
+                prompt=environment_prompt,
                 reference_images=[
-                    types.SubjectReferenceImage(
+                    types.RawReferenceImage(
                         reference_image=types.Image(image_bytes=product_image_bytes, mime_type=mime),
                         reference_id=1,
-                        config=types.SubjectReferenceConfig(
-                            subject_type=types.SubjectReferenceType.SUBJECT_TYPE_PRODUCT,
-                        ),
-                    )
+                    ),
                 ],
                 config=types.EditImageConfig(
-                    edit_mode=types.EditMode.EDIT_MODE_PRODUCT_IMAGE,
+                    edit_mode=types.EditMode.EDIT_MODE_BGSWAP,
                     number_of_images=1,
                     aspect_ratio='1:1',
                 ),
             )
             if resp.generated_images:
-                logger.info("Product lifestyle scene generated (SubjectReference PRODUCT_IMAGE)")
+                logger.info("BGSWAP exitoso — producto sobre entorno premium")
                 return resp.generated_images[0].image.image_bytes
-            logger.warning("edit_image returned no images, falling back to product image")
+            logger.warning("BGSWAP sin imágenes, usando foto original")
         except Exception as e:
-            logger.warning(f"Product scene generation failed (falling back to product image): {e}")
+            logger.warning(f"BGSWAP fallido (usando foto original): {e}")
         return product_image_bytes
+
+    def _generate_svg_overlay(self, image_bytes: bytes, colors: list[str]) -> str:
+        """Gemini Iluminador: genera SVG de sombra/luz para armonizar el producto con el nuevo fondo."""
+        try:
+            client = _vertex_client()
+            mime = 'image/png' if image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+            image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime)
+            primary = colors[0] if colors else '#ffffff'
+            prompt = (
+                f"Analyze this product advertising image. Generate an SVG transparent overlay (1080x1080) that:\n"
+                f"1. Adds a subtle soft shadow ellipse below the product (dark fill, opacity 0.15-0.20)\n"
+                f"2. Adds a gentle ambient light gradient matching the scene's dominant light direction\n"
+                f"3. Applies a very soft color wash using {primary} at opacity 0.05-0.08 to harmonize\n\n"
+                f"Rules:\n"
+                f"- Use ONLY: <defs>, <rect>, <ellipse>, <radialGradient>, <linearGradient> elements\n"
+                f"- All fills must use opacity 0.25 or lower — barely visible, purely atmospheric\n"
+                f"- No solid opaque fills. SVG root has no background-color.\n"
+                f"- Return ONLY valid SVG starting with <svg and ending with </svg>. No markdown."
+            )
+            resp = client.models.generate_content(
+                model=settings.VERTEX_TEXT_MODEL,
+                contents=[image_part, prompt],
+            )
+            raw = resp.text.strip()
+            svg_match = re.search(r'<svg[\s\S]*?</svg>', raw, re.DOTALL)
+            if svg_match:
+                logger.info("SVG lighting overlay generado")
+                return svg_match.group()
+        except Exception as e:
+            logger.warning(f"SVG overlay fallido (omitiendo): {e}")
+        return ''
 
     def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', max_qc_retries: int = 2) -> bytes:
         color_str = ', '.join(colors[:3]) if colors else 'modern vibrant colors'
@@ -261,8 +320,8 @@ class ImageGenerator:
         'instagram_post_top.html',     # upper third — texto arriba
     ]
 
-    def _render_html_template(self, background_bytes: bytes, content: dict, colors: list[str]) -> bytes:
-        """Inject background + content into a randomly chosen HTML template, render via Playwright → PNG."""
+    def _render_html_template(self, background_bytes: bytes, content: dict, colors: list[str], svg_overlay: str = '') -> bytes:
+        """Inject background + content + optional SVG overlay into a randomly chosen HTML template → PNG."""
         template_name = random.choice(self._TEMPLATES)
         _TEMPLATE_PATH = os.path.normpath(os.path.join(
             os.path.dirname(__file__),
@@ -276,8 +335,14 @@ class ImageGenerator:
         bg_b64 = base64.b64encode(background_bytes).decode()
         primary = colors[0] if colors else '#e94560'
 
+        svg_div = (
+            f'<div style="position:absolute;inset:0;pointer-events:none;z-index:1;">{svg_overlay}</div>'
+            if svg_overlay else ''
+        )
+
         html = html.replace('{{bg_data_url}}', f'data:{bg_mime};base64,{bg_b64}')
         html = html.replace('{{primary_color}}', primary)
+        html = html.replace('{{svg_overlay}}', svg_div)
         html = html.replace('{{tag}}', _html.escape(content.get('tag', 'DESTACADO')))
         html = html.replace('{{headline}}', _html.escape(content.get('headline', '')))
         html = html.replace('{{subtitle}}', _html.escape(content.get('subtitle', '')))
