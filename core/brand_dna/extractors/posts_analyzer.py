@@ -79,7 +79,7 @@ class PostsAnalyzer:
         parts = [_IMAGE_PROMPT]
         for img_bytes in images[:5]:
             parts.append(types.Part.from_bytes(data=img_bytes, mime_type='image/jpeg'))
-        resp = client.models.generate_content(model=settings.VERTEX_VISION_MODEL, contents=parts)
+        resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=parts)
         raw = resp.text.strip()
         raw = re.sub(r'^```(?:json)?\n?', '', raw)
         raw = re.sub(r'\n?```$', '', raw)

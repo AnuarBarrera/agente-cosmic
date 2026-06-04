@@ -50,7 +50,7 @@ class LogoAnalyzer:
         client = _vertex_client()
         image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
         resp = client.models.generate_content(
-            model=settings.VERTEX_VISION_MODEL,
+            model=settings.VERTEX_TEXT_MODEL,
             contents=[_VISION_PROMPT, image_part],
         )
         return resp.text.strip()

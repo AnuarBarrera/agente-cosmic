@@ -6,6 +6,7 @@ from core.brand_dna.models import AnalysisJob, BrandDNA
 from core.brand_dna.extractors.web_scraper import WebScraper
 from core.brand_dna.extractors.logo_analyzer import LogoAnalyzer
 from core.brand_dna.extractors.posts_analyzer import PostsAnalyzer
+from core.content_pipeline.image_utils import normalize_image
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +28,9 @@ def analyze_brand_task(job_id: str) -> None:
             logo_path = os.path.join(settings.MEDIA_ROOT, job.logo_file_path)
             if os.path.exists(logo_path):
                 with open(logo_path, 'rb') as f:
-                    logo_bytes = f.read()
-                mime = 'image/png' if logo_path.endswith('.png') else 'image/jpeg'
+                    logo_bytes = normalize_image(f.read())
                 analyzer = LogoAnalyzer()
-                logo_data = analyzer.analyze(logo_bytes, mime)
+                logo_data = analyzer.analyze(logo_bytes, 'image/webp')
         job.update_progress(AnalysisJob.STAGE_LOGO, 55)
 
         job.update_progress(AnalysisJob.STAGE_POSTS, 58)
@@ -39,7 +39,7 @@ def analyze_brand_task(job_id: str) -> None:
             full_path = os.path.join(settings.MEDIA_ROOT, img_path)
             if os.path.exists(full_path):
                 with open(full_path, 'rb') as f:
-                    posts_images.append(f.read())
+                    posts_images.append(normalize_image(f.read()))
         posts_analyzer = PostsAnalyzer()
         posts_data = posts_analyzer.analyze(
             images=posts_images if posts_images else None,
