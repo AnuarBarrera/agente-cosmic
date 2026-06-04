@@ -74,9 +74,11 @@
     .btn-regen:hover { background: #4a4a2a; }
     .btn-save { background: #e94560; color: #fff; display: none; }
     .btn-save:hover { background: #c73652; }
-    .post-card.approved .btn-approve { display: none; }
+    .post-card.approved .btn-approve,
+    .post-card.approved .btn-edit,
+    .post-card.approved .btn-regen { display: none; }
     .post-card.approved .actions::after {
-      content: '✓ Aprobado';
+      content: '✓ Aprobado — sin cambios pendientes';
       font-size: 0.78rem; color: #4caf7d; font-weight: 600;
     }
     .feedback-area { margin-top: 10px; display: none; }
