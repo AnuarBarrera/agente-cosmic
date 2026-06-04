@@ -25,6 +25,36 @@ def _detect_mime(image_bytes: bytes) -> str:
     if image_bytes[:4] == b'RIFF' and image_bytes[8:12] == b'WEBP':
         return 'image/webp'
     return 'image/jpeg'
+
+
+def _luminance(hex_color: str) -> float:
+    """Luminancia relativa (0=negro, 1=blanco) de un color hex."""
+    try:
+        h = hex_color.strip('#')
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    except Exception:
+        return 0.5
+
+
+def _pick_button_color(colors: list[str]) -> str:
+    """Elige el color más oscuro de la paleta que tenga buen contraste con texto blanco.
+    Si todos son claros, oscurece el primario."""
+    _FALLBACK = '#1a1a2e'
+    if not colors:
+        return _FALLBACK
+    dark = [c for c in colors if _luminance(c) < 0.45]
+    if dark:
+        return min(dark, key=_luminance)  # el más oscuro disponible
+    # Todos claros: oscurecer el primero al 40%
+    try:
+        h = colors[0].strip('#')
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f'#{int(r*0.4):02x}{int(g*0.4):02x}{int(b*0.4):02x}'
+    except Exception:
+        return _FALLBACK
+
+
 _RETRY_DELAYS = [10, 20, 40]
 
 
@@ -466,8 +496,10 @@ class ImageGenerator:
             if svg_overlay else ''
         )
 
+        button_color = _pick_button_color(colors)
         html = html.replace('{{bg_data_url}}', f'data:{bg_mime};base64,{bg_b64}')
         html = html.replace('{{primary_color}}', primary)
+        html = html.replace('{{button_color}}', button_color)
         html = html.replace('{{svg_overlay}}', svg_div)
         html = html.replace('{{tag}}', _html.escape(content.get('tag', 'DESTACADO')))
         html = html.replace('{{headline}}', _html.escape(content.get('headline', '')))

@@ -17,7 +17,7 @@
   <h2 style="border-bottom: 2px solid #e94560; padding-bottom: 8px;">Tu Calendario de Contenido</h2>
   {% for post in posts %}
   <div style="background: #f9f9f9; padding: 12px; margin: 8px 0; border-left: 4px solid #e94560;">
-    <strong>Dia {{ post.day_number }}</strong> — {{ post.suggested_time }}
+    <strong>Dia {{ post.day_number }}</strong> — {{ post.suggested_time|time:"H:i" }}
     <p>{{ post.caption }}</p>
     <small>{{ post.hashtags|join:" " }}</small>
   </div>

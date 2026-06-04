@@ -11,7 +11,7 @@
     {% if post.image_url %}
     <img src="{{ post.image_url }}" style="max-width: 100%; border-radius: 8px; margin: 12px 0;" alt="Imagen del post">
     {% endif %}
-    <p><strong>Horario sugerido:</strong> {{ post.suggested_time }}</p>
+    <p><strong>Horario sugerido:</strong> {{ post.suggested_time|time:"H:i" }}</p>
     <p><strong>Hashtags:</strong> {{ post.hashtags|join:" " }}</p>
   </div>
 
