@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Agente Cosmic — ADN de Marca + Contenido Automatico</title>
+  <title>Agente Cosmic — ADN de Marca + Contenido Automático</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #f0f0f0; min-height: 100vh; }
@@ -21,8 +21,11 @@
     .section-title { font-size: 1rem; color: #e94560; margin: 28px 0 16px; font-weight: 600; }
     .optional-badge { font-size: 0.75rem; background: #333; color: #aaa; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
     input[type="file"] { width: 100%; padding: 10px; background: #0d0d1a; border: 1px dashed #444; border-radius: 8px; color: #aaa; }
-    .btn { width: 100%; padding: 16px; background: #e94560; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; font-weight: 600; cursor: pointer; margin-top: 12px; }
+    .btn { width: 100%; padding: 16px; background: #e94560; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; font-weight: 600; cursor: pointer; margin-top: 12px; display: flex; align-items: center; justify-content: center; gap: 10px; transition: background 0.2s; }
     .btn:hover { background: #c73652; }
+    .btn:disabled { background: #8a2a3c; cursor: not-allowed; }
+    .btn-spinner { width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; display: none; flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .features { display: flex; justify-content: center; gap: 32px; padding: 40px 20px; flex-wrap: wrap; }
     .feature { text-align: center; max-width: 160px; }
     .feature .icon { font-size: 2rem; margin-bottom: 8px; }
@@ -55,7 +58,7 @@
 
   <div class="hero">
     <h1>Agente Cosmic</h1>
-    <p>Da la URL de tu negocio y genera automaticamente 7 dias de contenido listo para publicar — posts, imagenes y mas.</p>
+    <p>Da la URL de tu negocio y obtén 7 días de contenido listo para publicar — imágenes generadas con Imagen 3, captions escritos por Gemini, entregados automáticamente a tu correo.</p>
   </div>
 
   {% if error %}
@@ -97,16 +100,30 @@
         <small style="color:#666;font-size:0.8rem;margin-top:4px;display:block;">Ej: collar de plata, platillo del menú, prenda de ropa. Con 1 imagen se usa 2 días; con 3-7 imágenes, una distinta por día.</small>
       </div>
 
-      <button type="submit" class="btn">Analizar mi marca</button>
+      <button type="submit" class="btn" id="submitBtn">
+        <span class="btn-spinner" id="btnSpinner"></span>
+        <span id="btnText">Analizar mi marca</span>
+      </button>
     </form>
   </div>
 
   <div class="features">
-    <div class="feature"><div class="icon">*</div><p>Analisis del sitio web</p></div>
-    <div class="feature"><div class="icon">*</div><p>Extraccion de colores del logo</p></div>
-    <div class="feature"><div class="icon">*</div><p>7 dias de contenido</p></div>
-    <div class="feature"><div class="icon">*</div><p>Entregado por email</p></div>
-    <div class="feature"><div class="icon">*</div><p>Google Cloud Vision</p></div>
+    <div class="feature"><div class="icon">🔍</div><p>Análisis del sitio web</p></div>
+    <div class="feature"><div class="icon">🎨</div><p>Extracción de colores y tono de marca</p></div>
+    <div class="feature"><div class="icon">🖼️</div><p>Imágenes con Imagen 3 + Art Director</p></div>
+    <div class="feature"><div class="icon">📅</div><p>7 días de contenido generado por Gemini</p></div>
+    <div class="feature"><div class="icon">📬</div><p>Entregado automáticamente por email</p></div>
   </div>
+
+  <script>
+    document.querySelector('form').addEventListener('submit', function() {
+      const btn = document.getElementById('submitBtn');
+      const spinner = document.getElementById('btnSpinner');
+      const text = document.getElementById('btnText');
+      btn.disabled = true;
+      spinner.style.display = 'block';
+      text.textContent = 'Analizando...';
+    });
+  </script>
 </body>
 </html>
