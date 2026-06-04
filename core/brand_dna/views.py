@@ -196,6 +196,11 @@ def post_action_api(request, post_id):
     if action == 'approve':
         post.user_status = ContentPost.USER_STATUS_APPROVED
         post.save(update_fields=['user_status'])
+        logger.info(
+            f"POST APROBADO | user={request.user.email} | "
+            f"job={post.calendar.brand_dna.job_id} | día={post.day_number} | "
+            f"post={post_id}"
+        )
         return JsonResponse({'status': 'ok'})
 
     if action == 'edit':
