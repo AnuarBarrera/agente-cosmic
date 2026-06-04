@@ -108,10 +108,6 @@ AI_PROVIDER = get_env('AI_PROVIDER', default='gemini')
 AI_MODEL = get_env('AI_MODEL', default='gemini-3.1-flash-lite')
 GEMINI_API_KEY = get_env('GEMINI_API_KEY', default='')
 SERPER_API_KEY = get_env('SERPER_API_KEY', default='')
-MCP_SERVERS = {
-    'brave_search': get_env('BRAVE_SEARCH_MCP_URL', default='http://brave-search-mcp:8080'),
-}
-
 PEXELS_API_KEY = get_env('PEXELS_API_KEY', default='')
 
 # --- n8n + Maps Settings ---
@@ -224,7 +220,6 @@ INSTALLED_APPS = [
     'anymail',
     'core.tenant_management.apps.TenantManagementConfig',
     'core.shared.apps.SharedConfig',
-    'core.agent.apps.AgentConfig',
     'core.brand_dna.apps.BrandDnaConfig',
     'core.content_pipeline.apps.ContentPipelineConfig',
 ]

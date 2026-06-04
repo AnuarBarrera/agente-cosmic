@@ -28,7 +28,6 @@ handler500 = 'core.shared.error_handlers.handler500'
 urlpatterns = [
     path('health/', health_check, name='health'),
     path('admin/', admin.site.urls),
-    path('api/v1/agent/', include('core.agent.interfaces.urls')),
     path('', include('core.brand_dna.urls')),
 ]
 
