@@ -66,6 +66,10 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 # Instead, we'll validate hosts manually in our middleware
 USE_X_FORWARDED_HOST = False
 
+# Security headers (Django SecurityMiddleware)
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'SAMEORIGIN'
+
 # CORS Configuration - secure for production
 if DEBUG:
     # Development - allow local origins
