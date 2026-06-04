@@ -39,6 +39,7 @@ class AnalysisJob(models.Model):
     posts_text = models.TextField(blank=True, default='')
     profile_url = models.URLField(blank=True, default='')
     product_image_path = models.CharField(max_length=500, blank=True, default='')
+    product_image_paths = models.JSONField(default=list, blank=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

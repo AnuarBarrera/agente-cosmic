@@ -17,6 +17,36 @@ from core.content_pipeline.image_utils import normalize_image
 logger = logging.getLogger(__name__)
 
 
+def _load_product_images(job) -> list[bytes]:
+    """Carga hasta 7 imágenes de producto normalizadas a WebP."""
+    paths = job.product_image_paths or []
+    if not paths and job.product_image_path:
+        paths = [job.product_image_path]
+    result = []
+    for path in paths[:7]:
+        full = os.path.join(settings.MEDIA_ROOT, path)
+        if os.path.exists(full):
+            with open(full, 'rb') as f:
+                result.append(normalize_image(f.read()))
+    return result
+
+
+def _product_image_for_day(day_number: int, images: list[bytes]) -> bytes | None:
+    """Asigna imagen de producto por día.
+    - Si hay imagen para ese día exacto: úsala.
+    - Si solo hay 1 imagen: se repite el día 2 (máx 2 usos).
+    - Después del día 3 sin imagen directa: sin producto.
+    """
+    n = len(images)
+    if n == 0:
+        return None
+    if day_number <= n:
+        return images[day_number - 1]
+    if n == 1 and day_number == 2:
+        return images[0]
+    return None
+
+
 def content_generation_task(job_id: str) -> None:
     job = AnalysisJob.objects.get(id=job_id)
     brand_dna = job.brand_dna
@@ -35,18 +65,14 @@ def content_generation_task(job_id: str) -> None:
 
         scheduled_dates = smart_schedule_dates(brand_dna, base_date=mexico_today, count=len(posts_data))
 
-        # Load product image bytes if client uploaded one
-        product_image_bytes = None
-        if job.product_image_path:
-            prod_full = os.path.join(settings.MEDIA_ROOT, job.product_image_path)
-            if os.path.exists(prod_full):
-                with open(prod_full, 'rb') as _f:
-                    product_image_bytes = normalize_image(_f.read())
+        # Cargar imágenes de producto (hasta 7, una por día)
+        product_images_bytes = _load_product_images(job)
 
         for i, post_data in enumerate(posts_data, start=1):
             hour, minute = map(int, post_data.get('suggested_time', '19:00').split(':'))
             scheduled = scheduled_dates[i - 1]
 
+            day_product = _product_image_for_day(i, product_images_bytes)
             if i == 1:
                 image_url = image_gen.generate(
                     caption=post_data['caption'],
@@ -56,7 +82,7 @@ def content_generation_task(job_id: str) -> None:
                     brand_name=brand_dna.business_name,
                     keywords=brand_dna.keywords,
                     description=brand_dna.description,
-                    product_image_bytes=product_image_bytes,
+                    product_image_bytes=day_product,
                 )
             else:
                 image_url = ''
@@ -101,12 +127,8 @@ def send_daily_email_task(post_id: str) -> None:
         job_id = str(brand_dna.job.id)
         try:
             image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
-            product_image_bytes = None
-            if brand_dna.job.product_image_path:
-                prod_full = os.path.join(settings.MEDIA_ROOT, brand_dna.job.product_image_path)
-                if os.path.exists(prod_full):
-                    with open(prod_full, 'rb') as _f:
-                        product_image_bytes = normalize_image(_f.read())
+            product_images = _load_product_images(brand_dna.job)
+            product_image_bytes = _product_image_for_day(post.day_number, product_images)
             post.image_url = image_gen.generate(
                 caption=post.caption,
                 colors=brand_dna.primary_colors,

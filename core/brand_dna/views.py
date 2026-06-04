@@ -73,17 +73,21 @@ def analyze_submit(request):
         job.post_images_paths = post_paths
         job.save(update_fields=['post_images_paths'])
 
-    if 'product_image' in request.FILES:
-        prod_file = request.FILES['product_image']
-        ext = prod_file.name.rsplit('.', 1)[-1].lower() if '.' in prod_file.name else 'jpg'
-        prod_path = f'uploads/product_{job.id}.{ext}'
-        full_path = os.path.join(settings.MEDIA_ROOT, prod_path)
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, 'wb') as f:
-            for chunk in prod_file.chunks():
-                f.write(chunk)
-        job.product_image_path = prod_path
-        job.save(update_fields=['product_image_path'])
+    prod_files = request.FILES.getlist('product_images')[:7]
+    if prod_files:
+        prod_paths = []
+        for idx, prod_file in enumerate(prod_files):
+            ext = prod_file.name.rsplit('.', 1)[-1].lower() if '.' in prod_file.name else 'jpg'
+            prod_path = f'uploads/product_{job.id}_{idx}.{ext}'
+            full_path = os.path.join(settings.MEDIA_ROOT, prod_path)
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            with open(full_path, 'wb') as f:
+                for chunk in prod_file.chunks():
+                    f.write(chunk)
+            prod_paths.append(prod_path)
+        job.product_image_paths = prod_paths
+        job.product_image_path = prod_paths[0]
+        job.save(update_fields=['product_image_path', 'product_image_paths'])
 
     from core.brand_dna.tasks import analyze_brand_task
     django_rq.enqueue(analyze_brand_task, str(job.id))
