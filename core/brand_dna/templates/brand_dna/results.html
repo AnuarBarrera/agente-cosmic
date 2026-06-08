@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/svg+xml" href="{% url 'favicon' %}">
   <title>Analizando tu marca — Agente Cosmic</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -46,51 +47,40 @@
       margin-bottom: 24px; text-align: center;
     }
 
-    /* ── CAT SCENE ── */
-    .cat-scene {
-      position: relative; height: 120px; margin: 0 auto 24px;
-      max-width: 480px; overflow: hidden;
+    /* ── LOGO LOADING SCENE ── */
+    .logo-scene {
+      position: relative; height: 140px; margin: 0 auto 24px;
+      display: flex; align-items: center; justify-content: center;
     }
-    .cat-run {
-      position: absolute; bottom: 0;
-      font-size: 3.2rem; line-height: 1;
-      animation: catRun 5s ease-in-out infinite;
-      white-space: nowrap;
+    .logo-loading {
+      width: 120px; height: 120px;
+      animation: logoFloat 3.4s ease-in-out infinite;
     }
-    .cat-type {
-      position: absolute; bottom: 0;
-      font-size: 3.2rem; line-height: 1;
-      animation: catType 5s ease-in-out infinite;
-      opacity: 0;
-      white-space: nowrap;
+    .portal-ring {
+      transform-box: fill-box; transform-origin: center;
+      animation: portalSpin 7s linear infinite;
     }
-    .stars {
-      position: absolute; top: 8px; left: 0; right: 0;
-      font-size: 1rem; text-align: center; opacity: 0;
-      animation: starsFloat 5s ease-in-out infinite;
-      color: #e94560;
+    .portal-path { animation: portalPulse 2.6s ease-in-out infinite; }
+    .portal-spark {
+      transform-box: fill-box; transform-origin: center;
+      animation: sparkTwinkle 2.2s ease-in-out infinite;
     }
-    @keyframes catRun {
-      0%   { left: -80px; opacity: 1; transform: scaleX(1); }
-      35%  { left: 38%; opacity: 1; transform: scaleX(1); }
-      40%  { left: 38%; opacity: 0; transform: scaleX(1); }
-      60%  { left: 38%; opacity: 0; transform: scaleX(1); }
-      65%  { left: 38%; opacity: 1; transform: scaleX(-1); }
-      100% { left: calc(100% + 80px); opacity: 1; transform: scaleX(-1); }
+    .portal-spark.s2 { animation-delay: 0.5s; }
+    .portal-spark.s3 { animation-delay: 1s; }
+    @keyframes logoFloat {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(-8px); }
     }
-    @keyframes catType {
-      0%   { left: 38%; opacity: 0; }
-      40%  { left: 38%; opacity: 1; }
-      60%  { left: 38%; opacity: 1; }
-      65%  { left: 38%; opacity: 0; }
-      100% { left: 38%; opacity: 0; }
+    @keyframes portalSpin {
+      to { transform: rotate(360deg); }
     }
-    @keyframes starsFloat {
-      0%   { opacity: 0; transform: translateY(0); }
-      42%  { opacity: 0; transform: translateY(0); }
-      50%  { opacity: 1; transform: translateY(-8px); }
-      58%  { opacity: 0; transform: translateY(-16px); }
-      100% { opacity: 0; }
+    @keyframes portalPulse {
+      0%, 100% { opacity: 0.6; }
+      50%      { opacity: 1; }
+    }
+    @keyframes sparkTwinkle {
+      0%, 100% { opacity: 0.25; transform: scale(0.7); }
+      50%      { opacity: 1; transform: scale(1.4); }
     }
 
     /* ── LOADING MESSAGES ── */
@@ -177,10 +167,31 @@
 
   <!-- ── LOADING ── -->
   <div class="loading-card" id="progressCard">
-    <div class="cat-scene">
-      <div class="stars" id="stars">✨ analizando... ✨</div>
-      <div class="cat-run" id="catRun">🐱</div>
-      <div class="cat-type" id="catType">😸💻</div>
+    <div class="logo-scene">
+      <svg class="logo-loading" viewBox="0 0 512 512" aria-hidden="true">
+        <defs>
+          <linearGradient id="loadingPortalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#E63946" />
+            <stop offset="50%" stop-color="#FF5E7E" />
+            <stop offset="100%" stop-color="#00F2FE" />
+          </linearGradient>
+          <filter id="loadingPortalGlow"><feDropShadow dx="0" dy="0" stdDeviation="14" flood-color="#FF5E7E" flood-opacity="0.5"/></filter>
+        </defs>
+        <g transform="translate(10, -25)">
+          <g transform="rotate(12 310 256)">
+            <rect x="240" y="176" width="150" height="160" rx="12" fill="#151624" stroke="#FFFFFF" stroke-width="4"/>
+            <rect x="264" y="200" width="102" height="45" rx="6" fill="url(#loadingPortalGrad)" opacity="0.2"/>
+            <line x1="264" y1="270" x2="340" y2="270" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" />
+            <line x1="264" y1="285" x2="310" y2="285" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" opacity="0.5" />
+          </g>
+          <g class="portal-ring">
+            <path class="portal-path" d="M 300,140 C 200,110 110,180 110,256 C 110,332 200,402 300,372" fill="none" stroke="url(#loadingPortalGrad)" stroke-width="28" stroke-linecap="round" filter="url(#loadingPortalGlow)"/>
+            <circle class="portal-spark s1" cx="100" cy="180" r="5" fill="#00F2FE" />
+            <circle class="portal-spark s2" cx="80" cy="260" r="3" fill="#FF5E7E" />
+            <circle class="portal-spark s3" cx="130" cy="340" r="4" fill="#FFFFFF" />
+          </g>
+        </g>
+      </svg>
     </div>
 
     <div class="loading-msg" id="loadingMsg">Iniciando análisis...</div>
@@ -229,7 +240,7 @@
 
 <script>
   // ── Mensajes rotativos del gatito ──
-  const catMsgs = [
+  const loadingMsgs = [
     ['🔍 Leyendo tu sitio web...', 'Escaneando contenido, colores e identidad visual'],
     ['🎨 Detectando la paleta de marca...', 'Extrayendo colores y elementos del logo'],
     ['📝 Analizando tu estilo de comunicación...', 'El agente está aprendiendo cómo hablas'],
@@ -240,7 +251,7 @@
   ];
   let msgIdx = 0;
   function rotateMsgs() {
-    const [main, sub] = catMsgs[msgIdx % catMsgs.length];
+    const [main, sub] = loadingMsgs[msgIdx % loadingMsgs.length];
     const msgEl = document.getElementById('loadingMsg');
     const subEl = document.getElementById('loadingSub');
     msgEl.style.opacity = 0;

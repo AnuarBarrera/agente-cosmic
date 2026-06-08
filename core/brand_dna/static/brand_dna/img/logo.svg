@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="portalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E63946" />
+      <stop offset="50%" stop-color="#FF5E7E" />
+      <stop offset="100%" stop-color="#00F2FE" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFE259" />
+      <stop offset="100%" stop-color="#FFA751" />
+    </linearGradient>
+    <filter id="portalGlow"><feDropShadow dx="0" dy="0" stdDeviation="15" flood-color="#FF5E7E" flood-opacity="0.4"/></filter>
+    <filter id="textGlow"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#FFA751" flood-opacity="0.25"/></filter>
+  </defs>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;900&amp;display=swap');
+    .tech-sub { font-family: 'Orbitron', sans-serif; font-size: 13px; font-weight: 600; fill: #FFFFFF; letter-spacing: 10px; opacity: 0.6; }
+    .tech-main { font-family: 'Orbitron', sans-serif; font-size: 44px; font-weight: 900; fill: 'url(#goldGrad)'; letter-spacing: 6px; }
+  </style>
+
+  <rect width="100%" height="100%" fill="#0D0E15" rx="20"/>
+
+  <g id="isotipo" transform="translate(10, -25)">
+    <g transform="rotate(12 310 256)">
+      <rect x="240" y="176" width="150" height="160" rx="12" fill="#151624" stroke="#FFFFFF" stroke-width="4" filter="url(#portalGlow)"/>
+      <rect x="264" y="200" width="102" height="45" rx="6" fill="url(#portalGrad)" opacity="0.2"/>
+      <line x1="264" y1="270" x2="340" y2="270" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" />
+      <line x1="264" y1="285" x2="310" y2="285" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" opacity="0.5" />
+    </g>
+    <path d="M 300,140 C 200,110 110,180 110,256 C 110,332 200,402 300,372" fill="none" stroke="url(#portalGrad)" stroke-width="28" stroke-linecap="round" filter="url(#portalGlow)"/>
+    <circle cx="100" cy="180" r="5" fill="#00F2FE" /><circle cx="80" cy="260" r="3" fill="#FF5E7E" /><circle cx="130" cy="340" r="4" fill="#FFFFFF" />
+  </g>
+
+  <g id="logotipo-texto">
+    <text x="261" y="415" class="tech-sub" text-anchor="middle">AGENTE</text>
+    <text x="256" y="460" class="tech-main" fill="url(#goldGrad)" text-anchor="middle" filter="url(#textGlow)">COSMIC</text>
+  </g>
+</svg>

@@ -3,6 +3,7 @@ from . import views, auth_views
 
 urlpatterns = [
     path('', views.landing, name='landing'),
+    path('favicon.svg', views.favicon, name='favicon'),
     path('analizar/', views.analyze_submit, name='analyze_submit'),
     path('resultados/<uuid:job_id>/', views.results, name='results'),
     path('api/brand-dna/status/<uuid:job_id>/', views.status_api, name='status_api'),

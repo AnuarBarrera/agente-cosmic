@@ -7,7 +7,7 @@ import django_rq
 import google.genai as genai
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
+from django.http import JsonResponse, FileResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 from core.brand_dna.models import AnalysisJob, BrandDNA
@@ -19,6 +19,11 @@ def landing(request):
     if not request.user.is_authenticated:
         return redirect('login')
     return render(request, 'brand_dna/landing.html')
+
+
+def favicon(request):
+    path = os.path.join(settings.BASE_DIR, 'core', 'brand_dna', 'static', 'brand_dna', 'img', 'logo.svg')
+    return FileResponse(open(path, 'rb'), content_type='image/svg+xml')
 
 
 @login_required
