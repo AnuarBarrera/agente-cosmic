@@ -19,6 +19,9 @@ services:
 
   redis:
     image: "redis:alpine"
+    command: redis-server --appendonly yes
+    volumes:
+      - cosmic_redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -85,6 +88,7 @@ services:
 
 volumes:
   cosmic_postgres_data:
+  cosmic_redis_data:
 
 networks:
   cosmic-net:
