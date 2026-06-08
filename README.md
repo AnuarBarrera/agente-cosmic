@@ -30,40 +30,7 @@ Agente Cosmic automates the entire Brand DNA discovery and content creation work
 
 ## Architecture
 
-```mermaid
-graph TD
-    User["🧑 User\nURL + Logo + Posts + Product Photos"]
-
-    subgraph Extraction ["Brand DNA Extraction (Async · RQ Worker)"]
-        WS["WebScraper\nCSS color harvest\n+ Gemini 2.5 Flash text analysis"]
-        LA["LogoAnalyzer\nGemini 2.5 Flash multimodal\nColor + element detection"]
-        PA["PostsAnalyzer\nGemini 2.5 Flash multimodal\nStyle + tone fingerprint"]
-    end
-
-    DB[("PostgreSQL\nBrandDNA + AnalysisJob\n+ ContentCalendar")]
-
-    subgraph Pipeline ["Content Pipeline (Async · RQ Worker)"]
-        TG["TextGenerator\nGemini 2.5 Flash\n7 captions · brand voice"]
-
-        subgraph ImagePipeline ["Image Pipeline (per post)"]
-            AD["Art Director\nGemini 2.5 Flash\nLifestyle scene prompt"]
-            IG3["Imagen 3\nimagen-3.0-generate-001\nPhoto-real background"]
-            BGSWAP["Imagen 3 Edit\nimagen-3.0-capability-001\nProduct background swap"]
-            PIL["PIL Compositor\nHeadline · Subtitle · CTA · Tag\nBrand colors overlay"]
-        end
-
-        GCS["Google Cloud Storage\nposts/ public bucket"]
-    end
-
-    Email["📧 Mailgun\nDay 1 email"]
-    Sched["⏰ RQ Scheduler\nDays 2–7 · daily delivery"]
-
-    User --> WS & LA & PA
-    WS & LA & PA --> DB
-    DB --> TG --> AD --> IG3 --> PIL
-    DB --> BGSWAP --> PIL
-    PIL --> GCS --> Email --> Sched
-```
+![Architecture diagram](docs/assets/architecture-diagram.svg)
 
 ---
 
