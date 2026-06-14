@@ -298,6 +298,62 @@ def post_action_api(request, post_id):
     return JsonResponse({'error': 'Acción desconocida'}, status=400)
 
 
+@login_required
+@require_POST
+def calendar_feedback_api(request, job_id):
+    from django.utils import timezone
+    from core.content_pipeline.models import WeeklyFeedback
+    from core.content_pipeline.tasks import generate_next_week
+
+    job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
+    calendar = job.brand_dna.calendar
+    feedback = get_object_or_404(
+        WeeklyFeedback, calendar=calendar, continue_decision=WeeklyFeedback.CONTINUE_PENDING
+    )
+
+    feedback.rating = int(request.POST.get('rating'))
+    feedback.comment = request.POST.get('comment', '')
+    feedback.continue_decision = request.POST.get('continue_decision')
+    feedback.responded_at = timezone.now()
+    feedback.save(update_fields=['rating', 'comment', 'continue_decision', 'responded_at'])
+
+    if feedback.continue_decision == WeeklyFeedback.CONTINUE_YES:
+        next_week = feedback.week_number + 1
+        _update_active_product_images(calendar, job, request, next_week)
+        generate_next_week(calendar, next_week)
+
+    return JsonResponse({'status': 'ok', 'continue_decision': feedback.continue_decision})
+
+
+def _update_active_product_images(calendar, job, request, next_week):
+    choice = request.POST.get('image_choice', 'reuse')
+    if choice == 'new':
+        files = request.FILES.getlist('product_images')[:7]
+        new_paths = []
+        for idx, f in enumerate(files):
+            ext = f.name.rsplit('.', 1)[-1].lower() if '.' in f.name else 'jpg'
+            path = f'uploads/product_{job.id}_w{next_week}_{idx}.{ext}'
+            full = os.path.join(settings.MEDIA_ROOT, path)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, 'wb') as out:
+                for chunk in f.chunks():
+                    out.write(chunk)
+            new_paths.append(path)
+        if new_paths:
+            job.product_image_paths = job.product_image_paths + new_paths
+            job.save(update_fields=['product_image_paths'])
+            calendar.active_product_images = new_paths
+            calendar.save(update_fields=['active_product_images'])
+    elif choice == 'reuse':
+        pool = job.product_image_paths
+        if len(pool) > 7:
+            selected = request.POST.getlist('selected_images')[:7]
+            valid = [p for p in selected if p in pool]
+            if valid:
+                calendar.active_product_images = valid
+                calendar.save(update_fields=['active_product_images'])
+
+
 def _regenerate_caption(post, feedback: str) -> str:
     brand_dna = post.calendar.brand_dna
     prompt = (
