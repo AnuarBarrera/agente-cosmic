@@ -6,7 +6,7 @@ from django.utils import timezone
 
 MEXICO_TZ = dt_timezone(timedelta(hours=-6))  # UTC-6 sin DST (desde 2023)
 from core.brand_dna.models import AnalysisJob
-from core.content_pipeline.models import ContentCalendar, ContentPost
+from core.content_pipeline.models import ContentCalendar, ContentPost, WeeklyFeedback
 from core.content_pipeline.generators.text_generator import TextGenerator
 from core.content_pipeline.generators.image_generator import ImageGenerator
 from core.content_pipeline.email_sender import EmailSender
@@ -125,10 +125,11 @@ def send_daily_email_task(post_id: str) -> None:
     if not post.image_url:
         brand_dna = post.calendar.brand_dna
         job_id = str(brand_dna.job.id)
+        day_in_week = ((post.day_number - 1) % 7) + 1
         try:
             image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
-            product_images = _load_product_images(brand_dna.job)
-            product_image_bytes = _product_image_for_day(post.day_number, product_images)
+            product_images = _load_product_images(post.calendar.active_product_images)
+            product_image_bytes = _product_image_for_day(day_in_week, product_images)
             post.image_url = image_gen.generate(
                 caption=post.caption,
                 colors=brand_dna.primary_colors,
@@ -143,3 +144,7 @@ def send_daily_email_task(post_id: str) -> None:
         except Exception as img_err:
             logger.warning(f"Imagen día {post.day_number} falló (no fatal): {img_err}")
     EmailSender().send_daily(post=post)
+
+    if post.day_number % 7 == 0:
+        week_number = post.day_number // 7
+        WeeklyFeedback.objects.get_or_create(calendar=post.calendar, week_number=week_number)

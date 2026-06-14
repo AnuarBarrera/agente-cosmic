@@ -1,8 +1,10 @@
 import pytest
 from unittest.mock import patch
 from django.test import override_settings
+from django.utils import timezone
+from datetime import timedelta
 from core.brand_dna.models import AnalysisJob, BrandDNA
-from core.content_pipeline.models import ContentCalendar, ContentPost
+from core.content_pipeline.models import ContentCalendar, ContentPost, WeeklyFeedback
 
 pytestmark = pytest.mark.django_db
 
@@ -126,3 +128,57 @@ def test_content_generation_sets_active_product_images(job_with_dna):
 
     calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
     assert calendar.active_product_images == ['uploads/p1.jpg', 'uploads/p2.jpg']
+
+
+@pytest.fixture
+def calendar_with_dna():
+    job = AnalysisJob.objects.create(email='t@t.com', business_url='https://tuwebmx.com')
+    dna = BrandDNA.objects.create(
+        job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
+        description='Agencia digital', keywords=['diseno'], audience='PYMEs',
+        tone='profesional', primary_colors=['#1a1a2e'],
+    )
+    return ContentCalendar.objects.create(brand_dna=dna)
+
+
+def _make_post(calendar, day_number, **kwargs):
+    defaults = dict(
+        caption=f'Post {day_number}',
+        image_url='https://example.com/img.jpg',
+        suggested_time='19:00',
+        hashtags=[],
+        scheduled_at=timezone.now() + timedelta(days=day_number),
+    )
+    defaults.update(kwargs)
+    return ContentPost.objects.create(calendar=calendar, day_number=day_number, **defaults)
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
+def test_send_daily_email_task_creates_weekly_feedback_on_day_7(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 7)
+    with patch('core.content_pipeline.tasks.EmailSender'):
+        from core.content_pipeline.tasks import send_daily_email_task
+        send_daily_email_task(str(post.id))
+
+    assert WeeklyFeedback.objects.filter(calendar=calendar_with_dna, week_number=1).exists()
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
+def test_send_daily_email_task_no_feedback_on_other_days(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 5)
+    with patch('core.content_pipeline.tasks.EmailSender'):
+        from core.content_pipeline.tasks import send_daily_email_task
+        send_daily_email_task(str(post.id))
+
+    assert not WeeklyFeedback.objects.filter(calendar=calendar_with_dna).exists()
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
+def test_send_daily_email_task_weekly_feedback_idempotent(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 14)
+    with patch('core.content_pipeline.tasks.EmailSender'):
+        from core.content_pipeline.tasks import send_daily_email_task
+        send_daily_email_task(str(post.id))
+        send_daily_email_task(str(post.id))
+
+    assert WeeklyFeedback.objects.filter(calendar=calendar_with_dna, week_number=2).count() == 1
