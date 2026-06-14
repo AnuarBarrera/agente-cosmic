@@ -383,6 +383,87 @@
       showToast(data.error || 'Error al eliminar', '#e74c3c');
     }
   }
+
+  let selectedRating = 0;
+
+  document.querySelectorAll('#star-rating .star').forEach(star => {
+    star.addEventListener('click', () => {
+      selectedRating = parseInt(star.dataset.value);
+      document.querySelectorAll('#star-rating .star').forEach(s => {
+        s.textContent = parseInt(s.dataset.value) <= selectedRating ? '★' : '☆';
+      });
+    });
+  });
+
+  function showImageChoice() {
+    if (!selectedRating) { showToast('Selecciona una calificación primero', '#f0c040'); return; }
+    document.getElementById('image-choice-section').style.display = 'block';
+    document.getElementById('feedback-yes-btn').style.display = 'none';
+  }
+
+  function toggleImageMode() {
+    const mode = document.querySelector('input[name="image_choice"]:checked').value;
+    const gallery = document.getElementById('image-gallery');
+    const upload = document.getElementById('image-upload-section');
+    if (mode === 'new') {
+      if (gallery) gallery.style.display = 'none';
+      upload.style.display = 'block';
+    } else {
+      if (gallery) gallery.style.display = 'grid';
+      upload.style.display = 'none';
+    }
+  }
+
+  document.querySelectorAll('.gallery-checkbox').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const checked = document.querySelectorAll('.gallery-checkbox:checked');
+      if (checked.length > 7) {
+        cb.checked = false;
+        showToast('Máximo 7 imágenes', '#f0c040');
+      }
+    });
+  });
+
+  async function submitFeedback(decision) {
+    if (!selectedRating) { showToast('Selecciona una calificación primero', '#f0c040'); return; }
+
+    const formData = new FormData();
+    formData.append('rating', selectedRating);
+    formData.append('comment', document.getElementById('feedback-comment').value);
+    formData.append('continue_decision', decision);
+
+    if (decision === 'yes') {
+      const mode = document.querySelector('input[name="image_choice"]:checked').value;
+      formData.append('image_choice', mode);
+      if (mode === 'reuse') {
+        document.querySelectorAll('.gallery-checkbox:checked').forEach(cb => {
+          formData.append('selected_images', cb.value);
+        });
+      } else if (mode === 'new') {
+        const files = document.getElementById('product-images-input').files;
+        for (let i = 0; i < Math.min(files.length, 7); i++) {
+          formData.append('product_images', files[i]);
+        }
+      }
+    }
+
+    const res = await fetch('/api/calendar/{{ job.id }}/feedback/', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': CSRF },
+      body: formData,
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      if (data.continue_decision === 'yes') {
+        showToast('¡Gracias! Tu próxima semana está en camino 🚀');
+      } else {
+        showToast('Gracias por tu feedback');
+      }
+      document.getElementById('feedback-banner').remove();
+    } else {
+      showToast('Error al enviar feedback', '#e74c3c', 5000);
+    }
+  }
 </script>
 </body>
 </html>
