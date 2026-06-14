@@ -7,6 +7,9 @@ venv/
 .env.prod
 .env.local
 
+# Compose override local (worktrees)
+docker-compose.override.yml
+
 # Archivos de runtime
 /media/
 /backups/
