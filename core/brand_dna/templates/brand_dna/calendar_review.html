@@ -166,7 +166,7 @@
 
     <div style="display:flex;gap:12px;flex-wrap:wrap;">
       <button id="feedback-yes-btn" onclick="showImageChoice()" style="flex:1;min-width:200px;padding:12px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Sí, quiero mi próxima semana</button>
-      <button onclick="submitFeedback('no')" style="flex:1;min-width:150px;padding:12px;background:transparent;color:#aaa;border:1px solid #333;border-radius:8px;font-weight:600;cursor:pointer;">No, por ahora</button>
+      <button onclick="submitFeedback('no', this)" style="flex:1;min-width:150px;padding:12px;background:transparent;color:#aaa;border:1px solid #333;border-radius:8px;font-weight:600;cursor:pointer;">No, por ahora</button>
     </div>
 
     <div id="image-choice-section" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid #2a2a4a;">
@@ -195,7 +195,7 @@
         <p style="font-size:0.75rem;color:#666;margin-top:6px;">Hasta 7 imágenes.</p>
       </div>
 
-      <button onclick="submitFeedback('yes')" style="width:100%;margin-top:16px;padding:12px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Generar mi semana →</button>
+      <button onclick="submitFeedback('yes', this)" style="width:100%;margin-top:16px;padding:12px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Generar mi semana →</button>
     </div>
   </div>
   {% endif %}
@@ -424,7 +424,7 @@
     });
   });
 
-  async function submitFeedback(decision) {
+  async function submitFeedback(decision, btn) {
     if (!selectedRating) { showToast('Selecciona una calificación primero', '#f0c040'); return; }
 
     const formData = new FormData();
@@ -447,21 +447,35 @@
       }
     }
 
-    const res = await fetch('/api/calendar/{{ job.id }}/feedback/', {
-      method: 'POST',
-      headers: { 'X-CSRFToken': CSRF },
-      body: formData,
-    });
-    const data = await res.json();
-    if (data.status === 'ok') {
-      if (data.continue_decision === 'yes') {
-        showToast('¡Gracias! Tu próxima semana está en camino 🚀');
+    const banner = document.getElementById('feedback-banner');
+    const buttons = banner.querySelectorAll('button');
+    buttons.forEach(b => b.disabled = true);
+    const originalText = btn.textContent;
+    btn.textContent = decision === 'yes' ? 'Generando tu próxima semana... (puede tardar ~15s)' : 'Enviando...';
+
+    try {
+      const res = await fetch('/api/calendar/{{ job.id }}/feedback/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF },
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        if (data.continue_decision === 'yes') {
+          showToast('¡Gracias! Tu próxima semana está en camino 🚀');
+        } else {
+          showToast('Gracias por tu feedback');
+        }
+        banner.remove();
       } else {
-        showToast('Gracias por tu feedback');
+        showToast('Error al enviar feedback', '#e74c3c', 5000);
+        buttons.forEach(b => b.disabled = false);
+        btn.textContent = originalText;
       }
-      document.getElementById('feedback-banner').remove();
-    } else {
+    } catch (err) {
       showToast('Error al enviar feedback', '#e74c3c', 5000);
+      buttons.forEach(b => b.disabled = false);
+      btn.textContent = originalText;
     }
   }
 </script>
