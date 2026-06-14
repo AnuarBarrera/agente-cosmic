@@ -2,6 +2,7 @@ import logging
 from django.conf import settings
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
+from django.urls import reverse
 from django.utils import timezone
 from core.brand_dna.models import AnalysisJob, BrandDNA
 from core.content_pipeline.models import ContentCalendar, ContentPost
@@ -29,7 +30,13 @@ class EmailSender:
         logger.info(f"Email inicial enviado a {job.email} para job {job.id}")
 
     def send_daily(self, post: ContentPost) -> None:
-        html = render_to_string('content_pipeline/email_daily.html', {'post': post})
+        calendar_review_url = settings.COSMIC_BASE_URL + reverse(
+            'calendar_review', args=[post.calendar.brand_dna.job.id]
+        )
+        html = render_to_string('content_pipeline/email_daily.html', {
+            'post': post,
+            'calendar_review_url': calendar_review_url,
+        })
         business_name = post.calendar.brand_dna.business_name
         email = post.calendar.brand_dna.job.email
         send_mail(
