@@ -49,3 +49,33 @@ def test_schedule_daily_emails_skips_day_1(calendar_with_7_posts):
         post_id = str(call[0][2])
         post = ContentPost.objects.get(id=post_id)
         assert post.day_number != 1
+
+
+def test_schedule_daily_emails_does_not_reschedule_sent_posts(calendar_with_7_posts):
+    # Marcar días 2-7 como ya enviados (semana 1 completada)
+    for post in calendar_with_7_posts.posts.filter(day_number__gt=1):
+        post.status = ContentPost.STATUS_SENT
+        post.save(update_fields=['status'])
+
+    # Agregar semana 2 (días 8-14), pendientes
+    for i in range(8, 15):
+        ContentPost.objects.create(
+            calendar=calendar_with_7_posts, day_number=i, caption=f'Post {i}',
+            image_url='', suggested_time='19:00', hashtags=[],
+            scheduled_at=timezone.now() + timedelta(days=i),
+        )
+
+    with patch('core.content_pipeline.scheduler.django_rq') as mock_rq:
+        mock_queue = MagicMock()
+        mock_rq.get_queue.return_value = mock_queue
+
+        from core.content_pipeline.scheduler import schedule_daily_emails
+        schedule_daily_emails(calendar_with_7_posts)
+
+    scheduled_days = []
+    for call in mock_queue.enqueue_in.call_args_list:
+        post_id = str(call[0][2])
+        post = ContentPost.objects.get(id=post_id)
+        scheduled_days.append(post.day_number)
+
+    assert sorted(scheduled_days) == list(range(8, 15))
