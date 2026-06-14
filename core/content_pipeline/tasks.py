@@ -148,3 +148,29 @@ def send_daily_email_task(post_id: str) -> None:
     if post.day_number % 7 == 0:
         week_number = post.day_number // 7
         WeeklyFeedback.objects.get_or_create(calendar=post.calendar, week_number=week_number)
+
+
+def generate_next_week(calendar: ContentCalendar, week_number: int) -> None:
+    brand_dna = calendar.brand_dna
+    text_gen = TextGenerator()
+    posts_data = text_gen.generate(brand_dna)
+
+    now = timezone.now()
+    mexico_today = now.astimezone(MEXICO_TZ).date()
+    scheduled_dates = smart_schedule_dates(brand_dna, base_date=mexico_today, count=len(posts_data))
+
+    base_day = (week_number - 1) * 7
+
+    for i, post_data in enumerate(posts_data, start=1):
+        hour, minute = map(int, post_data.get('suggested_time', '19:00').split(':'))
+        ContentPost.objects.create(
+            calendar=calendar,
+            day_number=base_day + i,
+            caption=post_data['caption'],
+            image_url='',
+            suggested_time=f"{hour:02d}:{minute:02d}",
+            hashtags=post_data.get('hashtags', []),
+            scheduled_at=scheduled_dates[i - 1],
+        )
+
+    schedule_daily_emails(calendar)

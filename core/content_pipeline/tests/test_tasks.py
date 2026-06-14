@@ -182,3 +182,18 @@ def test_send_daily_email_task_weekly_feedback_idempotent(calendar_with_dna):
         send_daily_email_task(str(post.id))
 
     assert WeeklyFeedback.objects.filter(calendar=calendar_with_dna, week_number=2).count() == 1
+
+
+def test_generate_next_week_creates_posts_for_week_2(job_with_dna):
+    calendar = ContentCalendar.objects.create(brand_dna=job_with_dna.brand_dna, active_product_images=[])
+
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.schedule_daily_emails') as mock_schedule:
+        MockText.return_value.generate.return_value = _MOCK_POSTS
+
+        from core.content_pipeline.tasks import generate_next_week
+        generate_next_week(calendar, week_number=2)
+
+    days = sorted(p.day_number for p in calendar.posts.all())
+    assert days == list(range(8, 15))
+    mock_schedule.assert_called_once_with(calendar)
