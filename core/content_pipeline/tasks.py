@@ -17,13 +17,10 @@ from core.content_pipeline.image_utils import normalize_image
 logger = logging.getLogger(__name__)
 
 
-def _load_product_images(job) -> list[bytes]:
+def _load_product_images(paths: list[str]) -> list[bytes]:
     """Carga hasta 7 imágenes de producto normalizadas a WebP."""
-    paths = job.product_image_paths or []
-    if not paths and job.product_image_path:
-        paths = [job.product_image_path]
     result = []
-    for path in paths[:7]:
+    for path in (paths or [])[:7]:
         full = os.path.join(settings.MEDIA_ROOT, path)
         if os.path.exists(full):
             with open(full, 'rb') as f:
@@ -31,8 +28,8 @@ def _load_product_images(job) -> list[bytes]:
     return result
 
 
-def _product_image_for_day(day_number: int, images: list[bytes]) -> bytes | None:
-    """Asigna imagen de producto por día.
+def _product_image_for_day(day_in_week: int, images: list[bytes]) -> bytes | None:
+    """Asigna imagen de producto por día dentro de la semana (1-7).
     - Si hay imagen para ese día exacto: úsala.
     - Si solo hay 1 imagen: se repite el día 2 (máx 2 usos).
     - Después del día 3 sin imagen directa: sin producto.
@@ -40,9 +37,9 @@ def _product_image_for_day(day_number: int, images: list[bytes]) -> bytes | None
     n = len(images)
     if n == 0:
         return None
-    if day_number <= n:
-        return images[day_number - 1]
-    if n == 1 and day_number == 2:
+    if day_in_week <= n:
+        return images[day_in_week - 1]
+    if n == 1 and day_in_week == 2:
         return images[0]
     return None
 
@@ -58,7 +55,10 @@ def content_generation_task(job_id: str) -> None:
         posts_data = text_gen.generate(brand_dna)
         job.update_progress(AnalysisJob.STAGE_CONTENT, 87)
 
-        calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
+        calendar = ContentCalendar.objects.create(
+            brand_dna=brand_dna,
+            active_product_images=job.product_image_paths[:7],
+        )
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
         now = timezone.now()
         mexico_today = now.astimezone(MEXICO_TZ).date()
@@ -66,7 +66,7 @@ def content_generation_task(job_id: str) -> None:
         scheduled_dates = smart_schedule_dates(brand_dna, base_date=mexico_today, count=len(posts_data))
 
         # Cargar imágenes de producto (hasta 7, una por día)
-        product_images_bytes = _load_product_images(job)
+        product_images_bytes = _load_product_images(calendar.active_product_images)
 
         for i, post_data in enumerate(posts_data, start=1):
             hour, minute = map(int, post_data.get('suggested_time', '19:00').split(':'))
