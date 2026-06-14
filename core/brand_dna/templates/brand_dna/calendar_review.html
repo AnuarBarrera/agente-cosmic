@@ -144,6 +144,62 @@
     </div>
   </div>
 
+  {% if pending_feedback %}
+  <div id="feedback-banner" style="background:#1a1a2e;border:1px solid #e94560;border-radius:12px;padding:20px;margin-bottom:24px;">
+    <h2 style="font-size:1.1rem;margin-bottom:4px;">¡Tu semana {{ pending_feedback.week_number }} terminó! 🎉</h2>
+    <p style="color:#aaa;font-size:0.85rem;margin-bottom:16px;">Cuéntanos cómo te fue y decide si quieres tu próxima semana de contenido.</p>
+
+    <div style="margin-bottom:12px;">
+      <div style="font-size:0.85rem;color:#ccc;margin-bottom:6px;">¿Cómo calificarías esta semana?</div>
+      <div id="star-rating" style="display:flex;gap:8px;font-size:1.6rem;cursor:pointer;">
+        <span class="star" data-value="1">☆</span>
+        <span class="star" data-value="2">☆</span>
+        <span class="star" data-value="3">☆</span>
+        <span class="star" data-value="4">☆</span>
+        <span class="star" data-value="5">☆</span>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <textarea id="feedback-comment" placeholder="Comentarios (opcional)" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:#0d0d1a;color:#f0f0f0;font-size:0.85rem;resize:vertical;min-height:60px;"></textarea>
+    </div>
+
+    <div style="display:flex;gap:12px;flex-wrap:wrap;">
+      <button id="feedback-yes-btn" onclick="showImageChoice()" style="flex:1;min-width:200px;padding:12px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Sí, quiero mi próxima semana</button>
+      <button onclick="submitFeedback('no')" style="flex:1;min-width:150px;padding:12px;background:transparent;color:#aaa;border:1px solid #333;border-radius:8px;font-weight:600;cursor:pointer;">No, por ahora</button>
+    </div>
+
+    <div id="image-choice-section" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid #2a2a4a;">
+      <div style="font-size:0.85rem;color:#ccc;margin-bottom:10px;">Imágenes de producto para tu próxima semana</div>
+
+      <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;margin-bottom:8px;cursor:pointer;">
+        <input type="radio" name="image_choice" value="reuse" checked onchange="toggleImageMode()"> Reutilizar mis imágenes
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;margin-bottom:12px;cursor:pointer;">
+        <input type="radio" name="image_choice" value="new" onchange="toggleImageMode()"> Subir nuevas imágenes
+      </label>
+
+      {% if product_pool|length > 7 %}
+      <div id="image-gallery" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:8px;margin-bottom:12px;">
+        {% for img in product_pool %}
+        <label style="position:relative;cursor:pointer;">
+          <input type="checkbox" class="gallery-checkbox" value="{{ img }}" style="position:absolute;top:4px;left:4px;z-index:1;">
+          <img src="/media/{{ img }}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:2px solid transparent;" loading="lazy">
+        </label>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div id="image-upload-section" style="display:none;">
+        <input type="file" id="product-images-input" multiple accept="image/jpeg,image/png" style="font-size:0.82rem;color:#ccc;">
+        <p style="font-size:0.75rem;color:#666;margin-top:6px;">Hasta 7 imágenes.</p>
+      </div>
+
+      <button onclick="submitFeedback('yes')" style="width:100%;margin-top:16px;padding:12px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Generar mi semana →</button>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="posts-grid">
     {% for post in posts %}
     <div class="post-card {{ post.user_status }}" id="card-{{ post.id }}">
