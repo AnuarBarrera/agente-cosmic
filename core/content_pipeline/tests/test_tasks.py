@@ -1,8 +1,10 @@
 import pytest
 from unittest.mock import patch
 from django.test import override_settings
+from django.utils import timezone
+from datetime import timedelta
 from core.brand_dna.models import AnalysisJob, BrandDNA
-from core.content_pipeline.models import ContentCalendar, ContentPost
+from core.content_pipeline.models import ContentCalendar, ContentPost, WeeklyFeedback
 
 pytestmark = pytest.mark.django_db
 
@@ -73,3 +75,125 @@ def test_content_generation_marks_job_done(job_with_dna):
     job_with_dna.refresh_from_db()
     assert job_with_dna.status == AnalysisJob.STATUS_DONE
     assert job_with_dna.progress == 100
+
+
+def test_load_product_images_takes_paths_list(tmp_path, settings):
+    settings.MEDIA_ROOT = str(tmp_path)
+    uploads_dir = tmp_path / 'uploads'
+    uploads_dir.mkdir()
+    (uploads_dir / 'product.webp').write_bytes(b'fake-image-bytes')
+
+    from core.content_pipeline.tasks import _load_product_images
+    result = _load_product_images(['uploads/product.webp'])
+    assert result == [b'fake-image-bytes']
+
+
+def test_product_image_for_day_maps_day_in_week():
+    from core.content_pipeline.tasks import _product_image_for_day
+    images = [b'img1', b'img2', b'img3']
+
+    # Semana 1: day_in_week == day_number
+    assert _product_image_for_day(1, images) == b'img1'
+    assert _product_image_for_day(3, images) == b'img3'
+    assert _product_image_for_day(4, images) is None
+
+    # Semana 2, día 8 -> day_in_week 1 (mismo resultado que día 1 de semana 1)
+    day_in_week = ((8 - 1) % 7) + 1
+    assert day_in_week == 1
+    assert _product_image_for_day(day_in_week, images) == _product_image_for_day(1, images)
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    DEFAULT_FROM_EMAIL='noreply@test.com',
+)
+def test_content_generation_sets_active_product_images(job_with_dna):
+    job_with_dna.product_image_paths = ['uploads/p1.jpg', 'uploads/p2.jpg']
+    job_with_dna.save(update_fields=['product_image_paths'])
+
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+
+        from core.content_pipeline.tasks import content_generation_task
+        content_generation_task(str(job_with_dna.id))
+
+    calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
+    assert calendar.active_product_images == ['uploads/p1.jpg', 'uploads/p2.jpg']
+
+
+@pytest.fixture
+def calendar_with_dna():
+    job = AnalysisJob.objects.create(email='t@t.com', business_url='https://tuwebmx.com')
+    dna = BrandDNA.objects.create(
+        job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
+        description='Agencia digital', keywords=['diseno'], audience='PYMEs',
+        tone='profesional', primary_colors=['#1a1a2e'],
+    )
+    return ContentCalendar.objects.create(brand_dna=dna)
+
+
+def _make_post(calendar, day_number, **kwargs):
+    defaults = dict(
+        caption=f'Post {day_number}',
+        image_url='https://example.com/img.jpg',
+        suggested_time='19:00',
+        hashtags=[],
+        scheduled_at=timezone.now() + timedelta(days=day_number),
+    )
+    defaults.update(kwargs)
+    return ContentPost.objects.create(calendar=calendar, day_number=day_number, **defaults)
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
+def test_send_daily_email_task_creates_weekly_feedback_on_day_7(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 7)
+    with patch('core.content_pipeline.tasks.EmailSender'):
+        from core.content_pipeline.tasks import send_daily_email_task
+        send_daily_email_task(str(post.id))
+
+    assert WeeklyFeedback.objects.filter(calendar=calendar_with_dna, week_number=1).exists()
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
+def test_send_daily_email_task_no_feedback_on_other_days(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 5)
+    with patch('core.content_pipeline.tasks.EmailSender'):
+        from core.content_pipeline.tasks import send_daily_email_task
+        send_daily_email_task(str(post.id))
+
+    assert not WeeklyFeedback.objects.filter(calendar=calendar_with_dna).exists()
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
+def test_send_daily_email_task_weekly_feedback_idempotent(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 14)
+    with patch('core.content_pipeline.tasks.EmailSender'):
+        from core.content_pipeline.tasks import send_daily_email_task
+        send_daily_email_task(str(post.id))
+        send_daily_email_task(str(post.id))
+
+    assert WeeklyFeedback.objects.filter(calendar=calendar_with_dna, week_number=2).count() == 1
+
+
+def test_generate_next_week_creates_posts_for_week_2(job_with_dna):
+    calendar = ContentCalendar.objects.create(brand_dna=job_with_dna.brand_dna, active_product_images=[])
+
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.schedule_daily_emails') as mock_schedule:
+        MockText.return_value.generate.return_value = _MOCK_POSTS
+
+        from core.content_pipeline.tasks import generate_next_week
+        generate_next_week(calendar, week_number=2)
+
+    days = sorted(p.day_number for p in calendar.posts.all())
+    assert days == list(range(8, 15))
+    mock_schedule.assert_called_once_with(calendar)

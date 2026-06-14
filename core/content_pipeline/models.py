@@ -7,6 +7,7 @@ class ContentCalendar(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     brand_dna = models.OneToOneField(BrandDNA, on_delete=models.CASCADE, related_name='calendar')
     created_at = models.DateTimeField(auto_now_add=True)
+    active_product_images = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = 'content_pipeline_calendar'
@@ -59,3 +60,31 @@ class ContentPost(models.Model):
 
     def __str__(self):
         return f"Día {self.day_number} — {self.calendar.brand_dna.business_name}"
+
+
+class WeeklyFeedback(models.Model):
+    CONTINUE_PENDING = 'pending'
+    CONTINUE_YES = 'yes'
+    CONTINUE_NO = 'no'
+    CONTINUE_CHOICES = [
+        (CONTINUE_PENDING, 'Pendiente'),
+        (CONTINUE_YES, 'Sí'),
+        (CONTINUE_NO, 'No'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    calendar = models.ForeignKey(ContentCalendar, on_delete=models.CASCADE, related_name='feedback_entries')
+    week_number = models.IntegerField()
+    rating = models.IntegerField(null=True, blank=True)
+    comment = models.TextField(blank=True, default='')
+    continue_decision = models.CharField(max_length=10, choices=CONTINUE_CHOICES, default=CONTINUE_PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'content_pipeline_weekly_feedback'
+        unique_together = ('calendar', 'week_number')
+        ordering = ['week_number']
+
+    def __str__(self):
+        return f"Feedback semana {self.week_number} — {self.calendar.brand_dna.business_name}"

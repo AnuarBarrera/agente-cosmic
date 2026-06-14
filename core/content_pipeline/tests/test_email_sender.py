@@ -65,3 +65,28 @@ def test_send_daily_email_marks_post_sent(full_setup):
     post.refresh_from_db()
     assert post.status == ContentPost.STATUS_SENT
     assert post.sent_at is not None
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
+def test_send_daily_email_weekend_cta_on_day_7(full_setup):
+    from core.content_pipeline.email_sender import EmailSender
+    job, dna, calendar, posts = full_setup
+    post = posts[6]  # day_number == 7
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        sender = EmailSender()
+        sender.send_daily(post=post)
+    html = mock_send.call_args[1]['html_message']
+    assert 'Dar feedback y ver mi próxima semana' in html
+    assert 'https://cosmic.anuarbarrera.dev' in html
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
+def test_send_daily_email_no_weekend_cta_on_other_days(full_setup):
+    from core.content_pipeline.email_sender import EmailSender
+    job, dna, calendar, posts = full_setup
+    post = posts[1]  # day_number == 2
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        sender = EmailSender()
+        sender.send_daily(post=post)
+    html = mock_send.call_args[1]['html_message']
+    assert 'Dar feedback y ver mi próxima semana' not in html

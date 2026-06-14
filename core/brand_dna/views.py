@@ -156,6 +156,7 @@ def status_api(request, job_id):
 @login_required
 def calendar_review_view(request, job_id):
     from core.brand_dna.rate_limits import get_user_plan
+    from core.content_pipeline.models import WeeklyFeedback
     job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
     brand_dna = getattr(job, 'brand_dna', None)
     calendar = getattr(brand_dna, 'calendar', None) if brand_dna else None
@@ -163,6 +164,13 @@ def calendar_review_view(request, job_id):
     plan = get_user_plan(request.user)
     total_regens = sum(p.regen_count for p in posts)
     total_edits = sum(p.edit_count for p in posts)
+
+    pending_feedback = None
+    if calendar:
+        pending_feedback = calendar.feedback_entries.filter(
+            continue_decision=WeeklyFeedback.CONTINUE_PENDING
+        ).order_by('-week_number').first()
+
     return render(request, 'brand_dna/calendar_review.html', {
         'job': job,
         'brand_dna': brand_dna,
@@ -171,6 +179,8 @@ def calendar_review_view(request, job_id):
         'max_edits': plan.max_post_edits,
         'total_regens': total_regens,
         'total_edits': total_edits,
+        'pending_feedback': pending_feedback,
+        'product_pool': job.product_image_paths,
     })
 
 
@@ -286,6 +296,73 @@ def post_action_api(request, post_id):
         })
 
     return JsonResponse({'error': 'Acción desconocida'}, status=400)
+
+
+@login_required
+@require_POST
+def calendar_feedback_api(request, job_id):
+    from django.utils import timezone
+    from core.content_pipeline.models import WeeklyFeedback
+    from core.content_pipeline.tasks import generate_next_week
+
+    job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
+    calendar = job.brand_dna.calendar
+    feedback = get_object_or_404(
+        WeeklyFeedback, calendar=calendar, continue_decision=WeeklyFeedback.CONTINUE_PENDING
+    )
+
+    try:
+        rating = int(request.POST.get('rating'))
+    except (TypeError, ValueError):
+        rating = None
+    if rating is None or not (1 <= rating <= 5):
+        return JsonResponse({'error': 'Rating inválido'}, status=400)
+
+    continue_decision = request.POST.get('continue_decision')
+    if continue_decision not in (WeeklyFeedback.CONTINUE_YES, WeeklyFeedback.CONTINUE_NO):
+        return JsonResponse({'error': 'Decisión inválida'}, status=400)
+
+    feedback.rating = rating
+    feedback.comment = request.POST.get('comment', '')
+    feedback.continue_decision = continue_decision
+    feedback.responded_at = timezone.now()
+    feedback.save(update_fields=['rating', 'comment', 'continue_decision', 'responded_at'])
+
+    if feedback.continue_decision == WeeklyFeedback.CONTINUE_YES:
+        next_week = feedback.week_number + 1
+        _update_active_product_images(calendar, job, request, next_week)
+        generate_next_week(calendar, next_week)
+
+    return JsonResponse({'status': 'ok', 'continue_decision': feedback.continue_decision})
+
+
+def _update_active_product_images(calendar, job, request, next_week):
+    choice = request.POST.get('image_choice', 'reuse')
+    if choice == 'new':
+        files = request.FILES.getlist('product_images')[:7]
+        new_paths = []
+        for idx, f in enumerate(files):
+            ext = f.name.rsplit('.', 1)[-1].lower() if '.' in f.name else 'jpg'
+            path = f'uploads/product_{job.id}_w{next_week}_{idx}.{ext}'
+            full = os.path.join(settings.MEDIA_ROOT, path)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, 'wb') as out:
+                for chunk in f.chunks():
+                    out.write(chunk)
+            new_paths.append(path)
+        if new_paths:
+            job.product_image_paths = job.product_image_paths + new_paths
+            job.save(update_fields=['product_image_paths'])
+            calendar.active_product_images = new_paths
+            calendar.save(update_fields=['active_product_images'])
+    elif choice == 'reuse':
+        pool = job.product_image_paths
+        if len(pool) > 7:
+            selected = request.POST.getlist('selected_images')[:7]
+            valid = [p for p in selected if p in pool]
+            if valid:
+                calendar.active_product_images = valid
+                calendar.save(update_fields=['active_product_images'])
 
 
 def _regenerate_caption(post, feedback: str) -> str:

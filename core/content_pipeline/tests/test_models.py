@@ -1,8 +1,9 @@
 import pytest
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from datetime import timedelta
 from core.brand_dna.models import AnalysisJob, BrandDNA
-from core.content_pipeline.models import ContentCalendar, ContentPost
+from core.content_pipeline.models import ContentCalendar, ContentPost, WeeklyFeedback
 
 pytestmark = pytest.mark.django_db
 
@@ -50,3 +51,26 @@ def test_calendar_has_7_posts(brand_dna):
             scheduled_at=timezone.now() + timedelta(days=i),
         )
     assert calendar.posts.count() == 7
+
+
+def test_content_calendar_active_product_images_default(brand_dna):
+    calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
+    assert calendar.active_product_images == []
+
+
+def test_weekly_feedback_defaults(brand_dna):
+    calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
+    feedback = WeeklyFeedback.objects.create(calendar=calendar, week_number=1)
+    assert feedback.rating is None
+    assert feedback.comment == ''
+    assert feedback.continue_decision == WeeklyFeedback.CONTINUE_PENDING
+    assert feedback.responded_at is None
+    assert feedback.created_at is not None
+
+
+def test_weekly_feedback_unique_per_calendar_and_week(brand_dna):
+    calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
+    WeeklyFeedback.objects.create(calendar=calendar, week_number=1)
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            WeeklyFeedback.objects.create(calendar=calendar, week_number=1)

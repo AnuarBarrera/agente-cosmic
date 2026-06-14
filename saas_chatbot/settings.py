@@ -515,6 +515,9 @@ LOGGING = {
 # URL for the frontend application, used for redirects
 FRONTEND_URL = get_env('FRONTEND_URL', default='http://localhost:3000')
 
+# Base URL para Agente Cosmic — usada para construir links en emails (encuesta semanal)
+COSMIC_BASE_URL = get_env('COSMIC_BASE_URL', default='https://cosmic.anuarbarrera.dev')
+
 # Sentry Configuration for Error Tracking
 SENTRY_DSN = get_env('SENTRY_DSN', default='')
 if SENTRY_DSN and not DEBUG:
