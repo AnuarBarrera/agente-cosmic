@@ -181,6 +181,42 @@ def test_calendar_feedback_api_requires_ownership(client, django_user_model, job
     assert response.status_code == 404
 
 
+def test_calendar_feedback_api_invalid_rating_returns_400(client, user, job_with_calendar):
+    calendar = job_with_calendar.brand_dna.calendar
+    client.force_login(user)
+    with patch('core.content_pipeline.tasks.generate_next_week') as mock_gen:
+        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
+            'rating': 'not-a-number',
+            'comment': 'Estuvo bien',
+            'continue_decision': 'no',
+        })
+    assert response.status_code == 400
+    data = response.json()
+    assert 'error' in data
+
+    feedback = calendar.feedback_entries.get(week_number=1)
+    assert feedback.continue_decision == WeeklyFeedback.CONTINUE_PENDING
+    mock_gen.assert_not_called()
+
+
+def test_calendar_feedback_api_invalid_continue_decision_returns_400(client, user, job_with_calendar):
+    calendar = job_with_calendar.brand_dna.calendar
+    client.force_login(user)
+    with patch('core.content_pipeline.tasks.generate_next_week') as mock_gen:
+        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
+            'rating': '5',
+            'comment': 'Estuvo bien',
+            'continue_decision': 'maybe',
+        })
+    assert response.status_code == 400
+    data = response.json()
+    assert 'error' in data
+
+    feedback = calendar.feedback_entries.get(week_number=1)
+    assert feedback.continue_decision == WeeklyFeedback.CONTINUE_PENDING
+    mock_gen.assert_not_called()
+
+
 def test_update_active_product_images_reuse_pool_le_7(job_with_calendar):
     from core.brand_dna.views import _update_active_product_images
     from django.test import RequestFactory

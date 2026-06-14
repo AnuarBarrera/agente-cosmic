@@ -311,9 +311,20 @@ def calendar_feedback_api(request, job_id):
         WeeklyFeedback, calendar=calendar, continue_decision=WeeklyFeedback.CONTINUE_PENDING
     )
 
-    feedback.rating = int(request.POST.get('rating'))
+    try:
+        rating = int(request.POST.get('rating'))
+    except (TypeError, ValueError):
+        rating = None
+    if rating is None or not (1 <= rating <= 5):
+        return JsonResponse({'error': 'Rating inválido'}, status=400)
+
+    continue_decision = request.POST.get('continue_decision')
+    if continue_decision not in (WeeklyFeedback.CONTINUE_YES, WeeklyFeedback.CONTINUE_NO):
+        return JsonResponse({'error': 'Decisión inválida'}, status=400)
+
+    feedback.rating = rating
     feedback.comment = request.POST.get('comment', '')
-    feedback.continue_decision = request.POST.get('continue_decision')
+    feedback.continue_decision = continue_decision
     feedback.responded_at = timezone.now()
     feedback.save(update_fields=['rating', 'comment', 'continue_decision', 'responded_at'])
 
