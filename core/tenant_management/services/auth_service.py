@@ -1,6 +1,7 @@
 import uuid
 from django.utils import timezone
 from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password
 from django.core.mail import send_mail
 from django.conf import settings
 from django.template.loader import render_to_string
@@ -41,7 +42,7 @@ class AuthService:
             tenant_name=tenant_name,
             user_data={
                 'username': username,
-                'password': password,  # En producción, esto debería estar hasheado
+                'password': make_password(password),
             }
         )
         
@@ -84,14 +85,16 @@ class AuthService:
         # Obtener el tenant creado
         tenant = TenantModel.objects.get(id=tenant_dto.tenant_id)
         
-        # Crear el usuario
+        # Crear el usuario (el password ya viene hasheado desde initiate_registration)
         user = User.objects.create_user(
             username=verification_token.user_data['username'],
             email=verification_token.email,
-            password=verification_token.user_data['password'],
+            password=None,
             tenant=tenant,
             email_verified=True  # Marcar como verificado
         )
+        user.password = verification_token.user_data['password']
+        user.save(update_fields=['password'])
         
         # Marcar token como usado
         verification_token.is_used = True
