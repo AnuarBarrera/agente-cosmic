@@ -35,7 +35,8 @@ class TestNotificationServiceAdapter:
                 "to": ["recipient@test.com"],
                 "subject": "Test Subject",
                 "text": "Test message"
-            }
+            },
+            timeout=10,
         )
 
     @patch.object(settings, 'MAILGUN_API_KEY', 'test-api-key')

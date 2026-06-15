@@ -29,7 +29,8 @@ class NotificationServiceAdapter:
                     "to": [recipient_email],
                     "subject": subject,
                     "text": message
-                }
+                },
+                timeout=10,
             )
             response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
             logger.info(f"Mailgun notification sent successfully to {recipient_email} for tenant {tenant_id}.")
