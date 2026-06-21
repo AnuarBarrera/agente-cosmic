@@ -5,6 +5,7 @@ import logging
 from django.conf import settings
 from django.contrib.auth import authenticate, login, logout, get_user_model
 from django.contrib.auth.decorators import login_required
+from django.core.cache import cache
 from django.shortcuts import render, redirect
 from .auth_forms import RegisterForm, LoginForm
 from .models import AnalysisJob
@@ -77,6 +78,10 @@ def register_view(request):
     return render(request, 'brand_dna/auth/register.html', {'form': form})
 
 
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_LOCKOUT_SECONDS = 300
+
+
 def login_view(request):
     if request.user.is_authenticated:
         return redirect('dashboard')
@@ -86,14 +91,20 @@ def login_view(request):
         form = LoginForm(request.POST)
         if form.is_valid():
             email = form.cleaned_data['email'].lower().strip()
-            password = form.cleaned_data['password']
-            # check_password() verifies PBKDF2 hash — nunca compara texto plano
-            user = authenticate(request, email=email, password=password)
-            if user is not None:
-                login(request, user)
-                next_url = request.GET.get('next', 'dashboard')
-                return redirect(next_url)
-            error = 'Correo o contraseña incorrectos.'
+            cache_key = f'login_attempts:{email}'
+            attempts = cache.get(cache_key, 0)
+            if attempts >= _LOGIN_MAX_ATTEMPTS:
+                error = 'Demasiados intentos. Intenta de nuevo en 5 minutos.'
+            else:
+                password = form.cleaned_data['password']
+                user = authenticate(request, email=email, password=password)
+                if user is not None:
+                    cache.delete(cache_key)
+                    login(request, user)
+                    next_url = request.GET.get('next', 'dashboard')
+                    return redirect(next_url)
+                cache.set(cache_key, attempts + 1, _LOGIN_LOCKOUT_SECONDS)
+                error = 'Correo o contraseña incorrectos.'
     else:
         form = LoginForm()
 

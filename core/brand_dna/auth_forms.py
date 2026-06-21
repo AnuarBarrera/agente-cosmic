@@ -1,5 +1,6 @@
 from django import forms
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
 User = get_user_model()
@@ -23,6 +24,12 @@ class RegisterForm(forms.Form):
         if User.objects.filter(email=email).exists():
             raise ValidationError('Este correo ya está registrado. ¿Quieres iniciar sesión?')
         return email
+
+    def clean_password1(self):
+        password = self.cleaned_data.get('password1')
+        if password:
+            validate_password(password)
+        return password
 
     def clean(self):
         cleaned = super().clean()

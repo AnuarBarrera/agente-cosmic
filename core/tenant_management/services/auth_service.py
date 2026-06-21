@@ -145,10 +145,17 @@ class AuthService:
             raise ValueError("Token has expired")
         
         user = reset_token.user
-        
+
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError
+        try:
+            validate_password(new_password, user)
+        except ValidationError as e:
+            raise ValueError('; '.join(e.messages))
+
         # Save current password to history before changing
         AuthService._save_password_to_history(user, user.password)
-        
+
         # Cambiar contraseña
         user.set_password(new_password)
         user.save()
