@@ -14,6 +14,16 @@ from core.brand_dna.models import AnalysisJob, BrandDNA
 
 logger = logging.getLogger(__name__)
 
+_ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'gif'}
+
+
+def _safe_extension(filename: str) -> str:
+    if '.' in filename:
+        ext = filename.rsplit('.', 1)[-1].lower()
+        if ext in _ALLOWED_IMAGE_EXTENSIONS:
+            return ext
+    return 'jpg'
+
 
 def landing(request):
     if not request.user.is_authenticated:
@@ -54,7 +64,7 @@ def analyze_submit(request):
 
     if 'logo' in request.FILES:
         logo_file = request.FILES['logo']
-        ext = logo_file.name.rsplit('.', 1)[-1].lower()
+        ext = _safe_extension(logo_file.name)
         logo_path = f'uploads/logo_{job.id}.{ext}'
         full_path = os.path.join(settings.MEDIA_ROOT, logo_path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
@@ -82,7 +92,7 @@ def analyze_submit(request):
     if prod_files:
         prod_paths = []
         for idx, prod_file in enumerate(prod_files):
-            ext = prod_file.name.rsplit('.', 1)[-1].lower() if '.' in prod_file.name else 'jpg'
+            ext = _safe_extension(prod_file.name)
             prod_path = f'uploads/product_{job.id}_{idx}.{ext}'
             full_path = os.path.join(settings.MEDIA_ROOT, prod_path)
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
