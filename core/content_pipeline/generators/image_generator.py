@@ -6,6 +6,7 @@ import os
 import random
 import re
 import time
+import xml.etree.ElementTree as ET
 
 import google.genai as genai
 from google.cloud import storage
@@ -16,6 +17,49 @@ from playwright.sync_api import sync_playwright
 logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 3
+
+_SVG_ALLOWED_TAGS = frozenset({
+    'svg', 'defs', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon',
+    'path', 'g', 'use', 'clipPath', 'mask',
+    'linearGradient', 'radialGradient', 'stop',
+    'filter', 'feGaussianBlur', 'feOffset', 'feBlend', 'feFlood', 'feComposite',
+})
+_SVG_DANGEROUS_ATTRS = re.compile(
+    r'^on\w+|^xlink:href$|^href$|^style$|^class$', re.IGNORECASE
+)
+
+
+def _sanitize_svg(raw_svg: str) -> str:
+    try:
+        root = ET.fromstring(raw_svg)
+    except ET.ParseError:
+        return ''
+    _strip_element(root)
+    tag = _local_tag(root.tag)
+    if tag != 'svg':
+        return ''
+    return ET.tostring(root, encoding='unicode')
+
+
+def _local_tag(tag: str) -> str:
+    if '}' in tag:
+        return tag.split('}', 1)[1]
+    return tag
+
+
+def _strip_element(el):
+    children_to_remove = []
+    for child in el:
+        tag = _local_tag(child.tag)
+        if tag not in _SVG_ALLOWED_TAGS:
+            children_to_remove.append(child)
+        else:
+            attrs_to_remove = [k for k in child.attrib if _SVG_DANGEROUS_ATTRS.match(k)]
+            for attr in attrs_to_remove:
+                del child.attrib[attr]
+            _strip_element(child)
+    for child in children_to_remove:
+        el.remove(child)
 
 
 def _detect_mime(image_bytes: bytes) -> str:
@@ -491,9 +535,10 @@ class ImageGenerator:
         bg_b64 = base64.b64encode(background_bytes).decode()
         primary = colors[0] if colors else '#e94560'
 
+        safe_svg = _sanitize_svg(svg_overlay) if svg_overlay else ''
         svg_div = (
-            f'<div style="position:absolute;inset:0;pointer-events:none;z-index:1;">{svg_overlay}</div>'
-            if svg_overlay else ''
+            f'<div style="position:absolute;inset:0;pointer-events:none;z-index:1;">{safe_svg}</div>'
+            if safe_svg else ''
         )
 
         button_color = _pick_button_color(colors)
