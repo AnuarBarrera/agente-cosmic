@@ -259,7 +259,11 @@ def google_callback_view(request):
     )
     if created:
         user.set_unusable_password()
-        user.save(update_fields=['password'])
+        user.email_verified = True
+        user.save(update_fields=['password', 'email_verified'])
+        from django.contrib.auth.models import Group
+        user_group, _ = Group.objects.get_or_create(name='user')
+        user.groups.add(user_group)
 
     login(request, user)
     return redirect('dashboard')
@@ -285,3 +289,20 @@ def dashboard_view(request):
         'used_this_week': used_this_week,
         'max_calendars': plan.max_calendars_per_week,
     })
+
+
+@login_required
+def apply_code_view(request):
+    if request.method != 'POST':
+        return redirect('dashboard')
+    from core.tenant_management.models import InvitationCode
+    code_str = request.POST.get('code', '').strip().upper()
+    try:
+        code_obj = InvitationCode.objects.get(code=code_str)
+        if code_obj.redeem(request.user):
+            logger.info(f"Codigo {code_str} aplicado por {request.user.email}")
+        else:
+            logger.warning(f"Codigo invalido {code_str} intentado por {request.user.email}")
+    except InvitationCode.DoesNotExist:
+        logger.warning(f"Codigo inexistente {code_str} intentado por {request.user.email}")
+    return redirect('dashboard')

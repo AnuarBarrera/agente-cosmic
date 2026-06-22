@@ -101,3 +101,37 @@ class TestVerifyEmailView:
         assert resp.status_code == 302
         assert '/auth/login/' in resp.url
         assert User.objects.filter(email='used@test.com').count() == 0
+
+
+@pytest.mark.django_db
+class TestApplyCodeView:
+    def test_apply_valid_code_upgrades_to_tester(self, client, setup_plans_and_groups):
+        user = User.objects.create_user(
+            email='apply@test.com', password='SecurePass123!x', username='apply@test.com'
+        )
+        user.groups.add(Group.objects.get(name='user'))
+        admin = User.objects.create_user(
+            email='adm3@test.com', password='test123!', username='adm3@test.com'
+        )
+        code = InvitationCode.objects.create(created_by=admin)
+
+        client.force_login(user)
+        resp = client.post('/dashboard/apply-code/', {'code': code.code})
+        assert resp.status_code == 302
+        user.refresh_from_db()
+        assert user.groups.filter(name='tester').exists()
+
+    def test_apply_invalid_code_stays_user(self, client, setup_plans_and_groups):
+        user = User.objects.create_user(
+            email='bad@test.com', password='SecurePass123!x', username='bad@test.com'
+        )
+        user.groups.add(Group.objects.get(name='user'))
+        client.force_login(user)
+        resp = client.post('/dashboard/apply-code/', {'code': 'COSMIC-INVALID'})
+        assert resp.status_code == 302
+        assert user.groups.filter(name='user').exists()
+
+    def test_apply_code_requires_login(self, client, setup_plans_and_groups):
+        resp = client.post('/dashboard/apply-code/', {'code': 'COSMIC-AAAAAA'})
+        assert resp.status_code == 302
+        assert '/auth/login/' in resp.url
