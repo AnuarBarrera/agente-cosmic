@@ -316,3 +316,56 @@ class SecurityEvent(models.Model):
             models.Index(fields=['user', 'created_at']),
             models.Index(fields=['severity', 'created_at']),
         ]
+
+
+_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+
+
+class InvitationCode(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.CharField(max_length=13, unique=True)
+    target_group = models.CharField(max_length=20, default='tester')
+    max_uses = models.PositiveIntegerField(default=1)
+    times_used = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_codes')
+    is_active = models.BooleanField(default=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'invitation_codes'
+        verbose_name = 'Invitation Code'
+        verbose_name_plural = 'Invitation Codes'
+
+    def __str__(self):
+        return f"{self.code} ({self.target_group})"
+
+    def save(self, *args, **kwargs):
+        if not self.code:
+            self.code = self.generate_code()
+        super().save(*args, **kwargs)
+
+    @staticmethod
+    def generate_code() -> str:
+        suffix = ''.join(secrets.choice(_CODE_ALPHABET) for _ in range(6))
+        return f'COSMIC-{suffix}'
+
+    def is_valid(self) -> bool:
+        if not self.is_active:
+            return False
+        if self.expires_at and timezone.now() > self.expires_at:
+            return False
+        if self.max_uses > 0 and self.times_used >= self.max_uses:
+            return False
+        return True
+
+    def redeem(self, user) -> bool:
+        if not self.is_valid():
+            return False
+        from django.contrib.auth.models import Group
+        target, _ = Group.objects.get_or_create(name=self.target_group)
+        user.groups.clear()
+        user.groups.add(target)
+        self.times_used += 1
+        self.save(update_fields=['times_used'])
+        return True
