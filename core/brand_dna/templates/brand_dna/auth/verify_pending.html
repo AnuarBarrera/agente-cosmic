@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/svg+xml" href="{% url 'favicon' %}">
+  <title>Revisa tu correo — Agente Cosmic</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #f0f0f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+    .logo { font-size: 1.8rem; font-weight: 700; color: #e94560; margin-bottom: 8px; }
+    .card { background: #1a1a2e; width: 100%; max-width: 420px; padding: 40px; border-radius: 16px; text-align: center; }
+    .icon { font-size: 3rem; margin-bottom: 16px; }
+    h2 { margin-bottom: 12px; font-size: 1.2rem; }
+    p { color: #aaa; font-size: 0.95rem; line-height: 1.5; margin-bottom: 8px; }
+    .email { color: #e94560; font-weight: 600; }
+    .footer-link { text-align: center; margin-top: 24px; font-size: 0.9rem; color: #aaa; }
+    .footer-link a { color: #e94560; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="logo">Agente Cosmic</div>
+  <div class="card">
+    <div class="icon">📬</div>
+    <h2>Revisa tu correo</h2>
+    <p>Enviamos un enlace de verificación a <span class="email">{{ email }}</span></p>
+    <p>Haz clic en el enlace para activar tu cuenta. El enlace expira en 24 horas.</p>
+    <div class="footer-link">
+      <a href="{% url 'login' %}">Volver al inicio de sesión</a>
+    </div>
+  </div>
+</body>
+</html>

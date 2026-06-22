@@ -6,6 +6,7 @@ from django.conf import settings
 from django.contrib.auth import authenticate, login, logout, get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
+from django.core.mail import send_mail
 from django.shortcuts import render, redirect
 from .auth_forms import RegisterForm, LoginForm
 from .models import AnalysisJob
@@ -65,17 +66,86 @@ def register_view(request):
                 })
             email = form.cleaned_data['email']
             password = form.cleaned_data['password1']
-            user = User.objects.create_user(
+            invitation_code = form.cleaned_data.get('invitation_code', '').strip()
+
+            from django.contrib.auth.hashers import make_password
+            from core.tenant_management.models import EmailVerificationToken
+            token = EmailVerificationToken.objects.create(
                 email=email,
-                password=password,
-                username=email,
+                tenant_name='',
+                user_data={
+                    'password': make_password(password),
+                    'invitation_code': invitation_code,
+                },
             )
-            login(request, user)
-            return redirect('dashboard')
+
+            verify_url = f"{settings.COSMIC_BASE_URL}/auth/verify/{token.token}/"
+            send_mail(
+                'Verifica tu correo — Agente Cosmic',
+                f'Haz clic en este enlace para verificar tu correo: {verify_url}',
+                settings.DEFAULT_FROM_EMAIL,
+                [email],
+                html_message=(
+                    f'<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;">'
+                    f'<h2 style="color:#e94560;">Agente Cosmic</h2>'
+                    f'<p>Haz clic en el boton para verificar tu correo y activar tu cuenta:</p>'
+                    f'<a href="{verify_url}" style="display:inline-block;padding:14px 28px;'
+                    f'background:#e94560;color:#fff;text-decoration:none;border-radius:8px;'
+                    f'font-weight:600;">Verificar mi correo</a>'
+                    f'<p style="color:#888;font-size:0.85rem;margin-top:24px;">'
+                    f'Este enlace expira en 24 horas.</p></div>'
+                ),
+                fail_silently=False,
+            )
+
+            return render(request, 'brand_dna/auth/verify_pending.html', {'email': email})
     else:
         form = RegisterForm()
 
     return render(request, 'brand_dna/auth/register.html', {'form': form})
+
+
+def verify_email_view(request, token):
+    from core.tenant_management.models import EmailVerificationToken, InvitationCode
+    from django.contrib.auth.models import Group
+
+    try:
+        verification = EmailVerificationToken.objects.get(token=token)
+    except EmailVerificationToken.DoesNotExist:
+        return redirect('login')
+
+    if not verification.is_valid():
+        return redirect('login')
+
+    email = verification.email
+    user_data = verification.user_data
+
+    user = User.objects.create_user(
+        email=email,
+        password=None,
+        username=email,
+    )
+    user.password = user_data['password']
+    user.email_verified = True
+    user.save(update_fields=['password', 'email_verified'])
+
+    invitation_code_str = user_data.get('invitation_code', '')
+    redeemed = False
+    if invitation_code_str:
+        try:
+            code_obj = InvitationCode.objects.get(code=invitation_code_str)
+            redeemed = code_obj.redeem(user)
+        except InvitationCode.DoesNotExist:
+            pass
+
+    if not redeemed:
+        user_group, _ = Group.objects.get_or_create(name='user')
+        user.groups.add(user_group)
+
+    verification.is_used = True
+    verification.save(update_fields=['is_used'])
+
+    return redirect('login')
 
 
 _LOGIN_MAX_ATTEMPTS = 5

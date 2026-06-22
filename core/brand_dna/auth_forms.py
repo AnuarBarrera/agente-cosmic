@@ -18,6 +18,11 @@ class RegisterForm(forms.Form):
         label='Confirmar contraseña',
         widget=forms.PasswordInput,
     )
+    invitation_code = forms.CharField(
+        label='Código de invitación',
+        required=False,
+        max_length=13,
+    )
 
     def clean_email(self):
         email = self.cleaned_data['email'].lower().strip()

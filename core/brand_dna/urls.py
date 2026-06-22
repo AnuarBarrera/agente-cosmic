@@ -12,6 +12,7 @@ urlpatterns = [
     path('auth/login/', auth_views.login_view, name='login'),
     path('auth/register/', auth_views.register_view, name='register'),
     path('auth/logout/', auth_views.logout_view, name='logout'),
+    path('auth/verify/<str:token>/', auth_views.verify_email_view, name='verify_email'),
     path('auth/google/', auth_views.google_login_view, name='google_login'),
     path('auth/google/callback/', auth_views.google_callback_view, name='google_callback'),
     path('dashboard/', auth_views.dashboard_view, name='dashboard'),

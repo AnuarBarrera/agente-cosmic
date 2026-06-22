@@ -85,6 +85,12 @@
         </div>
         {% endif %}
       </div>
+      <div class="form-group">
+        <label for="invitation_code">Código de invitación <span style="font-size:0.75rem;background:#333;color:#aaa;padding:2px 8px;border-radius:10px;margin-left:6px;">opcional</span></label>
+        <input type="text" id="invitation_code" name="invitation_code" placeholder="COSMIC-XXXXXX"
+               value="{{ form.invitation_code.value|default:'' }}" style="text-transform:uppercase;">
+        <div class="hint">Si tienes un código de invitación, ingrésalo para obtener acceso ampliado.</div>
+      </div>
       <button type="submit" class="btn">Crear cuenta</button>
     </form>
 
