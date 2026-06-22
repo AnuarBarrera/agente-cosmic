@@ -104,6 +104,39 @@ class TestVerifyEmailView:
 
 
 @pytest.mark.django_db
+class TestNotifyAdmin:
+    @patch('core.brand_dna.auth_views.send_mail')
+    def test_verify_email_sends_admin_notification(self, mock_send, client, setup_plans_and_groups):
+        from django.contrib.auth.hashers import make_password
+        token = EmailVerificationToken.objects.create(
+            email='notify@test.com',
+            tenant_name='',
+            user_data={'password': make_password('SecurePass123!x'), 'invitation_code': ''},
+        )
+        client.get(f'/auth/verify/{token.token}/')
+        assert mock_send.call_count == 1
+        call_args = mock_send.call_args
+        assert 'notify@test.com' in call_args[0][0]
+
+    @patch('core.brand_dna.auth_views.send_mail')
+    def test_notify_admin_includes_invitation_code(self, mock_send, client, setup_plans_and_groups):
+        from django.contrib.auth.hashers import make_password
+        admin = User.objects.create_user(
+            email='adm4@test.com', password='test123!', username='adm4@test.com'
+        )
+        code = InvitationCode.objects.create(created_by=admin)
+        token = EmailVerificationToken.objects.create(
+            email='codenotify@test.com',
+            tenant_name='',
+            user_data={'password': make_password('SecurePass123!x'), 'invitation_code': code.code},
+        )
+        client.get(f'/auth/verify/{token.token}/')
+        call_kwargs = mock_send.call_args
+        html = call_kwargs[1].get('html_message', '') if call_kwargs[1] else ''
+        assert code.code in html
+
+
+@pytest.mark.django_db
 class TestApplyCodeView:
     def test_apply_valid_code_upgrades_to_tester(self, client, setup_plans_and_groups):
         user = User.objects.create_user(

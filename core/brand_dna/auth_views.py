@@ -14,6 +14,34 @@ from .models import AnalysisJob
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
+
+def notify_admin_new_user(user, invitation_code=None):
+    try:
+        admin_email = settings.ADMIN_NOTIFICATION_EMAIL
+        group_name = user.groups.first().name if user.groups.exists() else 'user'
+        code_info = f'<p><strong>Codigo usado:</strong> {invitation_code}</p>' if invitation_code else ''
+        admin_url = f'{settings.COSMIC_BASE_URL}/admin/tenant_management/user/{user.pk}/change/'
+        send_mail(
+            f'[Agente Cosmic] Nuevo usuario verificado — {user.email}',
+            f'Nuevo usuario: {user.email} (rol: {group_name})',
+            settings.DEFAULT_FROM_EMAIL,
+            [admin_email],
+            html_message=(
+                f'<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;">'
+                f'<h2 style="color:#e94560;">Nuevo usuario en Agente Cosmic</h2>'
+                f'<p><strong>Email:</strong> {user.email}</p>'
+                f'<p><strong>Rol:</strong> {group_name}</p>'
+                f'{code_info}'
+                f'<p><strong>Fecha:</strong> {user.date_joined.strftime("%Y-%m-%d %H:%M")}</p>'
+                f'<a href="{admin_url}" style="display:inline-block;padding:12px 24px;'
+                f'background:#e94560;color:#fff;text-decoration:none;border-radius:8px;'
+                f'font-weight:600;margin-top:12px;">Ver en Admin</a></div>'
+            ),
+            fail_silently=True,
+        )
+    except Exception as e:
+        logger.error(f'Admin notification failed: {e}')
+
 _GOOGLE_SCOPES = [
     'openid',
     'https://www.googleapis.com/auth/userinfo.email',
@@ -145,6 +173,8 @@ def verify_email_view(request, token):
     verification.is_used = True
     verification.save(update_fields=['is_used'])
 
+    notify_admin_new_user(user, invitation_code=invitation_code_str or None)
+
     return redirect('login')
 
 
@@ -264,6 +294,7 @@ def google_callback_view(request):
         from django.contrib.auth.models import Group
         user_group, _ = Group.objects.get_or_create(name='user')
         user.groups.add(user_group)
+        notify_admin_new_user(user)
 
     login(request, user)
     return redirect('dashboard')
