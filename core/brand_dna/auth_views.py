@@ -266,7 +266,22 @@ def reset_password_view(request, token):
         else:
             from core.tenant_management.services.auth_service import AuthService
             try:
-                AuthService.reset_password(token, password1)
+                user = AuthService.reset_password(token, password1)
+                send_mail(
+                    'Tu contraseña fue restablecida — Agente Cosmic',
+                    'Tu contraseña de Agente Cosmic fue restablecida exitosamente. Si no realizaste este cambio, contacta soporte de inmediato.',
+                    settings.DEFAULT_FROM_EMAIL,
+                    [user.email],
+                    html_message=(
+                        '<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;">'
+                        '<h2 style="color:#e94560;">Agente Cosmic</h2>'
+                        '<p>Tu contraseña fue restablecida exitosamente.</p>'
+                        '<p style="color:#888;font-size:0.85rem;margin-top:16px;">'
+                        'Si no realizaste este cambio, contacta soporte de inmediato a '
+                        '<a href="mailto:contacto.neia@gmail.com" style="color:#e94560;">contacto.neia@gmail.com</a></p></div>'
+                    ),
+                    fail_silently=True,
+                )
                 return render(request, 'brand_dna/auth/reset_password.html', {
                     'success': True,
                 })
