@@ -116,10 +116,13 @@ def results(request, job_id):
     calendar = None
     if brand_dna:
         calendar = getattr(brand_dna, 'calendar', None)
+    from core.brand_dna.rate_limits import can_create_calendar
+    can_create = can_create_calendar(request.user)[0] if request.user.is_authenticated else False
     return render(request, 'brand_dna/results.html', {
         'job': job,
         'brand_dna': brand_dna,
         'calendar': calendar,
+        'can_create_calendar': can_create,
     })
 
 
@@ -181,6 +184,9 @@ def calendar_review_view(request, job_id):
             continue_decision=WeeklyFeedback.CONTINUE_PENDING
         ).order_by('-week_number').first()
 
+    from core.brand_dna.rate_limits import can_create_calendar
+    can_create, _ = can_create_calendar(request.user)
+
     return render(request, 'brand_dna/calendar_review.html', {
         'job': job,
         'brand_dna': brand_dna,
@@ -189,6 +195,7 @@ def calendar_review_view(request, job_id):
         'max_edits': plan.max_post_edits,
         'total_regens': total_regens,
         'total_edits': total_edits,
+        'can_create_calendar': can_create,
         'pending_feedback': pending_feedback,
         'product_pool': job.product_image_paths,
     })
