@@ -389,13 +389,12 @@ def dashboard_view(request):
         .select_related('brand_dna')
         .order_by('-created_at')[:20]
     )
-    week_ago = timezone.now() - timedelta(days=7)
-    used_this_week = AnalysisJob.objects.filter(user=request.user, created_at__gte=week_ago).count()
+    used_total = AnalysisJob.objects.filter(user=request.user).count()
     plan = get_user_plan(request.user)
     return render(request, 'brand_dna/dashboard.html', {
         'jobs': jobs,
         'user': request.user,
-        'used_this_week': used_this_week,
+        'used_total': used_total,
         'max_calendars': plan.max_calendars_per_week,
     })
 

@@ -55,18 +55,17 @@
     <h1>Mis análisis de marca</h1>
     <p class="welcome">Cada análisis genera 7 días de contenido entregado a tu correo.</p>
 
-    {% if used_this_week < max_calendars %}
+    {% if used_total < max_calendars %}
     <a href="{% url 'landing' %}" class="btn-new">+ Nuevo análisis</a>
     <div style="display:inline-flex;align-items:center;gap:8px;padding:8px 16px;background:#1a1a2e;border-radius:8px;margin-bottom:24px;font-size:0.82rem;color:#aaa;margin-left:12px;">
-      📅 Calendarios esta semana:
-      <strong style="color:#f0f0f0;">{{ used_this_week }}/{{ max_calendars }}</strong>
+      📅 Calendarios: <strong style="color:#f0f0f0;">{{ used_total }}/{{ max_calendars }}</strong>
     </div>
     {% else %}
     <div style="display:flex;align-items:center;gap:10px;padding:14px 20px;background:#3a1a1a;border:1px solid #c0392b;border-radius:10px;margin-bottom:24px;font-size:0.88rem;">
       <span>📅</span>
       <div>
         <strong style="color:#e94560;">Límite de calendarios alcanzado</strong>
-        <div style="color:#aaa;font-size:0.8rem;margin-top:2px;">Ya generaste {{ used_this_week }} de {{ max_calendars }} calendarios esta semana. Vuelve en 7 días o contacta soporte para ampliar tu plan.</div>
+        <div style="color:#aaa;font-size:0.8rem;margin-top:2px;">Ya generaste {{ used_total }} de {{ max_calendars }} calendarios de tu plan. Contacta soporte para ampliar tu acceso.</div>
       </div>
     </div>
     {% endif %}

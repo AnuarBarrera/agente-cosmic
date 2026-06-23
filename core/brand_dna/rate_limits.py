@@ -25,8 +25,7 @@ def get_user_plan(user):
 
 def can_create_calendar(user) -> tuple[bool, int]:
     plan = get_user_plan(user)
-    week_ago = timezone.now() - timedelta(days=7)
-    used = AnalysisJob.objects.filter(user=user, created_at__gte=week_ago).count()
+    used = AnalysisJob.objects.filter(user=user).count()
     remaining = max(0, plan.max_calendars_per_week - used)
     return remaining > 0, remaining
 

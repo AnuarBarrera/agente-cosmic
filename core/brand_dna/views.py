@@ -46,7 +46,7 @@ def analyze_submit(request):
     if not allowed:
         plan = get_user_plan(request.user)
         return render(request, 'brand_dna/landing.html', {
-            'error': f'Límite alcanzado: máximo {plan.max_calendars_per_week} calendarios por semana. Vuelve en 7 días o contacta soporte para ampliar tu plan.',
+            'error': f'Límite alcanzado: ya generaste el máximo de {plan.max_calendars_per_week} calendarios de tu plan. Contacta soporte para ampliar tu acceso.',
         })
 
     email = request.user.email
