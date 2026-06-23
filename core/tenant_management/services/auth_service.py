@@ -287,34 +287,26 @@ class AuthService:
     
     @staticmethod
     def _send_password_reset_email(reset_token: PasswordResetToken):
-        """
-        Envía el email de recuperación de contraseña.
-        """
-        reset_url = f"{settings.FRONTEND_URL}/reset-password?token={reset_token.token}"
+        reset_url = f"{settings.COSMIC_BASE_URL}/auth/reset-password/{reset_token.token}/"
 
-        subject = "Restablecer tu contraseña"
+        subject = "Restablecer tu contraseña — Agente Cosmic"
 
-        html_message = f"""
-        <h2>Solicitud de Restablecimiento de Contraseña</h2>
-        <p>Solicitaste restablecer tu contraseña. Haz clic en el enlace a continuación para establecer una nueva contraseña:</p>
-        <p><a href="{reset_url}" style="background-color: #007cba; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Restablecer Contraseña</a></p>
-        <p>O copia y pega esta URL en tu navegador:</p>
-        <p>{reset_url}</p>
-        <p>Este enlace expirará en 1 hora.</p>
-        <p>Si no solicitaste este restablecimiento, por favor ignora este correo.</p>
-        """
+        html_message = (
+            '<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;">'
+            '<h2 style="color:#e94560;">Agente Cosmic</h2>'
+            '<p>Solicitaste restablecer tu contraseña. Haz clic en el botón para establecer una nueva:</p>'
+            f'<a href="{reset_url}" style="display:inline-block;padding:14px 28px;'
+            'background:#e94560;color:#fff;text-decoration:none;border-radius:8px;'
+            'font-weight:600;">Restablecer contraseña</a>'
+            '<p style="color:#888;font-size:0.85rem;margin-top:24px;">'
+            'Este enlace expira en 1 hora. Si no solicitaste esto, ignora este correo.</p></div>'
+        )
 
-        plain_message = f"""
-        Solicitud de Restablecimiento de Contraseña
-
-        Solicitaste restablecer tu contraseña. Por favor visita la siguiente URL para establecer una nueva contraseña:
-
-        {reset_url}
-
-        Este enlace expirará en 1 hora.
-
-        Si no solicitaste este restablecimiento, por favor ignora este correo.
-        """
+        plain_message = (
+            f"Solicitaste restablecer tu contraseña.\n\n"
+            f"Visita este enlace: {reset_url}\n\n"
+            f"Este enlace expira en 1 hora."
+        )
         
         try:
             send_mail(

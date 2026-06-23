@@ -216,6 +216,69 @@ def logout_view(request):
     return redirect('login')
 
 
+def forgot_password_view(request):
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+
+    sent = False
+    error = None
+    if request.method == 'POST':
+        email = request.POST.get('email', '').lower().strip()
+        if email:
+            from core.tenant_management.services.auth_service import AuthService
+            try:
+                AuthService.initiate_password_reset(email)
+            except ValueError:
+                pass
+            sent = True
+
+    return render(request, 'brand_dna/auth/forgot_password.html', {
+        'sent': sent,
+        'error': error,
+    })
+
+
+def reset_password_view(request, token):
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+
+    from core.tenant_management.models import PasswordResetToken
+    try:
+        reset_token = PasswordResetToken.objects.get(token=token, is_used=False)
+    except PasswordResetToken.DoesNotExist:
+        return render(request, 'brand_dna/auth/reset_password.html', {
+            'invalid_token': True,
+        })
+
+    if not reset_token.is_valid():
+        return render(request, 'brand_dna/auth/reset_password.html', {
+            'invalid_token': True,
+        })
+
+    error = None
+    if request.method == 'POST':
+        password1 = request.POST.get('password1', '')
+        password2 = request.POST.get('password2', '')
+        if not password1 or not password2:
+            error = 'Ambos campos son obligatorios.'
+        elif password1 != password2:
+            error = 'Las contraseñas no coinciden.'
+        else:
+            from core.tenant_management.services.auth_service import AuthService
+            try:
+                AuthService.reset_password(token, password1)
+                return render(request, 'brand_dna/auth/reset_password.html', {
+                    'success': True,
+                })
+            except ValueError as e:
+                error = str(e)
+
+    return render(request, 'brand_dna/auth/reset_password.html', {
+        'token': token,
+        'error': error,
+    })
+
+
 def google_login_view(request):
     from google_auth_oauthlib.flow import Flow
 
