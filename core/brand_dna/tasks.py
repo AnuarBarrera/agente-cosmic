@@ -21,8 +21,15 @@ def analyze_brand_task(job_id: str) -> None:
     start = time.monotonic()
     try:
         job.update_progress(AnalysisJob.STAGE_WEB, 10)
-        scraper = WebScraper()
-        web_data = scraper.extract(job.business_url)
+        if job.business_url:
+            scraper = WebScraper()
+            web_data = scraper.extract(job.business_url)
+        else:
+            from core.brand_dna.extractors.manual_extractor import ManualBrandExtractor
+            web_data = ManualBrandExtractor().extract(
+                business_name=job.business_description.split('\n')[0][:100],
+                description=job.business_description,
+            )
         job.update_progress(AnalysisJob.STAGE_WEB, 30)
 
         job.update_progress(AnalysisJob.STAGE_LOGO, 35)

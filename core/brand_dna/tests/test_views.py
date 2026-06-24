@@ -51,6 +51,26 @@ def test_analyze_submit_creates_job(user):
     assert AnalysisJob.objects.filter(user=user).exists()
 
 
+def test_analyze_submit_without_url_with_description(user):
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.django_rq'):
+        response = c.post('/analizar/', {
+            'business_description': 'Vendo tamales oaxaqueños en el mercado',
+        })
+    assert response.status_code == 302
+    job = AnalysisJob.objects.filter(user=user).latest('created_at')
+    assert job.business_url == ''
+    assert 'tamales' in job.business_description
+
+
+def test_analyze_submit_without_url_or_description_shows_error(user):
+    c = Client()
+    c.force_login(user)
+    response = c.post('/analizar/', {})
+    assert response.status_code == 200
+
+
 def test_analyze_submit_enqueues_task(user):
     c = Client()
     c.force_login(user)

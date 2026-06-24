@@ -52,12 +52,23 @@ def analyze_submit(request):
 
     email = request.user.email
     business_url = request.POST.get('business_url', '').strip()
+    business_description = request.POST.get('business_description', '').strip()
+    business_name = request.POST.get('business_name', '').strip()
     posts_text = request.POST.get('posts_text', '').strip()
     profile_url = request.POST.get('profile_url', '').strip()
+
+    if not business_url and not business_description:
+        return render(request, 'brand_dna/landing.html', {
+            'error': 'Ingresa la URL de tu negocio o una descripción.',
+        })
+
+    if business_name and business_description:
+        business_description = f"{business_name}\n{business_description}"
 
     job = AnalysisJob.objects.create(
         email=email,
         business_url=business_url,
+        business_description=business_description,
         posts_text=posts_text,
         profile_url=profile_url,
         user=request.user,
