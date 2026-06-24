@@ -163,7 +163,7 @@
 
 <div class="container">
   <div class="page-title">Analizando tu marca</div>
-  <div class="page-sub">{{ job.business_url }}</div>
+  <div class="page-sub">{% if job.business_url %}{{ job.business_url }}{% else %}Analisis manual{% endif %}</div>
 
   <!-- ── LOADING ── -->
   <div class="loading-card" id="progressCard">
