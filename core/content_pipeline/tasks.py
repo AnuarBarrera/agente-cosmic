@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from datetime import datetime as dt_datetime, timedelta, timezone as dt_timezone
 from django.conf import settings
 from django.utils import timezone
@@ -13,6 +14,7 @@ from core.content_pipeline.email_sender import EmailSender
 from core.content_pipeline.scheduler import schedule_daily_emails
 from core.content_pipeline.smart_scheduler import smart_schedule_dates
 from core.content_pipeline.image_utils import normalize_image
+from core.shared.metrics import CONTENT_GENERATION_DURATION, CALENDARS_CREATED
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,7 @@ def content_generation_task(job_id: str) -> None:
     job = AnalysisJob.objects.get(id=job_id)
     brand_dna = job.brand_dna
 
+    start = time.monotonic()
     try:
         job.update_progress(AnalysisJob.STAGE_CONTENT, 80)
 
@@ -59,6 +62,7 @@ def content_generation_task(job_id: str) -> None:
             brand_dna=brand_dna,
             active_product_images=job.product_image_paths[:7],
         )
+        CALENDARS_CREATED.inc()
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
         now = timezone.now()
         mexico_today = now.astimezone(MEXICO_TZ).date()
@@ -109,9 +113,11 @@ def content_generation_task(job_id: str) -> None:
         job.progress = 100
         job.status = AnalysisJob.STATUS_DONE
         job.save(update_fields=['stage', 'progress', 'status'])
+        CONTENT_GENERATION_DURATION.observe(time.monotonic() - start)
         logger.info(f"Job {job_id} completado exitosamente")
 
     except Exception as e:
+        CONTENT_GENERATION_DURATION.observe(time.monotonic() - start)
         logger.error(f"content_generation_task error para job {job_id}: {e}")
         job.mark_failed(str(e))
 

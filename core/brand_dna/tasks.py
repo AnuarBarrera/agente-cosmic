@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 import django_rq
 from django.conf import settings
 from core.brand_dna.models import AnalysisJob, BrandDNA
@@ -7,6 +8,7 @@ from core.brand_dna.extractors.web_scraper import WebScraper
 from core.brand_dna.extractors.logo_analyzer import LogoAnalyzer
 from core.brand_dna.extractors.posts_analyzer import PostsAnalyzer
 from core.content_pipeline.image_utils import normalize_image
+from core.shared.metrics import ANALYSIS_JOBS_TOTAL, ANALYSIS_DURATION
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,7 @@ def analyze_brand_task(job_id: str) -> None:
     job.status = AnalysisJob.STATUS_PROCESSING
     job.save(update_fields=['status'])
 
+    start = time.monotonic()
     try:
         job.update_progress(AnalysisJob.STAGE_WEB, 10)
         scraper = WebScraper()
@@ -64,9 +67,14 @@ def analyze_brand_task(job_id: str) -> None:
         )
         job.update_progress(AnalysisJob.STAGE_CONTENT, 78)
 
+        ANALYSIS_DURATION.observe(time.monotonic() - start)
+        ANALYSIS_JOBS_TOTAL.labels(status='completed').inc()
+
         from core.content_pipeline.tasks import content_generation_task
         django_rq.enqueue(content_generation_task, str(job_id))
 
     except Exception as e:
+        ANALYSIS_DURATION.observe(time.monotonic() - start)
+        ANALYSIS_JOBS_TOTAL.labels(status='failed').inc()
         logger.error(f"analyze_brand_task error para job {job_id}: {e}")
         job.mark_failed(str(e))
