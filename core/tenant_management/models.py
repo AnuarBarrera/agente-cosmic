@@ -360,12 +360,16 @@ class InvitationCode(models.Model):
         return True
 
     def redeem(self, user) -> bool:
-        if not self.is_valid():
-            return False
         from django.contrib.auth.models import Group
-        target, _ = Group.objects.get_or_create(name=self.target_group)
-        user.groups.clear()
-        user.groups.add(target)
-        self.times_used += 1
-        self.save(update_fields=['times_used'])
+        from django.db import transaction
+        with transaction.atomic():
+            locked = InvitationCode.objects.select_for_update().get(pk=self.pk)
+            if not locked.is_valid():
+                return False
+            target, _ = Group.objects.get_or_create(name=locked.target_group)
+            user.groups.clear()
+            user.groups.add(target)
+            locked.times_used += 1
+            locked.save(update_fields=['times_used'])
+            self.times_used = locked.times_used
         return True

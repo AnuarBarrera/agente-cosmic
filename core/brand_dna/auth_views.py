@@ -8,6 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.shortcuts import render, redirect
+from django.utils.html import escape
 from .auth_forms import RegisterForm, LoginForm
 from .models import AnalysisJob
 from core.shared.metrics import (
@@ -22,8 +23,15 @@ _EMAIL_ACTION_MAX = 3
 _EMAIL_ACTION_WINDOW = 900
 
 
+def _get_client_ip(request) -> str:
+    xff = request.META.get('HTTP_X_FORWARDED_FOR', '')
+    if xff:
+        return xff.split(',')[-1].strip()
+    return request.META.get('REMOTE_ADDR', '')
+
+
 def _check_email_rate_limit(request, action: str) -> bool:
-    ip = request.META.get('REMOTE_ADDR', '')
+    ip = _get_client_ip(request)
     key = f'{action}_rate:{ip}'
     attempts = cache.get(key, 0)
     if attempts >= _EMAIL_ACTION_MAX:
@@ -36,7 +44,7 @@ def notify_admin_new_user(user, invitation_code=None):
     try:
         admin_email = settings.ADMIN_NOTIFICATION_EMAIL
         group_name = user.groups.first().name if user.groups.exists() else 'user'
-        code_info = f'<p><strong>Codigo usado:</strong> {invitation_code}</p>' if invitation_code else ''
+        code_info = f'<p><strong>Codigo usado:</strong> {escape(str(invitation_code))}</p>' if invitation_code else ''
         admin_url = f'{settings.COSMIC_BASE_URL}/admin/tenant_management/user/{user.pk}/change/'
         send_mail(
             f'[Agente Cosmic] Nuevo usuario verificado — {user.email}',
@@ -218,7 +226,8 @@ def login_view(request):
         form = LoginForm(request.POST)
         if form.is_valid():
             email = form.cleaned_data['email'].lower().strip()
-            cache_key = f'login_attempts:{email}'
+            ip = _get_client_ip(request)
+            cache_key = f'login_attempts:{ip}:{email}'
             attempts = cache.get(cache_key, 0)
             if attempts >= _LOGIN_MAX_ATTEMPTS:
                 LOGIN_ATTEMPTS.labels(result='locked').inc()
