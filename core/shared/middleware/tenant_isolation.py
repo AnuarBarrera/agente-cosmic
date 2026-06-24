@@ -7,111 +7,46 @@ logger = logging.getLogger(__name__)
 
 
 class TenantIsolationMiddleware:
-    """
-    Middleware to enforce tenant isolation by automatically setting tenant_id
-    from the authenticated user and preventing tenant_id manipulation in requests
-    """
-    
+    PUBLIC_PATH_PREFIXES = (
+        '/auth/', '/health/', '/admin/', '/static/', '/media/',
+        '/metrics', '/favicon',
+    )
+
     def __init__(self, get_response):
         self.get_response = get_response
-    
+
     def __call__(self, request):
-        # Process the request before view
+        if self._is_public_path(request.path):
+            return self.get_response(request)
+
         if hasattr(request, 'user') and request.user.is_authenticated:
-            logger.info(f"TenantIsolation: Processing request for user {request.user.email} to {request.path}")
             tenant_response = self._enforce_tenant_isolation(request)
             if tenant_response:
-                logger.info(f"TenantIsolation: Blocking access for user {request.user.email}")
                 return tenant_response
-        
-        response = self.get_response(request)
-        return response
-    
+
+        return self.get_response(request)
+
+    def _is_public_path(self, path):
+        if path == '/':
+            return True
+        for prefix in self.PUBLIC_PATH_PREFIXES:
+            if path.startswith(prefix):
+                return True
+        return False
+
     def _enforce_tenant_isolation(self, request):
-        """
-        Enforce tenant isolation by:
-        1. Setting the correct tenant_id from user
-        2. Preventing tenant_id manipulation in request data
-        3. Logging suspicious attempts
-        """
         user = request.user
-        
-        # Force debugging - check if user has tenant
-        has_tenant_attr = hasattr(user, 'tenant')
-        tenant_value = user.tenant if has_tenant_attr else None
-        logger.info(f"User {user.email}: has_tenant_attr={has_tenant_attr}, tenant_value={tenant_value}")
-        
+
         if not hasattr(user, 'tenant') or not user.tenant:
-            # Allow superusers to access admin without tenant requirement
-            if user.is_superuser and request.path.startswith('/admin'):
-                logger.info(f"Superuser {user.email} accessing admin without tenant - allowed")
+            if user.is_superuser:
                 return None
-            
-            logger.warning(f"User {user.email} has no associated tenant - blocking access")
-            # Return forbidden response for users without tenant
-            response = JsonResponse({
+            return JsonResponse({
                 'error': 'Access forbidden',
-                'message': 'User is not associated with any tenant'
+                'message': 'User is not associated with any tenant',
             }, status=403)
-            logger.info(f"Returning 403 response for user {user.email}")
-            return response
-        
-        user_tenant_id = str(user.tenant.id)
-        
-        # Check for tenant_id manipulation in query params
-        requested_tenant_id = request.GET.get('tenant_id')
-        if requested_tenant_id and requested_tenant_id != user_tenant_id:
-            logger.warning(
-                f"User {user.email} (tenant {user_tenant_id}) attempted to access "
-                f"tenant {requested_tenant_id} via query params"
-            )
-            # Record security event
-            self._record_security_event(
-                user, 
-                'unauthorized_tenant_access_attempt',
-                f'Attempted to access tenant {requested_tenant_id} via query params',
-                'medium'
-            )
-        
-        # Check for tenant_id manipulation in POST/PUT/PATCH data
-        if request.method in ['POST', 'PUT', 'PATCH'] and hasattr(request, 'data'):
-            if isinstance(request.data, dict):
-                requested_tenant_id = request.data.get('tenant_id')
-                if requested_tenant_id and str(requested_tenant_id) != user_tenant_id:
-                    logger.warning(
-                        f"User {user.email} (tenant {user_tenant_id}) attempted to "
-                        f"access tenant {requested_tenant_id} via request data"
-                    )
-                    # Record security event
-                    self._record_security_event(
-                        user,
-                        'unauthorized_tenant_access_attempt', 
-                        f'Attempted to access tenant {requested_tenant_id} via request data',
-                        'medium'
-                    )
-                
-                # Force the correct tenant_id
-                request.data['tenant_id'] = user_tenant_id
-        
-        # Set tenant_id attribute on request for easy access in views
-        request.tenant_id = user_tenant_id
-    
-    def _record_security_event(self, user, event_type, description, severity):
-        """Record a security event"""
-        try:
-            from core.tenant_management.models import SecurityEvent
-            
-            SecurityEvent.objects.create(
-                user=user,
-                event_type=event_type,
-                description=description,
-                severity=severity,
-                additional_data={
-                    'middleware': 'TenantIsolationMiddleware'
-                }
-            )
-        except Exception as e:
-            logger.error(f"Failed to record security event: {e}")
+
+        request.tenant_id = str(user.tenant.id)
+        return None
 
 
 def tenant_required(view_func):
