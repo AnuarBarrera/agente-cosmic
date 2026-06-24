@@ -198,7 +198,7 @@
     <div class="loading-sub" id="loadingSub">El Agente Cosmic está procesando tu marca</div>
 
     <ul class="stage-list" id="stageList">
-      <li class="stage-item" id="stage-web"><span class="stage-icon">○</span> Analizando sitio web</li>
+      <li class="stage-item" id="stage-web"><span class="stage-icon">○</span> {% if job.business_url %}Analizando sitio web{% else %}Analizando descripcion del negocio{% endif %}</li>
       <li class="stage-item" id="stage-logo"><span class="stage-icon">○</span> Analizando logo</li>
       <li class="stage-item" id="stage-posts"><span class="stage-icon">○</span> Analizando posts anteriores</li>
       <li class="stage-item" id="stage-content"><span class="stage-icon">○</span> Generando contenido</li>
@@ -241,7 +241,7 @@
 <script>
   // ── Mensajes rotativos del gatito ──
   const loadingMsgs = [
-    ['🔍 Leyendo tu sitio web...', 'Escaneando contenido, colores e identidad visual'],
+    {% if job.business_url %}['🔍 Leyendo tu sitio web...', 'Escaneando contenido, colores e identidad visual'],{% else %}['🔍 Analizando tu negocio...', 'Gemini esta estructurando tu perfil de marca'],{% endif %}
     ['🎨 Detectando la paleta de marca...', 'Extrayendo colores y elementos del logo'],
     ['📝 Analizando tu estilo de comunicación...', 'El agente está aprendiendo cómo hablas'],
     ['✨ Construyendo tu ADN de marca...', 'Vertex AI está procesando toda la información'],

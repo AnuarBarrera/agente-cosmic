@@ -16,7 +16,36 @@ from playwright.sync_api import sync_playwright
 from core.shared.metrics import IMAGEN_GENERATIONS, GCS_OPERATIONS
 from core.shared.metrics_utils import track_external_api, record_tokens
 
+from PIL import Image
+import io
+
 logger = logging.getLogger(__name__)
+
+
+def _crop_to_square(image_bytes: bytes) -> bytes:
+    """Crop image to 1:1 aspect ratio with top-biased center crop.
+    For portrait images, keeps the upper 1/3 as center point instead of
+    the geometric center — preserves heads, faces, and product tops."""
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        w, h = img.size
+        if w == h:
+            return image_bytes
+        side = min(w, h)
+        if w > h:
+            left = (w - side) // 2
+            box = (left, 0, left + side, side)
+        else:
+            top = max(0, (h - side) // 3)
+            box = (0, top, side, top + side)
+        cropped = img.crop(box)
+        buf = io.BytesIO()
+        fmt = 'JPEG' if img.format in (None, 'JPEG', 'MPO') else img.format
+        cropped.save(buf, format=fmt, quality=90)
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning(f"_crop_to_square failed, using original: {e}")
+        return image_bytes
 
 _MAX_RETRIES = 3
 
@@ -547,6 +576,7 @@ class ImageGenerator:
         with open(_TEMPLATE_PATH) as f:
             html = f.read()
 
+        background_bytes = _crop_to_square(background_bytes)
         bg_mime = _detect_mime(background_bytes)
         bg_b64 = base64.b64encode(background_bytes).decode()
         primary = colors[0] if colors else '#e94560'
