@@ -2,7 +2,10 @@ from django.contrib import admin
 from django.contrib.auth.models import Group
 from django.db.models import Count
 from django.http import Http404
+from django.urls import reverse
+from django.utils.html import format_html
 from django_otp.admin import OTPAdminSite
+from django_otp.plugins.otp_totp.admin import TOTPDeviceAdmin as OTPTOTPDeviceAdmin
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from core.brand_dna.models import AnalysisJob
@@ -116,11 +119,16 @@ class SecurityEventAdmin(admin.ModelAdmin):
         return False
 
 
-class TOTPDeviceAdmin(admin.ModelAdmin):
-    list_display = ('user', 'name', 'confirmed', 'created_at', 'last_used_at')
-    list_filter = ('confirmed',)
-    search_fields = ('user__email', 'name')
-    raw_id_fields = ('user',)
+class TOTPDeviceAdmin(OTPTOTPDeviceAdmin):
+    def qrcode_link(self, device):
+        try:
+            href = reverse(
+                f'{self.admin_site.name}:otp_totp_totpdevice_config',
+                kwargs={'pk': device.pk},
+            )
+            return format_html('<a href="{}">qrcode</a>', href)
+        except Exception:
+            return ''
 
 
 cosmic_admin.register(User, UserAdmin)
