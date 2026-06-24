@@ -143,12 +143,10 @@
     function switchMode(mode) {
       document.querySelectorAll('.mode-tab').forEach(function(t) { t.classList.remove('active'); });
       document.querySelector('[data-mode="' + mode + '"]').classList.add('active');
-
       var urlPanel = document.getElementById('mode-url');
       var manualPanel = document.getElementById('mode-manual');
       var inputUrl = document.getElementById('inputUrl');
       var inputDesc = document.getElementById('inputDesc');
-
       if (mode === 'url') {
         urlPanel.style.display = '';
         manualPanel.style.display = 'none';
@@ -162,13 +160,91 @@
       }
     }
 
-    document.getElementById('analyzeForm').addEventListener('submit', function() {
+    var MAX_SIDE = 1200;
+    var JPEG_QUALITY = 0.82;
+
+    function compressImage(file) {
+      return new Promise(function(resolve) {
+        if (!file.type.startsWith('image/')) { resolve(file); return; }
+        var img = new Image();
+        img.onload = function() {
+          var w = img.width, h = img.height;
+          if (w > MAX_SIDE || h > MAX_SIDE) {
+            var ratio = Math.min(MAX_SIDE / w, MAX_SIDE / h);
+            w = Math.round(w * ratio);
+            h = Math.round(h * ratio);
+          }
+          var canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          canvas.toBlob(function(blob) {
+            var name = file.name.replace(/\.[^.]+$/, '.jpg');
+            resolve(new File([blob], name, {type: 'image/jpeg'}));
+          }, 'image/jpeg', JPEG_QUALITY);
+        };
+        img.onerror = function() { resolve(file); };
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    function compressAll(files) {
+      return Promise.all(Array.from(files).map(compressImage));
+    }
+
+    document.getElementById('analyzeForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      var form = this;
       var btn = document.getElementById('submitBtn');
       var spinner = document.getElementById('btnSpinner');
       var text = document.getElementById('btnText');
       btn.disabled = true;
       spinner.style.display = 'block';
-      text.textContent = 'Analizando...';
+      text.textContent = 'Comprimiendo imagenes...';
+
+      var logoInput = form.querySelector('[name="logo"]');
+      var postInput = form.querySelector('[name="post_images"]');
+      var prodInput = form.querySelector('[name="product_images"]');
+
+      Promise.all([
+        logoInput.files.length ? compressAll(logoInput.files) : Promise.resolve([]),
+        postInput.files.length ? compressAll(postInput.files) : Promise.resolve([]),
+        prodInput.files.length ? compressAll(prodInput.files) : Promise.resolve([]),
+      ]).then(function(results) {
+        var fd = new FormData();
+        fd.append('csrfmiddlewaretoken', form.querySelector('[name="csrfmiddlewaretoken"]').value);
+
+        var fields = ['business_url', 'business_name', 'business_description', 'posts_text', 'profile_url'];
+        fields.forEach(function(name) {
+          var el = form.querySelector('[name="' + name + '"]');
+          if (el) fd.append(name, el.value);
+        });
+
+        results[0].forEach(function(f) { fd.append('logo', f); });
+        results[1].forEach(function(f) { fd.append('post_images', f); });
+        results[2].forEach(function(f) { fd.append('product_images', f); });
+
+        text.textContent = 'Analizando...';
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', form.action);
+        xhr.onload = function() {
+          if (xhr.responseURL && xhr.responseURL !== window.location.href) {
+            window.location.href = xhr.responseURL;
+          } else if (xhr.status === 200) {
+            document.open(); document.write(xhr.responseText); document.close();
+          } else {
+            text.textContent = 'Error — intenta de nuevo';
+            btn.disabled = false;
+            spinner.style.display = 'none';
+          }
+        };
+        xhr.onerror = function() {
+          text.textContent = 'Error de conexion';
+          btn.disabled = false;
+          spinner.style.display = 'none';
+        };
+        xhr.send(fd);
+      });
     });
   </script>
 </body>

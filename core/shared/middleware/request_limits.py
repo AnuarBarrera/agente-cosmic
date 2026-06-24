@@ -62,44 +62,26 @@ class RequestSizeLimitMiddleware(MiddlewareMixin):
                     status=400
                 )
             
-            # Check overall request size
-            if content_length > self.max_request_size:
-                logger.warning(
-                    f"Request size {content_length} exceeds limit {self.max_request_size}"
-                )
-                return JsonResponse(
-                    {
-                        'error': 'Request size too large',
-                        'max_size': self.max_request_size
-                    }, 
-                    status=413  # Request Entity Too Large
-                )
-            
-            # Special handling for JSON requests
             content_type = request.META.get('CONTENT_TYPE', '')
-            if 'application/json' in content_type and content_length > self.max_json_size:
+
+            if 'multipart/form-data' in content_type:
+                effective_limit = self.max_file_size
+                error_msg = 'File upload too large'
+            elif 'application/json' in content_type:
+                effective_limit = self.max_json_size
+                error_msg = 'JSON payload too large'
+            else:
+                effective_limit = self.max_request_size
+                error_msg = 'Request size too large'
+
+            if content_length > effective_limit:
                 logger.warning(
-                    f"JSON request size {content_length} exceeds JSON limit {self.max_json_size}"
+                    f"Request size {content_length} exceeds limit {effective_limit} "
+                    f"(content_type={content_type})"
                 )
                 return JsonResponse(
-                    {
-                        'error': 'JSON payload too large',
-                        'max_size': self.max_json_size
-                    }, 
-                    status=413
-                )
-            
-            # Special handling for file uploads
-            if 'multipart/form-data' in content_type and content_length > self.max_file_size:
-                logger.warning(
-                    f"File upload size {content_length} exceeds file limit {self.max_file_size}"
-                )
-                return JsonResponse(
-                    {
-                        'error': 'File upload too large',
-                        'max_size': self.max_file_size
-                    }, 
-                    status=413
+                    {'error': error_msg, 'max_size': effective_limit},
+                    status=413,
                 )
         
         return None
