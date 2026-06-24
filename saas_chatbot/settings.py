@@ -220,6 +220,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'django_rq',
     'anymail',
+    'django_prometheus',
     'core.tenant_management.apps.TenantManagementConfig',
     'core.shared.apps.SharedConfig',
     'core.brand_dna.apps.BrandDnaConfig',
@@ -241,6 +242,7 @@ RQ_QUEUES = {
 }
 
 MIDDLEWARE = [
+    'django_prometheus.middleware.PrometheusBeforeMiddleware',
     # Security middlewares - order matters!
     'core.shared.middleware.security.HostHeaderValidationMiddleware',  # FIRST: Validate host header
     'core.shared.middleware.request_limits.RequestSizeLimitMiddleware',
@@ -258,6 +260,7 @@ MIDDLEWARE = [
     'django_otp.middleware.OTPMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'django_prometheus.middleware.PrometheusAfterMiddleware',
 ]
 
 # Cookie security settings - conditional based on environment
@@ -313,7 +316,7 @@ WSGI_APPLICATION = 'saas_chatbot.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql_psycopg2',
+        'ENGINE': 'django_prometheus.db.backends.postgresql',
         'NAME': get_env('DB_NAME'),
         'USER': get_env('DB_USER'),
         'PASSWORD': get_env('DB_PASSWORD'),

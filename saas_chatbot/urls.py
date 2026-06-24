@@ -28,6 +28,7 @@ handler500 = 'core.shared.error_handlers.handler500'
 urlpatterns = [
     path('health/', health_check, name='health'),
     path('admin/', cosmic_admin.urls),
+    path('', include('django_prometheus.urls')),
     path('', include('core.brand_dna.urls')),
 ]
 
