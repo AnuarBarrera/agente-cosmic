@@ -1,4 +1,8 @@
+import logging
+from datetime import timedelta
+
 from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client.core import GaugeMetricFamily, REGISTRY
 
 ANALYSIS_JOBS_TOTAL = Counter(
     'cosmic_analysis_jobs_total',
@@ -110,3 +114,45 @@ CALENDARS_CREATED = Counter(
     'cosmic_calendars_created_total',
     'Content calendars created',
 )
+
+_logger = logging.getLogger(__name__)
+
+
+class RQJobsCollector:
+    def describe(self):
+        return []
+
+    def collect(self):
+        try:
+            import django_rq
+            queue = django_rq.get_queue('default')
+            g = GaugeMetricFamily('cosmic_rq_jobs', 'RQ jobs by state', labels=['state'])
+            g.add_metric(['queued'], queue.count)
+            g.add_metric(['started'], queue.started_job_registry.count)
+            g.add_metric(['finished'], queue.finished_job_registry.count)
+            g.add_metric(['failed'], queue.failed_job_registry.count)
+            yield g
+        except Exception as e:
+            _logger.warning(f'RQJobsCollector error: {e}')
+
+
+class ActiveUsersCollector:
+    def describe(self):
+        return []
+
+    def collect(self):
+        try:
+            from django.contrib.auth import get_user_model
+            from django.utils import timezone
+            User = get_user_model()
+            cutoff = timezone.now() - timedelta(hours=24)
+            count = User.objects.filter(last_login__gte=cutoff).count()
+            g = GaugeMetricFamily('cosmic_active_users', 'Users with login in last 24h')
+            g.add_metric([], count)
+            yield g
+        except Exception as e:
+            _logger.warning(f'ActiveUsersCollector error: {e}')
+
+
+REGISTRY.register(RQJobsCollector())
+REGISTRY.register(ActiveUsersCollector())
