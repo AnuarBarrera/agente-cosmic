@@ -4,6 +4,7 @@ import re
 import google.genai as genai
 from django.conf import settings
 from core.brand_dna.models import BrandDNA
+from core.shared.metrics_utils import track_external_api, record_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,9 @@ class TextGenerator:
             hashtags=', '.join(brand_dna.common_hashtags or []),
             avg_length=brand_dna.avg_caption_length,
         )
-        resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        with track_external_api('gemini'):
+            resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        record_tokens(resp)
         raw = resp.text.strip()
         raw = re.sub(r'^```(?:json)?\n?', '', raw)
         raw = re.sub(r'\n?```$', '', raw)

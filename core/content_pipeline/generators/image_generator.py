@@ -13,6 +13,8 @@ from google.cloud import storage
 from google.genai import types
 from django.conf import settings
 from playwright.sync_api import sync_playwright
+from core.shared.metrics import IMAGEN_GENERATIONS, GCS_OPERATIONS
+from core.shared.metrics_utils import track_external_api, record_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -193,10 +195,12 @@ class ImageGenerator:
                 f"End with: 'NOT abstract. NOT 3D render. Absolutely NO text, NO logos.'\n"
                 f"Return ONLY the prompt text, no explanations."
             )
-            resp = client.models.generate_content(
-                model=settings.VERTEX_TEXT_MODEL,
-                contents=[image_part, prompt],
-            )
+            with track_external_api('gemini'):
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL,
+                    contents=[image_part, prompt],
+                )
+            record_tokens(resp)
             result = resp.text.strip().strip('"').strip("'")
             if result:
                 logger.info(f"Art Director env prompt: {result[:100]}...")
@@ -212,28 +216,30 @@ class ImageGenerator:
         mime = _detect_mime(product_image_bytes)
         try:
             client = _vertex_client()
-            resp = client.models.edit_image(
-                model=settings.VERTEX_IMAGE_EDIT_MODEL,
-                prompt=environment_prompt,
-                reference_images=[
-                    types.RawReferenceImage(
-                        reference_image=types.Image(image_bytes=product_image_bytes, mime_type=mime),
-                        reference_id=1,
-                    ),
-                    types.MaskReferenceImage(
-                        reference_id=2,
-                        config=types.MaskReferenceConfig(
-                            mask_mode=types.MaskReferenceMode.MASK_MODE_BACKGROUND,
+            with track_external_api('imagen3'):
+                resp = client.models.edit_image(
+                    model=settings.VERTEX_IMAGE_EDIT_MODEL,
+                    prompt=environment_prompt,
+                    reference_images=[
+                        types.RawReferenceImage(
+                            reference_image=types.Image(image_bytes=product_image_bytes, mime_type=mime),
+                            reference_id=1,
                         ),
+                        types.MaskReferenceImage(
+                            reference_id=2,
+                            config=types.MaskReferenceConfig(
+                                mask_mode=types.MaskReferenceMode.MASK_MODE_BACKGROUND,
+                            ),
+                        ),
+                    ],
+                    config=types.EditImageConfig(
+                        edit_mode=types.EditMode.EDIT_MODE_BGSWAP,
+                        number_of_images=1,
+                        aspect_ratio='1:1',
                     ),
-                ],
-                config=types.EditImageConfig(
-                    edit_mode=types.EditMode.EDIT_MODE_BGSWAP,
-                    number_of_images=1,
-                    aspect_ratio='1:1',
-                ),
-            )
+                )
             if resp.generated_images:
+                IMAGEN_GENERATIONS.inc()
                 logger.info("BGSWAP exitoso — producto sobre entorno premium")
                 return resp.generated_images[0].image.image_bytes, True
             logger.warning("BGSWAP sin imágenes, usando foto original")
@@ -259,10 +265,12 @@ class ImageGenerator:
                 f"- No solid opaque fills. SVG root has no background-color.\n"
                 f"- Return ONLY valid SVG starting with <svg and ending with </svg>. No markdown."
             )
-            resp = client.models.generate_content(
-                model=settings.VERTEX_TEXT_MODEL,
-                contents=[image_part, prompt],
-            )
+            with track_external_api('gemini'):
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL,
+                    contents=[image_part, prompt],
+                )
+            record_tokens(resp)
             raw = resp.text.strip()
             svg_match = re.search(r'<svg[\s\S]*?</svg>', raw, re.DOTALL)
             if svg_match:
@@ -313,10 +321,12 @@ class ImageGenerator:
                 f"End with: 'Natural lighting. Photorealistic. NO laptops. NO computers. NO text. NO logos.'\n"
                 f"Return ONLY the prompt text, no explanations."
             )
-            resp = client.models.generate_content(
-                model=settings.VERTEX_TEXT_MODEL,
-                contents=prompt,
-            )
+            with track_external_api('gemini'):
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL,
+                    contents=prompt,
+                )
+            record_tokens(resp)
             result = resp.text.strip().strip('"').strip("'")
             if len(result) > 20:
                 logger.info(f"Brand scene prompt: {result[:120]}...")
@@ -370,10 +380,12 @@ class ImageGenerator:
                 "A screen must be completely BLACK or clearly turned off to not count. Be very strict.\n"
                 "ok: true ONLY if has_text=false AND is_abstract_3d=false AND has_screen_content=false."
             )
-            resp = client.models.generate_content(
-                model=settings.VERTEX_TEXT_MODEL,
-                contents=[image_part, prompt],
-            )
+            with track_external_api('gemini'):
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL,
+                    contents=[image_part, prompt],
+                )
+            record_tokens(resp)
             raw = resp.text.strip()
             match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
             if match:
@@ -409,10 +421,12 @@ class ImageGenerator:
                 "A professional advertising image must have an interesting background, not a plain studio backdrop.\n"
                 "ok: true ONLY if has_background_text=false AND has_shadow_artifacts=false AND plain_white_background=false."
             )
-            resp = client.models.generate_content(
-                model=settings.VERTEX_TEXT_MODEL,
-                contents=[image_part, prompt],
-            )
+            with track_external_api('gemini'):
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL,
+                    contents=[image_part, prompt],
+                )
+            record_tokens(resp)
             raw = resp.text.strip()
             match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
             if match:
@@ -488,18 +502,20 @@ class ImageGenerator:
                     "{\"headline\":\"...\",\"subtitle\":\"...\",\"cta\":\"...\",\"tag\":\"...\"}"
                 )
                 contents = prompt
-            resp = client.models.generate_content(
-                model=settings.VERTEX_TEXT_MODEL,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=(
-                        "Eres 'Cosmic', Director Creativo de Agente Cosmic. "
-                        "Generas contenido de marketing para redes sociales. "
-                        "Español impecable. Cero errores ortográficos. Nunca inventes palabras. "
-                        "Frases para imagen: cortas, impactantes, máximo 5 palabras."
+            with track_external_api('gemini'):
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=(
+                            "Eres 'Cosmic', Director Creativo de Agente Cosmic. "
+                            "Generas contenido de marketing para redes sociales. "
+                            "Español impecable. Cero errores ortográficos. Nunca inventes palabras. "
+                            "Frases para imagen: cortas, impactantes, máximo 5 palabras."
+                        ),
                     ),
-                ),
-            )
+                )
+            record_tokens(resp)
             raw = resp.text.strip()
             match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
             if match:
@@ -581,33 +597,39 @@ class ImageGenerator:
         client = _vertex_client()
         model = settings.VERTEX_IMAGE_MODEL
         if 'imagen' in model:
-            resp = client.models.generate_images(
-                model=model,
-                prompt=prompt,
-                config=types.GenerateImagesConfig(
-                    number_of_images=1,
-                    aspect_ratio='1:1',
-                ),
-            )
+            with track_external_api('imagen3'):
+                resp = client.models.generate_images(
+                    model=model,
+                    prompt=prompt,
+                    config=types.GenerateImagesConfig(
+                        number_of_images=1,
+                        aspect_ratio='1:1',
+                    ),
+                )
             if resp.generated_images:
+                IMAGEN_GENERATIONS.inc()
                 return resp.generated_images[0].image.image_bytes
             raise ValueError("No image returned by Imagen")
-        resp = client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_modalities=['IMAGE', 'TEXT']
-            ),
-        )
+        with track_external_api('gemini'):
+            resp = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_modalities=['IMAGE', 'TEXT']
+                ),
+            )
+        record_tokens(resp)
         for part in resp.candidates[0].content.parts:
             if part.inline_data:
                 return part.inline_data.data
         raise ValueError("No image returned by Vertex AI")
 
     def _upload_to_storage(self, image_bytes: bytes, filename: str) -> str:
-        client = storage.Client(project=settings.GOOGLE_CLOUD_PROJECT)
-        bucket = client.bucket(self._bucket)
-        blob = bucket.blob(f'posts/{filename}.png')
-        blob.upload_from_string(image_bytes, content_type='image/png')
-        blob.make_public()
+        with track_external_api('gcs'):
+            client = storage.Client(project=settings.GOOGLE_CLOUD_PROJECT)
+            bucket = client.bucket(self._bucket)
+            blob = bucket.blob(f'posts/{filename}.png')
+            blob.upload_from_string(image_bytes, content_type='image/png')
+            blob.make_public()
+        GCS_OPERATIONS.labels(operation='upload').inc()
         return blob.public_url

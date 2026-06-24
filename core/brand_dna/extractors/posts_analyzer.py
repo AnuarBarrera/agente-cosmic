@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 from google.genai import types
 from django.conf import settings
 from core.brand_dna.extractors import validate_url_safe, SSRFBlockedError
+from core.shared.metrics_utils import track_external_api, record_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,9 @@ class PostsAnalyzer:
     def _analyze_text(self, text: str) -> dict:
         client = _vertex_client()
         prompt = _TEXT_PROMPT.format(posts=text[:3000])
-        resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        with track_external_api('gemini'):
+            resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        record_tokens(resp)
         raw = resp.text.strip()
         raw = re.sub(r'^```(?:json)?\n?', '', raw)
         raw = re.sub(r'\n?```$', '', raw)
@@ -82,7 +85,9 @@ class PostsAnalyzer:
         parts = [_IMAGE_PROMPT]
         for img_bytes in images[:5]:
             parts.append(types.Part.from_bytes(data=img_bytes, mime_type='image/jpeg'))
-        resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=parts)
+        with track_external_api('gemini'):
+            resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=parts)
+        record_tokens(resp)
         raw = resp.text.strip()
         raw = re.sub(r'^```(?:json)?\n?', '', raw)
         raw = re.sub(r'\n?```$', '', raw)

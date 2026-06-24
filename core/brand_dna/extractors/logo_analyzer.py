@@ -3,6 +3,7 @@ import google.genai as genai
 from google.cloud import vision
 from google.genai import types
 from django.conf import settings
+from core.shared.metrics_utils import track_external_api, record_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,8 @@ class LogoAnalyzer:
         image = vision.Image(content=image_bytes)
         features = [vision.Feature(type_=vision.Feature.Type.IMAGE_PROPERTIES)]
         request = vision.AnnotateImageRequest(image=image, features=features)
-        response = client.annotate_image(request=request)
+        with track_external_api('cloud_vision'):
+            response = client.annotate_image(request=request)
         colors = response.image_properties_annotation.dominant_colors.colors
         hex_colors = []
         for c in sorted(colors, key=lambda x: x.pixel_fraction, reverse=True)[:5]:
@@ -49,8 +51,10 @@ class LogoAnalyzer:
     def _describe_with_vertex(self, image_bytes: bytes, mime_type: str) -> str:
         client = _vertex_client()
         image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
-        resp = client.models.generate_content(
-            model=settings.VERTEX_TEXT_MODEL,
-            contents=[_VISION_PROMPT, image_part],
-        )
+        with track_external_api('gemini'):
+            resp = client.models.generate_content(
+                model=settings.VERTEX_TEXT_MODEL,
+                contents=[_VISION_PROMPT, image_part],
+            )
+        record_tokens(resp)
         return resp.text.strip()

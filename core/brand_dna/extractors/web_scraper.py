@@ -6,6 +6,7 @@ import google.genai as genai
 from bs4 import BeautifulSoup
 from django.conf import settings
 from core.brand_dna.extractors import validate_url_safe, SSRFBlockedError
+from core.shared.metrics_utils import track_external_api, record_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,9 @@ class WebScraper:
         client = _vertex_client()
         colors_str = ', '.join(css_colors) if css_colors else 'No se detectaron colores'
         prompt = _PROMPT_TEMPLATE.format(html=text, css_colors=colors_str)
-        resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        with track_external_api('gemini'):
+            resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        record_tokens(resp)
         raw = resp.text.strip()
         raw = re.sub(r'^```(?:json)?\n?', '', raw)
         raw = re.sub(r'\n?```$', '', raw)
