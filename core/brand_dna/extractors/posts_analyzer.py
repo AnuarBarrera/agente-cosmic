@@ -97,7 +97,7 @@ class PostsAnalyzer:
     def _scrape_profile(self, url: str) -> str:
         try:
             validate_url_safe(url)
-            resp = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+            resp = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'}, allow_redirects=False)
             soup = BeautifulSoup(resp.text, 'html.parser')
             texts = [p.get_text() for p in soup.find_all(['p', 'span', 'div']) if len(p.get_text()) > 20]
             return '\n'.join(texts[:20])

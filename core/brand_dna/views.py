@@ -111,14 +111,15 @@ def analyze_submit(request):
     return redirect('results', job_id=str(job.id))
 
 
+@login_required
 def results(request, job_id):
-    job = get_object_or_404(AnalysisJob, id=job_id)
+    job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
     brand_dna = getattr(job, 'brand_dna', None)
     calendar = None
     if brand_dna:
         calendar = getattr(brand_dna, 'calendar', None)
     from core.brand_dna.rate_limits import can_create_calendar
-    can_create = can_create_calendar(request.user)[0] if request.user.is_authenticated else False
+    can_create = can_create_calendar(request.user)[0]
     return render(request, 'brand_dna/results.html', {
         'job': job,
         'brand_dna': brand_dna,
@@ -127,8 +128,9 @@ def results(request, job_id):
     })
 
 
+@login_required
 def status_api(request, job_id):
-    job = get_object_or_404(AnalysisJob, id=job_id)
+    job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
     brand_dna = getattr(job, 'brand_dna', None)
     brand_dna_data = None
     calendar_data = None

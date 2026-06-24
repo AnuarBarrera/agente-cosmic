@@ -75,7 +75,7 @@ class WebScraper:
     def _fetch_text_and_colors(self, url: str) -> tuple[str, list[str]]:
         validate_url_safe(url)
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, timeout=15, headers=headers)
+        response = requests.get(url, timeout=15, headers=headers, allow_redirects=False)
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # 1. Inline <style> blocks
@@ -94,7 +94,7 @@ class WebScraper:
             css_url = href if href.startswith('http') else f"{base_url}/{href.lstrip('/')}"
             try:
                 validate_url_safe(css_url)
-                css_resp = requests.get(css_url, timeout=6, headers=headers)
+                css_resp = requests.get(css_url, timeout=6, headers=headers, allow_redirects=False)
                 css_text += ' ' + css_resp.text
             except Exception:
                 pass

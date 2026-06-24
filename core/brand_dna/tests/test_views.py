@@ -11,38 +11,46 @@ from core.content_pipeline.models import ContentCalendar, ContentPost, WeeklyFee
 pytestmark = pytest.mark.django_db
 
 
-def test_landing_page_returns_200():
+@pytest.fixture
+def user(django_user_model):
+    return django_user_model.objects.create_user(
+        username='feedback@test.com', email='feedback@test.com', password='pass1234'
+    )
+
+
+def test_landing_page_redirects_to_login():
     c = Client()
     response = c.get('/')
-    assert response.status_code == 200
+    assert response.status_code == 302
 
 
-def test_analyze_submit_creates_job():
+def test_analyze_submit_creates_job(user):
     c = Client()
+    c.force_login(user)
     with patch('core.brand_dna.views.django_rq'):
         response = c.post('/analizar/', {
-            'email': 'test@example.com',
             'business_url': 'https://tuwebmx.com',
         })
     assert response.status_code == 302
-    assert AnalysisJob.objects.filter(email='test@example.com').exists()
+    assert AnalysisJob.objects.filter(user=user).exists()
 
 
-def test_analyze_submit_enqueues_task():
+def test_analyze_submit_enqueues_task(user):
     c = Client()
+    c.force_login(user)
     with patch('core.brand_dna.views.django_rq') as mock_rq:
         c.post('/analizar/', {
-            'email': 'test@example.com',
             'business_url': 'https://tuwebmx.com',
         })
     mock_rq.enqueue.assert_called_once()
 
 
-def test_status_api_returns_progress():
+def test_status_api_returns_progress(user):
     c = Client()
+    c.force_login(user)
     job = AnalysisJob.objects.create(
-        email='t@t.com', business_url='https://tuwebmx.com',
-        status='processing', stage='logo', progress=50,
+        email=user.email, business_url='https://tuwebmx.com',
+        status='processing', stage='logo', progress=50, user=user,
     )
     response = c.get(f'/api/brand-dna/status/{job.id}/')
     assert response.status_code == 200
@@ -52,11 +60,12 @@ def test_status_api_returns_progress():
     assert data['status'] == 'processing'
 
 
-def test_status_api_returns_brand_dna_when_done():
+def test_status_api_returns_brand_dna_when_done(user):
     c = Client()
+    c.force_login(user)
     job = AnalysisJob.objects.create(
-        email='t@t.com', business_url='https://tuwebmx.com',
-        status='done', stage='complete', progress=100,
+        email=user.email, business_url='https://tuwebmx.com',
+        status='done', stage='complete', progress=100, user=user,
     )
     BrandDNA.objects.create(
         job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
@@ -69,18 +78,37 @@ def test_status_api_returns_brand_dna_when_done():
     assert data['brand_dna']['business_name'] == 'Tu Web MX'
 
 
-def test_results_page_returns_200():
+def test_results_page_returns_200(user):
     c = Client()
-    job = AnalysisJob.objects.create(email='t@t.com', business_url='https://tuwebmx.com')
+    c.force_login(user)
+    job = AnalysisJob.objects.create(email=user.email, business_url='https://tuwebmx.com', user=user)
     response = c.get(f'/resultados/{job.id}/')
     assert response.status_code == 200
 
 
-@pytest.fixture
-def user(django_user_model):
-    return django_user_model.objects.create_user(
-        username='feedback@test.com', email='feedback@test.com', password='pass1234'
+def test_status_api_requires_login():
+    c = Client()
+    job = AnalysisJob.objects.create(email='t@t.com', business_url='https://tuwebmx.com')
+    response = c.get(f'/api/brand-dna/status/{job.id}/')
+    assert response.status_code == 302
+
+
+def test_results_requires_login():
+    c = Client()
+    job = AnalysisJob.objects.create(email='t@t.com', business_url='https://tuwebmx.com')
+    response = c.get(f'/resultados/{job.id}/')
+    assert response.status_code == 302
+
+
+def test_status_api_blocks_other_user(user, django_user_model):
+    other = django_user_model.objects.create_user(
+        username='other@test.com', email='other@test.com', password='pass1234'
     )
+    c = Client()
+    c.force_login(other)
+    job = AnalysisJob.objects.create(email=user.email, business_url='https://tuwebmx.com', user=user)
+    response = c.get(f'/api/brand-dna/status/{job.id}/')
+    assert response.status_code == 404
 
 
 @pytest.fixture

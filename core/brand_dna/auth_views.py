@@ -18,6 +18,19 @@ from core.shared.metrics import (
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
+_EMAIL_ACTION_MAX = 3
+_EMAIL_ACTION_WINDOW = 900
+
+
+def _check_email_rate_limit(request, action: str) -> bool:
+    ip = request.META.get('REMOTE_ADDR', '')
+    key = f'{action}_rate:{ip}'
+    attempts = cache.get(key, 0)
+    if attempts >= _EMAIL_ACTION_MAX:
+        return False
+    cache.set(key, attempts + 1, _EMAIL_ACTION_WINDOW)
+    return True
+
 
 def notify_admin_new_user(user, invitation_code=None):
     try:
@@ -89,6 +102,11 @@ def register_view(request):
         })
 
     if request.method == 'POST':
+        if not _check_email_rate_limit(request, 'register'):
+            return render(request, 'brand_dna/auth/register.html', {
+                'form': RegisterForm(),
+                'error': 'Demasiados intentos. Intenta de nuevo en 15 minutos.',
+            })
         form = RegisterForm(request.POST)
         if form.is_valid():
             if not _is_registration_open():
@@ -235,6 +253,11 @@ def forgot_password_view(request):
     sent = False
     error = None
     if request.method == 'POST':
+        if not _check_email_rate_limit(request, 'forgot_password'):
+            sent = True
+            return render(request, 'brand_dna/auth/forgot_password.html', {
+                'sent': sent, 'error': error,
+            })
         email = request.POST.get('email', '').lower().strip()
         if email:
             from core.tenant_management.services.auth_service import AuthService
