@@ -93,6 +93,7 @@ class WebScraper:
                 continue
             css_url = href if href.startswith('http') else f"{base_url}/{href.lstrip('/')}"
             try:
+                validate_url_safe(css_url)
                 css_resp = requests.get(css_url, timeout=6, headers=headers)
                 css_text += ' ' + css_resp.text
             except Exception:

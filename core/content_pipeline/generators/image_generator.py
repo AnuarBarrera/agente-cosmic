@@ -6,7 +6,7 @@ import os
 import random
 import re
 import time
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 
 import google.genai as genai
 from google.cloud import storage

@@ -84,6 +84,7 @@ services:
     volumes:
       - ./nginx.dev.conf:/etc/nginx/conf.d/default.conf
       - ./staticfiles:/app/staticfiles
+      - ./media:/app/media
     depends_on:
       - backend
     networks:
