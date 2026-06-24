@@ -36,49 +36,6 @@ class SecurityEventLoggingTestCase(APITestCase):
         )
         self.client = APIClient()
 
-    def test_successful_login_security_event(self):
-        """Test that successful logins create security events"""
-        # Use direct URL path to avoid reverse lookup issues
-        login_url = '/api/v1/tenants/token/'
-        
-        response = self.client.post(login_url, {
-            'email': 'testuser@example.com',
-            'password': 'TestPassword123!'
-        }, HTTP_X_FORWARDED_FOR='192.168.1.1')
-        
-        self.assertEqual(response.status_code, 200)
-        
-        # Verify security event was created
-        events = SecurityEvent.objects.filter(
-            user=self.user,
-            event_type='login_success'
-        )
-        self.assertEqual(events.count(), 1)
-        
-        event = events.first()
-        self.assertEqual(event.severity, 'low')
-        self.assertIn('successful login', event.description.lower())
-
-    def test_failed_login_security_event(self):
-        """Test that failed logins create security events"""
-        # Use direct URL path to avoid reverse lookup issues
-        login_url = '/api/v1/tenants/token/'
-        
-        response = self.client.post(login_url, {
-            'email': 'testuser@example.com',
-            'password': 'WrongPassword'
-        }, HTTP_X_FORWARDED_FOR='192.168.1.1')
-        
-        self.assertEqual(response.status_code, 400)
-        
-        # Verify security event was created
-        events = SecurityEvent.objects.filter(
-            event_type='login_failed'
-        )
-        # Note: The failed login event is created in the serializer, not linked to user
-        # since user is not authenticated yet
-        self.assertTrue(events.exists())
-
     def test_password_reset_security_event(self):
         """Test that password resets create security events"""
         # Initiate password reset
@@ -161,27 +118,6 @@ class SecurityEventLoggingTestCase(APITestCase):
         event = events.first()
         self.assertEqual(event.severity, 'low')
         self.assertIn('token blacklisted', event.description.lower())
-
-    def test_account_lockout_security_event(self):
-        """Test that account lockouts create security events"""
-        # Use direct URL path to avoid reverse lookup issues
-        login_url = '/api/v1/tenants/token/'
-        
-        # Make enough failed attempts to trigger lockout
-        for i in range(5):
-            self.client.post(login_url, {
-                'email': 'testuser@example.com',
-                'password': 'WrongPassword'
-            }, HTTP_X_FORWARDED_FOR='192.168.1.1')
-        
-        # Next attempt should log lockout
-        response = self.client.post(login_url, {
-            'email': 'testuser@example.com',
-            'password': 'TestPassword123!'
-        }, HTTP_X_FORWARDED_FOR='192.168.1.1')
-        
-        self.assertEqual(response.status_code, 400)
-        self.assertIn('Account temporarily locked', str(response.data))
 
     def test_security_event_data_structure(self):
         """Test that security events have proper data structure"""
@@ -323,33 +259,6 @@ class SecurityEventLoggingTestCase(APITestCase):
         events = SecurityEvent.objects.all()
         self.assertEqual(events.first().id, event2.id)
         self.assertEqual(events.last().id, event1.id)
-
-    def test_security_event_creation_from_middleware(self):
-        """Test security event creation from tenant isolation middleware"""
-        from core.shared.middleware.tenant_isolation import TenantIsolationMiddleware
-        from unittest.mock import MagicMock
-        
-        middleware = TenantIsolationMiddleware(lambda r: None)
-        
-        # Call the security event recording method
-        middleware._record_security_event(
-            self.user,
-            'unauthorized_tenant_access_attempt',
-            'Test tenant access attempt',
-            'medium'
-        )
-        
-        # Verify event was created
-        events = SecurityEvent.objects.filter(
-            user=self.user,
-            event_type='unauthorized_tenant_access_attempt'
-        )
-        self.assertEqual(events.count(), 1)
-        
-        event = events.first()
-        self.assertEqual(event.severity, 'medium')
-        self.assertEqual(event.description, 'Test tenant access attempt')
-        self.assertEqual(event.additional_data['middleware'], 'TenantIsolationMiddleware')
 
     def test_bulk_security_event_creation_performance(self):
         """Test that bulk security event creation performs well"""

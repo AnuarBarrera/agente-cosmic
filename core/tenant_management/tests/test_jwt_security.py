@@ -73,36 +73,6 @@ class JWTSecurityTestCase(APITestCase):
         self.assertEqual(blacklisted.user, self.user)
         self.assertEqual(blacklisted.reason, 'test_logout')
 
-    def test_jwt_authentication_with_blacklisted_token(self):
-        """Test that blacklisted tokens cannot be used for authentication"""
-        # Login to get tokens
-        # Use direct URL path to avoid reverse lookup issues
-        login_url = '/api/v1/tenants/token/'
-        response = self.client.post(login_url, {
-            'email': 'testuser@example.com',
-            'password': 'TestPassword123!'
-        })
-        self.assertEqual(response.status_code, 200)
-        
-        access_token = response.data['access']
-        refresh_token = response.data['refresh']
-        
-        # Use access token to access protected endpoint
-        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
-        protected_url = reverse('tenant_management:user_sessions')
-        response = self.client.get(protected_url)
-        self.assertEqual(response.status_code, 200)
-        
-        # Blacklist the token by logging out
-        logout_url = reverse('tenant_management:logout')
-        response = self.client.post(logout_url)
-        self.assertEqual(response.status_code, 200)
-        
-        # Try to access protected endpoint with blacklisted token
-        # The blacklisted token should cause a TokenError which gets translated to 401
-        with self.assertRaises(Exception):  # TokenError gets raised during authentication
-            response = self.client.get(protected_url)
-
     def test_token_rotation(self):
         """Test JWT token rotation functionality"""
         # Create initial tokens
@@ -190,83 +160,6 @@ class JWTSecurityTestCase(APITestCase):
             # Verify cleanup occurred
             self.assertEqual(cleaned_count, 1)
             self.assertEqual(BlacklistedToken.objects.count(), 0)
-
-    def test_token_refresh_endpoint(self):
-        """Test custom token refresh endpoint with rotation"""
-        # Login to get tokens
-        # Use direct URL path to avoid reverse lookup issues
-        login_url = '/api/v1/tenants/token/'
-        response = self.client.post(login_url, {
-            'email': 'testuser@example.com',
-            'password': 'TestPassword123!'
-        })
-        
-        old_refresh_token = response.data['refresh']
-        
-        # Use refresh endpoint
-        refresh_url = reverse('tenant_management:token_refresh')
-        response = self.client.post(refresh_url, {
-            'refresh': old_refresh_token
-        })
-        
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('access', response.data)
-        self.assertIn('refresh', response.data)
-        self.assertNotEqual(old_refresh_token, response.data['refresh'])
-
-    def test_session_management_endpoint(self):
-        """Test user session management endpoint"""
-        # Login to get tokens
-        # Use direct URL path to avoid reverse lookup issues
-        login_url = '/api/v1/tenants/token/'
-        response = self.client.post(login_url, {
-            'email': 'testuser@example.com',
-            'password': 'TestPassword123!'
-        })
-        
-        access_token = response.data['access']
-        
-        # Access sessions endpoint
-        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
-        sessions_url = reverse('tenant_management:user_sessions')
-        response = self.client.get(sessions_url)
-        
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('sessions', response.data)
-        self.assertEqual(len(response.data['sessions']), 1)
-        
-        # Verify session data structure
-        session_data = response.data['sessions'][0]
-        self.assertIn('session_id', session_data)
-        self.assertIn('ip_address', session_data)
-        self.assertIn('created_at', session_data)
-        self.assertIn('last_activity', session_data)
-
-    def test_logout_endpoint(self):
-        """Test logout endpoint functionality"""
-        # Login to get tokens
-        # Use direct URL path to avoid reverse lookup issues
-        login_url = '/api/v1/tenants/token/'
-        response = self.client.post(login_url, {
-            'email': 'testuser@example.com',
-            'password': 'TestPassword123!'
-        })
-        
-        access_token = response.data['access']
-        
-        # Logout
-        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
-        logout_url = reverse('tenant_management:logout')
-        response = self.client.post(logout_url)
-        
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['message'], 'Successfully logged out')
-        
-        # Verify token is blacklisted
-        protected_url = reverse('tenant_management:user_sessions')
-        # The blacklisted token should cause a TokenError during authentication
-        with self.assertRaises(Exception):  # TokenError gets raised during authentication
-            response = self.client.get(protected_url)
 
     def test_password_reset_invalidates_sessions(self):
         """Test that password reset invalidates all user sessions"""

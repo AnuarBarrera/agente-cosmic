@@ -155,22 +155,24 @@ class TestRenderHtmlTemplate:
 
         assert result == fake_shot
 
-    def test_injects_primary_color_into_html(self):
-        from core.content_pipeline.generators.image_generator import ImageGenerator
+    def test_injects_button_color_into_html(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator, _pick_button_color
         gen = ImageGenerator(bucket_name='test-bucket')
         fake_bg = _png_bytes()
         fake_shot = _png_bytes(size=(1080, 1080))
         content = {'headline': 'Título', 'subtitle': 'Subtítulo', 'cta': 'Empieza', 'tag': 'TEST'}
         mock_pw, mock_page = self._make_mock_playwright(fake_shot)
 
+        colors = ['#ff5500']
         with patch('core.content_pipeline.generators.image_generator.sync_playwright', return_value=mock_pw):
-            gen._render_html_template(fake_bg, content, ['#ff5500'])
+            gen._render_html_template(fake_bg, content, colors)
 
         html_arg = mock_page.set_content.call_args[0][0]
-        assert '#ff5500' in html_arg
+        expected_color = _pick_button_color(colors)
+        assert expected_color in html_arg
 
-    def test_uses_fallback_color_when_no_colors(self):
-        from core.content_pipeline.generators.image_generator import ImageGenerator
+    def test_uses_fallback_button_color_when_no_colors(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator, _pick_button_color
         gen = ImageGenerator(bucket_name='test-bucket')
         fake_bg = _png_bytes()
         fake_shot = _png_bytes(size=(1080, 1080))
@@ -181,7 +183,8 @@ class TestRenderHtmlTemplate:
             gen._render_html_template(fake_bg, content, [])
 
         html_arg = mock_page.set_content.call_args[0][0]
-        assert '#e94560' in html_arg  # fallback color
+        fallback = _pick_button_color([])
+        assert fallback in html_arg
 
 
 class TestLayeredPipeline:
