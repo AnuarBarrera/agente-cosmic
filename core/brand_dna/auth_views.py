@@ -10,6 +10,10 @@ from django.core.mail import send_mail
 from django.shortcuts import render, redirect
 from .auth_forms import RegisterForm, LoginForm
 from .models import AnalysisJob
+from core.shared.metrics import (
+    LOGIN_ATTEMPTS, REGISTRATIONS, EMAIL_VERIFICATIONS,
+    INVITATION_CODES_REDEEMED, EMAILS_SENT,
+)
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -126,6 +130,9 @@ def register_view(request):
                 fail_silently=False,
             )
 
+            REGISTRATIONS.labels(method='email').inc()
+            EMAILS_SENT.labels(type='verification').inc()
+
             return render(request, 'brand_dna/auth/verify_pending.html', {'email': email})
     else:
         form = RegisterForm()
@@ -143,6 +150,7 @@ def verify_email_view(request, token):
         return redirect('login')
 
     if not verification.is_valid():
+        EMAIL_VERIFICATIONS.labels(result='expired').inc()
         return redirect('login')
 
     email = verification.email
@@ -172,6 +180,7 @@ def verify_email_view(request, token):
 
     verification.is_used = True
     verification.save(update_fields=['is_used'])
+    EMAIL_VERIFICATIONS.labels(result='completed').inc()
 
     notify_admin_new_user(user, invitation_code=invitation_code_str or None)
 
@@ -194,16 +203,19 @@ def login_view(request):
             cache_key = f'login_attempts:{email}'
             attempts = cache.get(cache_key, 0)
             if attempts >= _LOGIN_MAX_ATTEMPTS:
+                LOGIN_ATTEMPTS.labels(result='locked').inc()
                 error = 'Demasiados intentos. Intenta de nuevo en 5 minutos.'
             else:
                 password = form.cleaned_data['password']
                 user = authenticate(request, email=email, password=password)
                 if user is not None:
                     cache.delete(cache_key)
+                    LOGIN_ATTEMPTS.labels(result='success').inc()
                     login(request, user)
                     next_url = request.GET.get('next', 'dashboard')
                     return redirect(next_url)
                 cache.set(cache_key, attempts + 1, _LOGIN_LOCKOUT_SECONDS)
+                LOGIN_ATTEMPTS.labels(result='failed').inc()
                 error = 'Correo o contraseña incorrectos.'
     else:
         form = LoginForm()
@@ -228,6 +240,7 @@ def forgot_password_view(request):
             from core.tenant_management.services.auth_service import AuthService
             try:
                 AuthService.initiate_password_reset(email)
+                EMAILS_SENT.labels(type='password_reset').inc()
             except ValueError:
                 pass
             sent = True
@@ -373,6 +386,7 @@ def google_callback_view(request):
         user_group, _ = Group.objects.get_or_create(name='user')
         user.groups.add(user_group)
         notify_admin_new_user(user)
+        REGISTRATIONS.labels(method='google_oauth').inc()
 
     login(request, user)
     return redirect('dashboard')
@@ -408,6 +422,7 @@ def apply_code_view(request):
     try:
         code_obj = InvitationCode.objects.get(code=code_str)
         if code_obj.redeem(request.user):
+            INVITATION_CODES_REDEEMED.inc()
             logger.info(f"Codigo {code_str} aplicado por {request.user.email}")
         else:
             logger.warning(f"Codigo invalido {code_str} intentado por {request.user.email}")

@@ -6,6 +6,7 @@ from django.urls import reverse
 from django.utils import timezone
 from core.brand_dna.models import AnalysisJob, BrandDNA
 from core.content_pipeline.models import ContentCalendar, ContentPost
+from core.shared.metrics import EMAILS_SENT
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class EmailSender:
             html_message=html,
             fail_silently=False,
         )
+        EMAILS_SENT.labels(type='initial_calendar').inc()
         logger.info(f"Email inicial enviado a {job.email} para job {job.id}")
 
     def send_daily(self, post: ContentPost) -> None:
@@ -50,4 +52,5 @@ class EmailSender:
         post.status = ContentPost.STATUS_SENT
         post.sent_at = timezone.now()
         post.save(update_fields=['status', 'sent_at'])
+        EMAILS_SENT.labels(type='daily_post').inc()
         logger.info(f"Email dia {post.day_number} enviado a {email}")

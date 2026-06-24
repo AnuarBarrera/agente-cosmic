@@ -11,6 +11,7 @@ from django.http import JsonResponse, FileResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 from core.brand_dna.models import AnalysisJob, BrandDNA
+from core.shared.metrics import POST_ACTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +233,7 @@ def post_action_api(request, post_id):
     if action == 'approve':
         post.user_status = ContentPost.USER_STATUS_APPROVED
         post.save(update_fields=['user_status'])
+        POST_ACTIONS.labels(action='approved').inc()
         logger.info(
             f"POST APROBADO | user={request.user.email} | "
             f"job={post.calendar.brand_dna.job_id} | día={post.day_number} | "
@@ -253,6 +255,7 @@ def post_action_api(request, post_id):
         post.user_status = ContentPost.USER_STATUS_EDITED
         post.edit_count += 1
         post.save(update_fields=['caption', 'user_status', 'edit_count'])
+        POST_ACTIONS.labels(action='edited').inc()
         return JsonResponse({'status': 'ok', 'caption': post.caption, 'remaining_edits': remaining - 1})
 
     if action == 'regenerate':
@@ -304,6 +307,7 @@ def post_action_api(request, post_id):
         except Exception as img_err:
             logger.error(f"Image regeneration error for post {post_id}: {img_err}")
             post.save(update_fields=['caption', 'user_note', 'user_status', 'regen_count'])
+        POST_ACTIONS.labels(action='regenerated').inc()
 
         return JsonResponse({
             'status': 'ok',
