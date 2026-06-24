@@ -19,6 +19,22 @@ from core.shared.metrics import (
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
+
+def provision_tenant(user):
+    from core.tenant_management.models import TenantModel, Plan, Subscription
+
+    if user.tenant is not None:
+        return user.tenant
+
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    free_plan = Plan.objects.filter(name='Free').first()
+    if free_plan:
+        Subscription.objects.create(tenant=tenant, plan=free_plan)
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+    return tenant
+
+
 _EMAIL_ACTION_MAX = 3
 _EMAIL_ACTION_WINDOW = 900
 
@@ -190,6 +206,8 @@ def verify_email_view(request, token):
     user.password = user_data['password']
     user.email_verified = True
     user.save(update_fields=['password', 'email_verified'])
+
+    provision_tenant(user)
 
     invitation_code_str = user_data.get('invitation_code', '')
     redeemed = False
@@ -414,6 +432,7 @@ def google_callback_view(request):
         user.set_unusable_password()
         user.email_verified = True
         user.save(update_fields=['password', 'email_verified'])
+        provision_tenant(user)
         from django.contrib.auth.models import Group
         user_group, _ = Group.objects.get_or_create(name='user')
         user.groups.add(user_group)
