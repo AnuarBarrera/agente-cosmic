@@ -3,9 +3,23 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.test import Client
-from core.tenant_management.models import EmailVerificationToken, InvitationCode, Plan
+from core.tenant_management.models import (
+    EmailVerificationToken, InvitationCode, Plan, TenantModel, Subscription,
+)
 
 User = get_user_model()
+
+
+def _make_tenant(user):
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    free, _ = Plan.objects.get_or_create(name='Free', defaults={
+        'max_calendars_per_week': 2, 'max_post_regenerations': 2,
+        'max_post_edits': 2, 'price': 0,
+    })
+    Subscription.objects.create(tenant=tenant, plan=free)
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+    return tenant
 
 
 @pytest.fixture
@@ -142,10 +156,12 @@ class TestApplyCodeView:
         user = User.objects.create_user(
             email='apply@test.com', password='SecurePass123!x', username='apply@test.com'
         )
+        _make_tenant(user)
         user.groups.add(Group.objects.get(name='user'))
         admin = User.objects.create_user(
             email='adm3@test.com', password='test123!', username='adm3@test.com'
         )
+        _make_tenant(admin)
         code = InvitationCode.objects.create(created_by=admin)
 
         client.force_login(user)
@@ -158,6 +174,7 @@ class TestApplyCodeView:
         user = User.objects.create_user(
             email='bad@test.com', password='SecurePass123!x', username='bad@test.com'
         )
+        _make_tenant(user)
         user.groups.add(Group.objects.get(name='user'))
         client.force_login(user)
         resp = client.post('/dashboard/apply-code/', {'code': 'COSMIC-INVALID'})

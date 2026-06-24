@@ -12,10 +12,26 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def user(django_user_model):
-    return django_user_model.objects.create_user(
+def free_plan():
+    from core.tenant_management.models import Plan
+    plan, _ = Plan.objects.get_or_create(name='Free', defaults={
+        'max_calendars_per_week': 2, 'max_post_regenerations': 2,
+        'max_post_edits': 2, 'price': 0,
+    })
+    return plan
+
+
+@pytest.fixture
+def user(django_user_model, free_plan):
+    from core.tenant_management.models import TenantModel, Subscription
+    u = django_user_model.objects.create_user(
         username='feedback@test.com', email='feedback@test.com', password='pass1234'
     )
+    tenant = TenantModel.objects.create(name=u.email, status='active')
+    Subscription.objects.create(tenant=tenant, plan=free_plan)
+    u.tenant = tenant
+    u.save(update_fields=['tenant'])
+    return u
 
 
 def test_landing_page_redirects_to_login():
@@ -100,10 +116,15 @@ def test_results_requires_login():
     assert response.status_code == 302
 
 
-def test_status_api_blocks_other_user(user, django_user_model):
+def test_status_api_blocks_other_user(user, django_user_model, free_plan):
+    from core.tenant_management.models import TenantModel, Subscription
     other = django_user_model.objects.create_user(
         username='other@test.com', email='other@test.com', password='pass1234'
     )
+    t = TenantModel.objects.create(name=other.email, status='active')
+    Subscription.objects.create(tenant=t, plan=free_plan)
+    other.tenant = t
+    other.save(update_fields=['tenant'])
     c = Client()
     c.force_login(other)
     job = AnalysisJob.objects.create(email=user.email, business_url='https://tuwebmx.com', user=user)
@@ -197,10 +218,15 @@ def test_calendar_feedback_api_yes_triggers_generate_next_week(client, user, job
     mock_gen.assert_called_once()
 
 
-def test_calendar_feedback_api_requires_ownership(client, django_user_model, job_with_calendar):
+def test_calendar_feedback_api_requires_ownership(client, django_user_model, job_with_calendar, free_plan):
+    from core.tenant_management.models import TenantModel, Subscription
     other_user = django_user_model.objects.create_user(
         username='other@test.com', email='other@test.com', password='pass1234'
     )
+    t = TenantModel.objects.create(name=other_user.email, status='active')
+    Subscription.objects.create(tenant=t, plan=free_plan)
+    other_user.tenant = t
+    other_user.save(update_fields=['tenant'])
     client.force_login(other_user)
     response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
         'rating': '4',
