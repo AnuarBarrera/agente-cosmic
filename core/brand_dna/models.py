@@ -29,7 +29,8 @@ class AnalysisJob(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField()
-    business_url = models.URLField()
+    business_url = models.URLField(blank=True, default='')
+    business_description = models.TextField(blank=True, default='')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
     stage = models.CharField(max_length=20, choices=STAGE_CHOICES, default=STAGE_WEB)
     progress = models.IntegerField(default=0)
@@ -71,7 +72,7 @@ class BrandDNA(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     job = models.OneToOneField(AnalysisJob, on_delete=models.CASCADE, related_name='brand_dna')
     business_name = models.CharField(max_length=255)
-    business_url = models.URLField()
+    business_url = models.URLField(blank=True, default='')
     description = models.TextField()
     keywords = models.JSONField(default=list)
     audience = models.TextField()

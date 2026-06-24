@@ -64,3 +64,20 @@ def test_verify_email_creates_tenant(free_plan, django_user_model):
     user = django_user_model.objects.get(email='verify@test.com')
     assert user.tenant is not None
     assert Subscription.objects.filter(tenant=user.tenant).exists()
+
+
+def test_analysis_job_allows_empty_url_with_description(free_plan, django_user_model):
+    from core.brand_dna.models import AnalysisJob
+    from core.brand_dna.auth_views import provision_tenant
+    user = django_user_model.objects.create_user(
+        email='nourl@test.com', username='nourl@test.com', password='pass1234'
+    )
+    provision_tenant(user)
+    job = AnalysisJob.objects.create(
+        email=user.email,
+        business_url='',
+        business_description='Vendo tamales oaxaqueños en el mercado de Coyoacán',
+        user=user,
+    )
+    assert job.business_description == 'Vendo tamales oaxaqueños en el mercado de Coyoacán'
+    assert job.business_url == ''
