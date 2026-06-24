@@ -3,6 +3,7 @@ from django.contrib.auth.models import Group
 from django.db.models import Count
 from django.http import Http404
 from django_otp.admin import OTPAdminSite
+from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from core.brand_dna.models import AnalysisJob
 from core.tenant_management.models import (
@@ -115,9 +116,17 @@ class SecurityEventAdmin(admin.ModelAdmin):
         return False
 
 
+class TOTPDeviceAdmin(admin.ModelAdmin):
+    list_display = ('user', 'name', 'confirmed', 'created_at', 'last_used_at')
+    list_filter = ('confirmed',)
+    search_fields = ('user__email', 'name')
+    raw_id_fields = ('user',)
+
+
 cosmic_admin.register(User, UserAdmin)
 cosmic_admin.register(InvitationCode, InvitationCodeAdmin)
 cosmic_admin.register(Plan, PlanAdmin)
 cosmic_admin.register(AnalysisJob, AnalysisJobAdmin)
 cosmic_admin.register(SecurityEvent, SecurityEventAdmin)
+cosmic_admin.register(TOTPDevice, TOTPDeviceAdmin)
 cosmic_admin.register(Group)
