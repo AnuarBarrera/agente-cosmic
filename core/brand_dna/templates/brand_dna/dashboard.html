@@ -123,5 +123,29 @@
       </div>
     {% endif %}
   </div>
+
+  <div style="max-width:700px;margin:48px auto 32px;border:1px solid #c0392b;border-radius:12px;padding:28px;background:#1a1215;">
+    <h3 style="color:#e74c3c;margin-bottom:12px;font-size:1.1rem;">Zona de peligro</h3>
+    <p style="color:#aaa;font-size:0.9rem;margin-bottom:16px;">
+      Tu cuenta sera desactivada. Podras reactivarla si te registras de nuevo con el mismo email.
+      Despues de 30 dias, las imagenes generadas seran eliminadas permanentemente.
+    </p>
+    <button type="button" id="dangerBtn" onclick="document.getElementById('dangerConfirm').style.display='block';this.style.display='none';"
+      style="background:#c0392b;color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-weight:600;">
+      Eliminar mi cuenta
+    </button>
+    <div id="dangerConfirm" style="display:none;margin-top:16px;">
+      <form method="POST" action="{% url 'deactivate_account' %}">
+        {% csrf_token %}
+        <label style="color:#e74c3c;font-size:0.85rem;display:block;margin-bottom:8px;">Escribe ELIMINAR para confirmar:</label>
+        <input type="text" name="confirmation" autocomplete="off"
+          style="padding:10px;border-radius:8px;border:1px solid #c0392b;background:#0d0d1a;color:#f0f0f0;width:200px;margin-right:12px;">
+        <button type="submit"
+          style="background:#e74c3c;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;">
+          Confirmar eliminacion
+        </button>
+      </form>
+    </div>
+  </div>
 </body>
 </html>

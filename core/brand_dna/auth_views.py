@@ -480,3 +480,31 @@ def apply_code_view(request):
     except InvitationCode.DoesNotExist:
         logger.warning(f"Codigo inexistente {code_str} intentado por {request.user.email}")
     return redirect('dashboard')
+
+
+@login_required
+def deactivate_account_view(request):
+    if request.method != 'POST':
+        return redirect('dashboard')
+
+    if request.POST.get('confirmation', '') != 'ELIMINAR':
+        return redirect('dashboard')
+
+    from django.utils import timezone as tz
+    user = request.user
+    user.is_active = False
+    user.deactivated_at = tz.now()
+    user.save(update_fields=['is_active', 'deactivated_at'])
+
+    if user.tenant:
+        user.tenant.status = 'deactivated'
+        user.tenant.save(update_fields=['status'])
+        try:
+            sub = user.tenant.subscription
+            sub.status = 'canceled'
+            sub.save(update_fields=['status'])
+        except Exception:
+            pass
+
+    logout(request)
+    return redirect('/auth/login/?reason=deactivated')

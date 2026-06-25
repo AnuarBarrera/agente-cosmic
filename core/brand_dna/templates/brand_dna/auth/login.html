@@ -37,6 +37,16 @@
     {% if error %}
     <div class="error-box">{{ error }}</div>
     {% endif %}
+    {% if request.GET.reason == 'deactivated' %}
+    <div style="background:#1a2a1a;border:1px solid #27ae60;color:#6ddf8e;padding:12px;border-radius:8px;font-size:0.9rem;margin-bottom:20px;">
+      Tu cuenta fue desactivada exitosamente.
+    </div>
+    {% endif %}
+    {% if request.GET.reason == 'inactivity' %}
+    <div style="background:#1a1a2e;border:1px solid #e94560;color:#f9a;padding:12px;border-radius:8px;font-size:0.9rem;margin-bottom:20px;">
+      Tu sesion expiro por inactividad.
+    </div>
+    {% endif %}
 
     <form method="POST">
       {% csrf_token %}

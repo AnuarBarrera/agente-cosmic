@@ -19,6 +19,7 @@ urlpatterns = [
     path('auth/google/callback/', auth_views.google_callback_view, name='google_callback'),
     path('dashboard/', auth_views.dashboard_view, name='dashboard'),
     path('dashboard/apply-code/', auth_views.apply_code_view, name='apply_code'),
+    path('dashboard/delete-account/', auth_views.deactivate_account_view, name='deactivate_account'),
     path('calendar/<uuid:job_id>/', views.calendar_review_view, name='calendar_review'),
     path('api/post/<uuid:post_id>/action/', views.post_action_api, name='post_action_api'),
     path('api/calendar/<uuid:job_id>/delete/', views.delete_calendar_api, name='delete_calendar_api'),
