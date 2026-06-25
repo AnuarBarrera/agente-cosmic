@@ -1,42 +1,59 @@
 #!/bin/bash
-# Prueba de estrés progresiva: endpoint del agente
-# Requiere: wrk y ab (apache2-utils)
 
-HOST="${1:-http://localhost:8000}"
-WEBHOOK="$HOST/api/v1/agent/webhook/"
+# =============================================================================
+# AGENTE COSMIC — Prueba de estrés en endpoints autenticados
+# Objetivo: medir latencia en API de status y métricas bajo carga
+# Uso: bash load_tests/agent_stress_test.sh [job_uuid]
+# Ejemplo: bash load_tests/agent_stress_test.sh 6eff29ff-52bb-45fa-9ce0-03441cc956a4
+# =============================================================================
 
-echo "🚀 PRUEBA DE ESTRÉS PROGRESIVA — Agente"
-echo "Endpoint: $WEBHOOK"
-echo "=========================================="
+BASE="${1:-http://localhost:3002}"
+JOB_UUID="${2:-6eff29ff-52bb-45fa-9ce0-03441cc956a4}"  # UUID de job existente
 
-# Cuerpo de prueba (simula mensaje de Telegram)
-PAYLOAD='/tmp/agent_test_payload.json'
-cat > "$PAYLOAD" << 'EOF'
-{
-  "update_id": 1,
-  "message": {
-    "message_id": 1,
-    "from": {"id": 999999, "first_name": "Test", "username": "testuser"},
-    "chat": {"id": 999999, "type": "private"},
-    "text": "hola"
-  }
-}
-EOF
+BACKEND="agente-cosmic-backend-1"
 
-for CONCURRENCY in 5 10 20; do
+echo "PRUEBA DE ESTRES — ENDPOINTS API"
+echo "Base: $BASE"
+echo "Job UUID: $JOB_UUID"
+echo "============================================"
+
+run_api_test() {
+    local requests=$1
+    local concurrency=$2
+    local endpoint=$3
+    local label=$4
+
     echo ""
-    echo "🔥 Concurrencia: $CONCURRENCY usuarios"
-    echo "Recursos antes:"
-    docker stats --no-stream chatbot-backend-1 2>/dev/null | tail -1
+    echo "--- $label ---"
+    echo "Peticiones: $requests | Concurrencia: $concurrency"
 
-    ab -n 50 -c "$CONCURRENCY" -T 'application/json' -p "$PAYLOAD" "$WEBHOOK" \
-       2>&1 | grep -E "Requests per second|Time per request|Failed"
+    ab -n "$requests" -c "$concurrency" "$BASE$endpoint" 2>/dev/null \
+      | grep -E "Complete requests|Failed requests|Requests per second|Time per request \(mean\b"
 
-    echo "Recursos después:"
-    docker stats --no-stream chatbot-backend-1 2>/dev/null | tail -1
+    docker stats --no-stream "$BACKEND" 2>/dev/null \
+      | awk 'NR>1 {printf "  CPU: %s  MEM: %s\n", $3, $4}'
     sleep 3
-done
+}
 
-rm -f "$PAYLOAD"
+# Endpoint público: métricas Prometheus
 echo ""
-echo "✅ Prueba completada"
+echo "--- METRICAS PROMETHEUS (/metrics) ---"
+ab -n 200 -c 20 "$BASE/metrics" 2>/dev/null \
+  | grep -E "Requests per second|Failed requests|Time per request \(mean\b"
+
+# Endpoint API: status de job (requiere auth — mide comportamiento con 403/redirect)
+run_api_test 300 30 "/api/brand-dna/status/$JOB_UUID/" "API STATUS — sin auth (mide overhead de auth check)"
+
+# Endpoint público: registro
+run_api_test 200 20 "/auth/register/"  "REGISTRO — carga moderada"
+
+# Endpoint público: forgot password
+run_api_test 200 20 "/auth/forgot-password/" "FORGOT PASSWORD — carga moderada"
+
+echo ""
+echo "============================================"
+echo "Estado del worker RQ:"
+docker logs agente-cosmic-rqworker-1 --tail 5 2>&1
+
+echo ""
+echo "Prueba completada."

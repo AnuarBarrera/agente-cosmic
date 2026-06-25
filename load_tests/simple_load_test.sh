@@ -1,34 +1,44 @@
 #!/bin/bash
 
 # =============================================================================
-# DIALOGIX - Simple Load Test with Apache Bench
+# AGENTE COSMIC — Prueba de carga simple con Apache Bench
+# Target: nginx en localhost:3002
+# Uso: bash load_tests/simple_load_test.sh
 # =============================================================================
-# Prueba usando ab directamente contra nginx
 
-echo "🔥 INICIANDO PRUEBA DE CARGA SIMPLE CON APACHE BENCH"
-echo "Target: nginx container (puerto 80)"
+BASE="http://localhost:3002"
+BACKEND="agente-cosmic-backend-1"
+NGINX="agente-cosmic-nginx-1"
+
+echo "INICIANDO PRUEBA DE CARGA SIMPLE"
+echo "Target: $BASE"
 echo "==========================================================="
 
-# Test 1: Health check interno en nginx
+# Prueba 1: Health check
 echo ""
-echo "📊 PRUEBA 1: Health check interno"
+echo "PRUEBA 1: Health check (/health/)"
 echo "100 peticiones, 10 concurrentes"
+ab -n 100 -c 10 "$BASE/health/" 2>/dev/null \
+  | grep -E "Requests per second|Time per request \(mean\)|Failed requests"
 
-docker exec dialogix-nginx-prod sh -c "
-echo '🔗 Testing /health/ endpoint...'
-ab -n 100 -c 10 http://localhost/health/ 2>/dev/null | grep -E 'Requests per second|Time per request|Transfer rate|Failed requests'
-"
+# Prueba 2: Landing page
+echo ""
+echo "PRUEBA 2: Landing page (/)"
+echo "200 peticiones, 20 concurrentes"
+ab -n 200 -c 20 "$BASE/" 2>/dev/null \
+  | grep -E "Requests per second|Time per request \(mean\)|Failed requests"
+
+# Prueba 3: Login page
+echo ""
+echo "PRUEBA 3: Login (/auth/login/)"
+echo "200 peticiones, 20 concurrentes"
+ab -n 200 -c 20 "$BASE/auth/login/" 2>/dev/null \
+  | grep -E "Requests per second|Time per request \(mean\)|Failed requests"
+
+# Estado de contenedores
+echo ""
+echo "ESTADO DE CONTENEDORES:"
+docker stats --no-stream "$BACKEND" "$NGINX" 2>/dev/null
 
 echo ""
-echo "📊 PRUEBA 2: Página de documentación (puerto 8080)"
-echo "50 peticiones, 5 concurrentes"
-
-ab -n 50 -c 5 http://localhost:8080/ 2>/dev/null | grep -E 'Requests per second|Time per request|Transfer rate|Failed requests'
-
-echo ""
-echo "📊 PRUEBA 3: Monitoreo de recursos durante carga"
-echo "Estado de contenedores:"
-docker stats --no-stream dialogix-backend-prod dialogix-nginx-prod dialogix-db-prod dialogix-redis-prod
-
-echo ""
-echo "✅ Pruebas completadas"
+echo "Prueba completada."

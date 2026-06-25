@@ -1,72 +1,74 @@
 #!/bin/bash
 
 # =============================================================================
-# DIALOGIX - Stress Test Progresivo
+# AGENTE COSMIC — Prueba de estrés progresiva
+# Objetivo: encontrar el punto de quiebre y medir RPS/latencia por nivel
+# Uso: bash load_tests/stress_test.sh
 # =============================================================================
-# Prueba gradual de estrés para encontrar los límites del sistema
 
-echo "🚀 INICIANDO PRUEBA DE ESTRÉS PROGRESIVA"
-echo "=========================================="
+BASE="http://localhost:3002"
+BACKEND="agente-cosmic-backend-1"
+NGINX="agente-cosmic-nginx-1"
 
-# Función para ejecutar prueba y monitorear recursos
-run_stress_test() {
+run_level() {
     local requests=$1
     local concurrency=$2
     local endpoint=$3
-    local test_name=$4
+    local label=$4
 
     echo ""
-    echo "🔥 $test_name"
-    echo "Peticiones: $requests, Concurrencia: $concurrency"
-    echo "Endpoint: $endpoint"
-    echo "----------------------------------------"
+    echo "--- $label ---"
+    echo "Peticiones: $requests | Concurrencia: $concurrency | Endpoint: $endpoint"
 
-    # Monitorear recursos antes
     echo "Recursos ANTES:"
-    docker stats --no-stream dialogix-backend-prod dialogix-nginx-prod | tail -2
+    docker stats --no-stream "$BACKEND" "$NGINX" 2>/dev/null \
+      | awk 'NR>1 {printf "  %-30s CPU: %s  MEM: %s\n", $1, $3, $4}'
 
-    # Ejecutar prueba
-    echo ""
-    echo "Ejecutando prueba..."
-    ab -n $requests -c $concurrency $endpoint 2>/dev/null | grep -E 'Complete requests|Failed requests|Requests per second|Time per request|Transfer rate'
+    ab -n "$requests" -c "$concurrency" "$BASE$endpoint" 2>/dev/null \
+      | grep -E "Complete requests|Failed requests|Requests per second|Time per request \(mean\b|Transfer rate"
 
-    # Monitorear recursos después
-    echo ""
-    echo "Recursos DESPUÉS:"
-    docker stats --no-stream dialogix-backend-prod dialogix-nginx-prod | tail -2
+    echo "Recursos DESPUES:"
+    docker stats --no-stream "$BACKEND" "$NGINX" 2>/dev/null \
+      | awk 'NR>1 {printf "  %-30s CPU: %s  MEM: %s\n", $1, $3, $4}'
 
-    echo "💤 Pausa de 10 segundos..."
-    sleep 10
+    echo "Pausa 5s..."
+    sleep 5
 }
 
-# Prueba 1: Carga ligera
-run_stress_test 100 5 "http://localhost:8080/" "PRUEBA 1: Carga Ligera - Documentación"
+echo "PRUEBA DE ESTRES PROGRESIVA — AGENTE COSMIC"
+echo "============================================"
 
-# Prueba 2: Carga moderada
-run_stress_test 500 15 "http://localhost:8080/" "PRUEBA 2: Carga Moderada"
+# Nivel 1: Carga ligera — baseline
+run_level 100   5  "/health/"     "NIVEL 1 — Carga ligera (health)"
+run_level 200  10  "/"            "NIVEL 1 — Carga ligera (landing)"
 
-# Prueba 3: Carga alta
-run_stress_test 1000 25 "http://localhost:8080/" "PRUEBA 3: Carga Alta"
+# Nivel 2: Carga moderada
+run_level 500  20  "/health/"     "NIVEL 2 — Carga moderada (health)"
+run_level 500  20  "/"            "NIVEL 2 — Carga moderada (landing)"
+run_level 500  20  "/auth/login/" "NIVEL 2 — Carga moderada (login)"
 
-# Prueba 4: Carga extrema
-run_stress_test 2000 50 "http://localhost:8080/" "PRUEBA 4: Carga Extrema"
+# Nivel 3: Carga alta
+run_level 1000 40  "/health/"     "NIVEL 3 — Carga alta (health)"
+run_level 1000 40  "/"            "NIVEL 3 — Carga alta (landing)"
 
-# Resumen final del sistema
+# Nivel 4: Carga extrema — buscar límite
+run_level 2000 80  "/health/"     "NIVEL 4 — Carga extrema (health)"
+run_level 1000 80  "/"            "NIVEL 4 — Carga extrema (landing)"
+
 echo ""
-echo "📈 RESUMEN FINAL DEL SISTEMA"
-echo "============================"
-
+echo "============================================"
+echo "RESUMEN FINAL"
 echo ""
-echo "Uso de CPU y memoria:"
-top -bn1 | grep -E "Cpu|MiB Mem" | head -2
+echo "CPU y memoria del host:"
+top -bn1 | grep -E "^%Cpu|^MiB Mem" | head -2
 
 echo ""
 echo "Estado de contenedores:"
-docker ps --format "table {{.Names}}\t{{.Status}}"
+docker ps --format "table {{.Names}}\t{{.Status}}" | grep agente-cosmic
 
 echo ""
-echo "Logs de errores del backend (últimas 5 líneas):"
-docker logs dialogix-backend-prod --tail 5
+echo "Ultimos errores del backend:"
+docker logs agente-cosmic-backend-1 --tail 10 2>&1 | grep -iE "error|exception|traceback" | tail -5
 
 echo ""
-echo "✅ PRUEBA DE ESTRÉS COMPLETADA"
+echo "Prueba de estres completada."
