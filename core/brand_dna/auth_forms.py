@@ -27,7 +27,9 @@ class RegisterForm(forms.Form):
     def clean_email(self):
         email = self.cleaned_data['email'].lower().strip()
         if User.objects.filter(email=email).exists():
-            raise ValidationError('Este correo ya está registrado. ¿Quieres iniciar sesión?')
+            raise ValidationError(
+                'Este correo no está disponible. Prueba iniciando sesión o recuperando tu contraseña.'
+            )
         return email
 
     def clean_password1(self):

@@ -485,20 +485,32 @@ def dashboard_view(request):
     })
 
 
+_CODE_RATE_LIMIT = 5
+_CODE_RATE_WINDOW = 3600  # 1 hora
+
+
 @login_required
 def apply_code_view(request):
     if request.method != 'POST':
         return redirect('dashboard')
     from core.tenant_management.models import InvitationCode
+    rate_key = f'invite_code_attempts:{request.user.id}'
+    attempts = cache.get(rate_key, 0)
+    if attempts >= _CODE_RATE_LIMIT:
+        logger.warning(f"Rate limit alcanzado en apply_code para {request.user.email}")
+        return redirect('dashboard')
     code_str = request.POST.get('code', '').strip().upper()
     try:
         code_obj = InvitationCode.objects.get(code=code_str)
         if code_obj.redeem(request.user):
             INVITATION_CODES_REDEEMED.inc()
+            cache.delete(rate_key)
             logger.info(f"Codigo {code_str} aplicado por {request.user.email}")
         else:
+            cache.set(rate_key, attempts + 1, _CODE_RATE_WINDOW)
             logger.warning(f"Codigo invalido {code_str} intentado por {request.user.email}")
     except InvitationCode.DoesNotExist:
+        cache.set(rate_key, attempts + 1, _CODE_RATE_WINDOW)
         logger.warning(f"Codigo inexistente {code_str} intentado por {request.user.email}")
     return redirect('dashboard')
 

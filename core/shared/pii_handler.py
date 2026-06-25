@@ -89,8 +89,10 @@ class PIIHandler:
         Encrypt PII data for storage
         """
         if not self.fernet:
+            if not settings.DEBUG:
+                raise ValueError("PII_ENCRYPTION_KEY no configurada en producción — operación abortada")
             logger.error("PII encryption not available")
-            return data  # Fallback to unencrypted in dev
+            return data  # Solo en desarrollo
         
         try:
             if isinstance(data, str):
