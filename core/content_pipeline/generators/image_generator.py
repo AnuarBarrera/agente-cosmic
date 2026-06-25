@@ -660,6 +660,5 @@ class ImageGenerator:
             bucket = client.bucket(self._bucket)
             blob = bucket.blob(f'posts/{filename}.png')
             blob.upload_from_string(image_bytes, content_type='image/png')
-            blob.make_public()
         GCS_OPERATIONS.labels(operation='upload').inc()
         return blob.public_url
