@@ -81,3 +81,17 @@ def test_analysis_job_allows_empty_url_with_description(free_plan, django_user_m
     )
     assert job.business_description == 'Vendo tamales oaxaqueños en el mercado de Coyoacán'
     assert job.business_url == ''
+
+
+def test_user_has_deactivated_at_field(free_plan, django_user_model):
+    from core.brand_dna.auth_views import provision_tenant
+    user = django_user_model.objects.create_user(
+        email='deact@test.com', username='deact@test.com', password='pass1234'
+    )
+    provision_tenant(user)
+    assert user.deactivated_at is None
+    from django.utils import timezone
+    user.deactivated_at = timezone.now()
+    user.save(update_fields=['deactivated_at'])
+    user.refresh_from_db()
+    assert user.deactivated_at is not None

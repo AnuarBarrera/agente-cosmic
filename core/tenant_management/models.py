@@ -135,7 +135,8 @@ class User(AbstractUser):
     tenant = models.ForeignKey(TenantModel, on_delete=models.CASCADE, null=True, blank=True)
     email = models.EmailField(_('email address'), unique=True)
     display_name = models.CharField(max_length=255, blank=True, null=True) # New field
-    email_verified = models.BooleanField(default=False)  # Nuevo campo para verificación de email
+    email_verified = models.BooleanField(default=False)
+    deactivated_at = models.DateTimeField(null=True, blank=True)
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = [] # No other fields are required for authentication
