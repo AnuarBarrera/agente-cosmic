@@ -288,9 +288,9 @@ SESSION_COOKIE_AGE = 3600  # 1 hour
 SESSION_SAVE_EVERY_REQUEST = True
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
-# Cookie domain configuration for OAuth callbacks
-SESSION_COOKIE_DOMAIN = '.anuarbarrera.dev'  # Allow subdomain sharing
-SESSION_COOKIE_NAME = 'dialogix_sessionid'   # Custom name to avoid conflicts
+# Sin wildcard — cookies restringidas al dominio exacto, no a subdominios hermanos
+SESSION_COOKIE_DOMAIN = None
+SESSION_COOKIE_NAME = 'cosmic_sessionid'
 
 ROOT_URLCONF = 'saas_chatbot.urls'
 

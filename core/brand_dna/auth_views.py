@@ -40,9 +40,10 @@ _EMAIL_ACTION_WINDOW = 900
 
 
 def _get_client_ip(request) -> str:
-    xff = request.META.get('HTTP_X_FORWARDED_FOR', '')
-    if xff:
-        return xff.split(',')[-1].strip()
+    # X-Real-IP es inyectado por Nginx con $remote_addr — no puede ser falsificado por el cliente
+    real_ip = request.META.get('HTTP_X_REAL_IP', '').strip()
+    if real_ip:
+        return real_ip
     return request.META.get('REMOTE_ADDR', '')
 
 
