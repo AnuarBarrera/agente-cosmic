@@ -198,6 +198,13 @@ def verify_email_view(request, token):
     email = verification.email
     user_data = verification.user_data
 
+    deactivated_user = User.objects.filter(email=email, is_active=False).first()
+    if deactivated_user:
+        return render(request, 'brand_dna/auth/reactivate.html', {
+            'email': email,
+            'token': token,
+        })
+
     user = User.objects.create_user(
         email=email,
         password=None,
@@ -439,6 +446,20 @@ def google_callback_view(request):
         notify_admin_new_user(user)
         REGISTRATIONS.labels(method='google_oauth').inc()
 
+    if not created and not user.is_active:
+        user.is_active = True
+        user.deactivated_at = None
+        user.save(update_fields=['is_active', 'deactivated_at'])
+        if user.tenant:
+            user.tenant.status = 'active'
+            user.tenant.save(update_fields=['status'])
+            try:
+                sub = user.tenant.subscription
+                sub.status = 'active'
+                sub.save(update_fields=['status'])
+            except Exception:
+                pass
+
     login(request, user)
     return redirect('dashboard')
 
@@ -508,3 +529,46 @@ def deactivate_account_view(request):
 
     logout(request)
     return redirect('/auth/login/?reason=deactivated')
+
+
+def reactivate_account_view(request, token):
+    from core.tenant_management.models import EmailVerificationToken
+
+    try:
+        verification = EmailVerificationToken.objects.get(token=token)
+    except EmailVerificationToken.DoesNotExist:
+        return redirect('login')
+
+    if not verification.is_valid():
+        return redirect('login')
+
+    email = verification.email
+    user = User.objects.filter(email=email, is_active=False).first()
+    if not user:
+        return redirect('login')
+
+    if request.method != 'POST':
+        return render(request, 'brand_dna/auth/reactivate.html', {
+            'email': email,
+            'token': token,
+        })
+
+    user.is_active = True
+    user.deactivated_at = None
+    user.save(update_fields=['is_active', 'deactivated_at'])
+
+    if user.tenant:
+        user.tenant.status = 'active'
+        user.tenant.save(update_fields=['status'])
+        try:
+            sub = user.tenant.subscription
+            sub.status = 'active'
+            sub.save(update_fields=['status'])
+        except Exception:
+            pass
+
+    verification.is_used = True
+    verification.save(update_fields=['is_used'])
+
+    login(request, user)
+    return redirect('dashboard')

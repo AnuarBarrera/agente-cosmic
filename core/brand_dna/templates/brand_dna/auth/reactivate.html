@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reactivar cuenta — Agente Cosmic</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #f0f0f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .card { background: #1a1a2e; max-width: 480px; padding: 40px; border-radius: 16px; text-align: center; }
+    h2 { color: #e94560; margin-bottom: 16px; }
+    p { color: #aaa; margin-bottom: 24px; line-height: 1.5; }
+    .btn { display: inline-block; padding: 14px 32px; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; border: none; text-decoration: none; }
+    .btn-primary { background: #e94560; color: #fff; margin-right: 12px; }
+    .btn-ghost { background: transparent; color: #aaa; border: 1px solid #444; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Ya tenias una cuenta</h2>
+    <p>Encontramos una cuenta desactivada con el email <strong>{{ email }}</strong>. Tus datos anteriores (analisis, calendarios) siguen guardados.</p>
+    <form method="POST" action="{% url 'reactivate_account' token=token %}" style="display:inline;">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-primary">Reactivar mi cuenta</button>
+    </form>
+    <a href="{% url 'login' %}" class="btn btn-ghost">Cancelar</a>
+  </div>
+</body>
+</html>
