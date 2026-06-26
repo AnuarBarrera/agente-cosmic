@@ -1,7 +1,11 @@
 import pytest
+import secrets
 from django.test import TestCase
 from django.core.exceptions import ValidationError
 from django.contrib.auth.password_validation import validate_password
+
+_TEST_PWD = f"T3st-{secrets.token_urlsafe(10)}!"
+_NEW_PWD  = f"N3w!{secrets.token_urlsafe(10)}-"
 from django.utils import timezone
 from datetime import timedelta
 
@@ -33,7 +37,7 @@ class PasswordSecurityTestCase(TestCase):
         self.user = User.objects.create_user(
             username='testuser@example.com',
             email='testuser@example.com',
-            password='TestPassword123!',
+            password=_TEST_PWD,
             tenant=self.tenant,
             email_verified=True
         )
@@ -73,7 +77,7 @@ class PasswordSecurityTestCase(TestCase):
         
         # Valid password should pass
         try:
-            validator.validate('TestPassword123!')
+            validator.validate(_TEST_PWD)
         except ValidationError:
             self.fail("Valid password failed validation")
 
@@ -118,16 +122,16 @@ class PasswordSecurityTestCase(TestCase):
         # Change password
         result = AuthService.change_password(
             self.user, 
-            'TestPassword123!', 
-            'NewPassword456@'
+            _TEST_PWD, 
+            _NEW_PWD
         )
         
         self.assertTrue(result)
         
         # Verify password was changed
         self.user.refresh_from_db()
-        self.assertTrue(self.user.check_password('NewPassword456@'))
-        self.assertFalse(self.user.check_password('TestPassword123!'))
+        self.assertTrue(self.user.check_password(_NEW_PWD))
+        self.assertFalse(self.user.check_password(_TEST_PWD))
 
     def test_password_change_with_wrong_old_password(self):
         """Test password change with incorrect old password"""
@@ -135,7 +139,7 @@ class PasswordSecurityTestCase(TestCase):
             AuthService.change_password(
                 self.user, 
                 'WrongOldPassword', 
-                'NewPassword456@'
+                _NEW_PWD
             )
         
         self.assertIn('Current password is incorrect', str(cm.exception))
@@ -145,7 +149,7 @@ class PasswordSecurityTestCase(TestCase):
         with self.assertRaises(ValueError) as cm:
             AuthService.change_password(
                 self.user, 
-                'TestPassword123!', 
+                _TEST_PWD, 
                 'weak'  # Too weak
             )
         
@@ -160,8 +164,8 @@ class PasswordSecurityTestCase(TestCase):
         # Change password
         AuthService.change_password(
             self.user, 
-            'TestPassword123!', 
-            'NewPassword456@'
+            _TEST_PWD, 
+            _NEW_PWD
         )
         
         # Verify password history was created
@@ -177,7 +181,7 @@ class PasswordSecurityTestCase(TestCase):
             'NewPassword4!@#', 'NewPassword5!@#', 'NewPassword6!@#', 'NewPassword7!@#'
         ]
         
-        current_password = 'TestPassword123!'
+        current_password = _TEST_PWD
         for new_password in passwords:
             AuthService.change_password(self.user, current_password, new_password)
             current_password = new_password
@@ -212,8 +216,8 @@ class PasswordSecurityTestCase(TestCase):
         # Change password
         AuthService.change_password(
             self.user, 
-            'TestPassword123!', 
-            'NewPassword456@'
+            _TEST_PWD, 
+            _NEW_PWD
         )
         
         # Verify security event was logged
@@ -234,7 +238,7 @@ class PasswordSecurityTestCase(TestCase):
             AuthService.change_password(
                 self.user, 
                 'WrongOldPassword', 
-                'NewPassword456@'
+                _NEW_PWD
             )
         except ValueError:
             pass  # Expected

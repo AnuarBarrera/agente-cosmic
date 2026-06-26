@@ -1,6 +1,10 @@
 import pytest
+import secrets
 import uuid
 from django.test import TestCase
+
+_TEST_PWD = f"T3st-{secrets.token_urlsafe(10)}!"
+_NEW_PWD  = f"N3w!{secrets.token_urlsafe(10)}-"
 from django.urls import reverse
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
@@ -30,7 +34,7 @@ class SecurityEventLoggingTestCase(APITestCase):
         self.user = User.objects.create_user(
             username='testuser@example.com',
             email='testuser@example.com',
-            password='TestPassword123!',
+            password=_TEST_PWD,
             tenant=self.tenant,
             email_verified=True
         )
@@ -60,8 +64,8 @@ class SecurityEventLoggingTestCase(APITestCase):
         # Change password
         AuthService.change_password(
             self.user, 
-            'TestPassword123!', 
-            'NewPassword456@'
+            _TEST_PWD, 
+            _NEW_PWD
         )
         
         # Verify security event was created
@@ -82,7 +86,7 @@ class SecurityEventLoggingTestCase(APITestCase):
             AuthService.change_password(
                 self.user, 
                 'WrongOldPassword', 
-                'NewPassword456@'
+                _NEW_PWD
             )
         except ValueError:
             pass  # Expected
@@ -148,7 +152,7 @@ class SecurityEventLoggingTestCase(APITestCase):
         user2 = User.objects.create_user(
             username='user2@example.com',
             email='user2@example.com',
-            password='TestPassword123!',
+            password=_TEST_PWD,
             tenant=self.tenant,
             email_verified=True
         )

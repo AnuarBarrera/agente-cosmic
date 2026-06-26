@@ -11,8 +11,8 @@ class RegisterForm(forms.Form):
     password1 = forms.CharField(
         label='Contraseña',
         widget=forms.PasswordInput,
-        min_length=8,
-        help_text='Mínimo 8 caracteres',
+        min_length=12,
+        help_text='Mínimo 12 caracteres',
     )
     password2 = forms.CharField(
         label='Confirmar contraseña',

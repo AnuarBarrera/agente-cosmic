@@ -1,4 +1,5 @@
 import pytest
+import secrets
 from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -6,6 +7,10 @@ from django.test import Client
 from core.tenant_management.models import (
     EmailVerificationToken, InvitationCode, Plan, TenantModel, Subscription,
 )
+
+# Contraseñas generadas dinámicamente — no hardcodeadas en el código fuente
+_TEST_PWD = f"T3st-{secrets.token_urlsafe(10)}!"   # ~17 chars, cumple todos los validators
+_ADMIN_PWD = f"Adm!{secrets.token_urlsafe(8)}"     # para usuarios admin creados directamente
 
 User = get_user_model()
 
@@ -45,8 +50,8 @@ class TestRegisterView:
     def test_register_creates_token_not_user(self, mock_send, client, setup_plans_and_groups):
         resp = client.post('/auth/register/', {
             'email': 'new@test.com',
-            'password1': 'SecurePass123!x',
-            'password2': 'SecurePass123!x',
+            'password1': _TEST_PWD,
+            'password2': _TEST_PWD,
         })
         assert resp.status_code == 200
         assert b'Revisa tu correo' in resp.content
@@ -57,13 +62,13 @@ class TestRegisterView:
     @patch('core.brand_dna.auth_views.send_mail')
     def test_register_with_invitation_code_stores_in_token(self, mock_send, client, setup_plans_and_groups):
         admin = User.objects.create_user(
-            email='adm@test.com', password='test123!', username='adm@test.com'
+            email='adm@test.com', password=_ADMIN_PWD, username='adm@test.com'
         )
         code = InvitationCode.objects.create(created_by=admin)
         resp = client.post('/auth/register/', {
             'email': 'invited@test.com',
-            'password1': 'SecurePass123!x',
-            'password2': 'SecurePass123!x',
+            'password1': _TEST_PWD,
+            'password2': _TEST_PWD,
             'invitation_code': code.code,
         })
         assert resp.status_code == 200
@@ -78,7 +83,7 @@ class TestVerifyEmailView:
         token = EmailVerificationToken.objects.create(
             email='verify@test.com',
             tenant_name='',
-            user_data={'password': make_password('SecurePass123!x'), 'invitation_code': ''},
+            user_data={'password': make_password(_TEST_PWD), 'invitation_code': ''},
         )
         resp = client.get(f'/auth/verify/{token.token}/')
         assert resp.status_code == 302
@@ -90,13 +95,13 @@ class TestVerifyEmailView:
     def test_verify_with_invitation_code_assigns_tester(self, client, setup_plans_and_groups):
         from django.contrib.auth.hashers import make_password
         admin = User.objects.create_user(
-            email='adm2@test.com', password='test123!', username='adm2@test.com'
+            email='adm2@test.com', password=_ADMIN_PWD, username='adm2@test.com'
         )
         code = InvitationCode.objects.create(created_by=admin)
         token = EmailVerificationToken.objects.create(
             email='tester@test.com',
             tenant_name='',
-            user_data={'password': make_password('SecurePass123!x'), 'invitation_code': code.code},
+            user_data={'password': make_password(_TEST_PWD), 'invitation_code': code.code},
         )
         resp = client.get(f'/auth/verify/{token.token}/')
         assert resp.status_code == 302
@@ -125,7 +130,7 @@ class TestNotifyAdmin:
         token = EmailVerificationToken.objects.create(
             email='notify@test.com',
             tenant_name='',
-            user_data={'password': make_password('SecurePass123!x'), 'invitation_code': ''},
+            user_data={'password': make_password(_TEST_PWD), 'invitation_code': ''},
         )
         client.get(f'/auth/verify/{token.token}/')
         assert mock_send.call_count == 1
@@ -136,13 +141,13 @@ class TestNotifyAdmin:
     def test_notify_admin_includes_invitation_code(self, mock_send, client, setup_plans_and_groups):
         from django.contrib.auth.hashers import make_password
         admin = User.objects.create_user(
-            email='adm4@test.com', password='test123!', username='adm4@test.com'
+            email='adm4@test.com', password=_ADMIN_PWD, username='adm4@test.com'
         )
         code = InvitationCode.objects.create(created_by=admin)
         token = EmailVerificationToken.objects.create(
             email='codenotify@test.com',
             tenant_name='',
-            user_data={'password': make_password('SecurePass123!x'), 'invitation_code': code.code},
+            user_data={'password': make_password(_TEST_PWD), 'invitation_code': code.code},
         )
         client.get(f'/auth/verify/{token.token}/')
         call_kwargs = mock_send.call_args
@@ -154,12 +159,12 @@ class TestNotifyAdmin:
 class TestApplyCodeView:
     def test_apply_valid_code_upgrades_to_tester(self, client, setup_plans_and_groups):
         user = User.objects.create_user(
-            email='apply@test.com', password='SecurePass123!x', username='apply@test.com'
+            email='apply@test.com', password=_TEST_PWD, username='apply@test.com'
         )
         _make_tenant(user)
         user.groups.add(Group.objects.get(name='user'))
         admin = User.objects.create_user(
-            email='adm3@test.com', password='test123!', username='adm3@test.com'
+            email='adm3@test.com', password=_ADMIN_PWD, username='adm3@test.com'
         )
         _make_tenant(admin)
         code = InvitationCode.objects.create(created_by=admin)
@@ -172,7 +177,7 @@ class TestApplyCodeView:
 
     def test_apply_invalid_code_stays_user(self, client, setup_plans_and_groups):
         user = User.objects.create_user(
-            email='bad@test.com', password='SecurePass123!x', username='bad@test.com'
+            email='bad@test.com', password=_TEST_PWD, username='bad@test.com'
         )
         _make_tenant(user)
         user.groups.add(Group.objects.get(name='user'))

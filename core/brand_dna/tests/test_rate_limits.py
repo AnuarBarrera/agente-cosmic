@@ -1,8 +1,11 @@
+import secrets
 from datetime import timedelta
 from unittest.mock import patch, MagicMock
 import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+
+_TEST_PWD = f"T3st-{secrets.token_urlsafe(10)}!"
 from django.test import TestCase
 from django.utils import timezone
 from core.tenant_management.models import Plan, TenantModel, Subscription
@@ -172,27 +175,27 @@ def all_groups(db):
 @pytest.mark.django_db
 class TestGetUserPlanByGroup:
     def test_admin_group_gets_admin_plan(self, all_plans, all_groups):
-        user = User.objects.create_user(email='a@test.com', password='test123!', username='a@test.com')
+        user = User.objects.create_user(email='a@test.com', password=_TEST_PWD, username='a@test.com')
         user.groups.add(all_groups['admin'])
         assert get_user_plan(user).name == 'Admin'
 
     def test_tester_group_gets_tester_plan(self, all_plans, all_groups):
-        user = User.objects.create_user(email='t@test.com', password='test123!', username='t@test.com')
+        user = User.objects.create_user(email='t@test.com', password=_TEST_PWD, username='t@test.com')
         user.groups.add(all_groups['tester'])
         assert get_user_plan(user).name == 'Tester'
 
     def test_user_group_gets_free_plan(self, all_plans, all_groups):
-        user = User.objects.create_user(email='u@test.com', password='test123!', username='u@test.com')
+        user = User.objects.create_user(email='u@test.com', password=_TEST_PWD, username='u@test.com')
         user.groups.add(all_groups['user'])
         assert get_user_plan(user).name == 'Free'
 
     def test_no_group_gets_free_plan(self, all_plans):
-        user = User.objects.create_user(email='n@test.com', password='test123!', username='n@test.com')
+        user = User.objects.create_user(email='n@test.com', password=_TEST_PWD, username='n@test.com')
         assert get_user_plan(user).name == 'Free'
 
     def test_tenant_subscription_takes_priority(self, all_plans, all_groups):
         tenant = TenantModel.objects.create(name='T2', status='active')
         Subscription.objects.create(tenant=tenant, plan=all_plans['free'])
-        user = User.objects.create_user(email='p@test.com', password='test123!', username='p@test.com', tenant=tenant)
+        user = User.objects.create_user(email='p@test.com', password=_TEST_PWD, username='p@test.com', tenant=tenant)
         user.groups.add(all_groups['admin'])
         assert get_user_plan(user).name == 'Free'

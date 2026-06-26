@@ -1,6 +1,9 @@
 import pytest
+import secrets
 import uuid
 from unittest.mock import patch
+
+_TEST_PWD = f"T3st-{secrets.token_urlsafe(10)}!"
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APITestCase, APIClient
@@ -27,7 +30,7 @@ class JWTSecurityTestCase(APITestCase):
         self.user = User.objects.create_user(
             username='testuser@example.com',
             email='testuser@example.com',
-            password='TestPassword123!',
+            password=_TEST_PWD,
             tenant=self.tenant,
             email_verified=True
         )

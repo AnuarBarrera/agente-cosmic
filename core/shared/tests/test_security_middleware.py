@@ -1,7 +1,10 @@
 import pytest
+import secrets
 import time
 import uuid
 from unittest.mock import patch, MagicMock
+
+_TEST_PWD = f"T3st-{secrets.token_urlsafe(10)}!"
 from django.test import TestCase, RequestFactory
 from django.core.cache import cache
 from django.utils import timezone
@@ -50,7 +53,7 @@ class RateLimitingMiddlewareTestCase(TestCase):
         self.free_user = User.objects.create_user(
             username='freeuser@example.com',
             email='freeuser@example.com',
-            password='TestPassword123!',
+            password=_TEST_PWD,
             tenant=self.free_tenant,
             email_verified=True
         )
@@ -58,7 +61,7 @@ class RateLimitingMiddlewareTestCase(TestCase):
         self.premium_user = User.objects.create_user(
             username='premiumuser@example.com',
             email='premiumuser@example.com',
-            password='TestPassword123!',
+            password=_TEST_PWD,
             tenant=self.premium_tenant,
             email_verified=True
         )
@@ -201,7 +204,7 @@ class APIThrottlingMiddlewareTestCase(TestCase):
         self.user = User.objects.create_user(
             username='testuser@example.com',
             email='testuser@example.com',
-            password='TestPassword123!',
+            password=_TEST_PWD,
             tenant=self.tenant,
             email_verified=True
         )

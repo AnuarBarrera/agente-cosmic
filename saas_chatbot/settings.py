@@ -266,23 +266,15 @@ MIDDLEWARE = [
     'django_prometheus.middleware.PrometheusAfterMiddleware',
 ]
 
-# Cookie security settings - conditional based on environment
-if DEBUG:
-    # Development settings - less restrictive for local testing
-    SESSION_COOKIE_SAMESITE = 'None'
-    CSRF_COOKIE_SAMESITE = 'None' 
-    SESSION_COOKIE_SECURE = True  # Still secure even in dev behind proxy
-    CSRF_COOKIE_SECURE = True
-    SESSION_COOKIE_HTTPONLY = True
-    CSRF_COOKIE_HTTPONLY = False  # CSRF cookies need to be accessible to JS
-else:
-    # Production settings - OAuth compatible (requires None for cross-site redirects)
-    SESSION_COOKIE_SAMESITE = 'None'  # Required for OAuth cross-site redirects
-    CSRF_COOKIE_SAMESITE = 'None'     # Required for OAuth cross-site redirects  
-    SESSION_COOKIE_SECURE = True      # Required when SameSite=None
-    CSRF_COOKIE_SECURE = True         # Required when SameSite=None
-    SESSION_COOKIE_HTTPONLY = True
-    CSRF_COOKIE_HTTPONLY = False
+# Cookie security settings
+# SameSite=Lax es compatible con Google OAuth (usa redirecciones GET top-level)
+# y bloquea envío de cookies en requests cross-site iniciados por terceros (CSRF).
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SECURE = not DEBUG   # HTTPS only en producción
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = False        # El CSRF token necesita ser legible por JS
     
 # Additional cookie security
 SESSION_COOKIE_AGE = 3600  # 1 hour
