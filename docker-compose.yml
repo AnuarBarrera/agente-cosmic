@@ -41,6 +41,7 @@ services:
       - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
     env_file:
       - ./.env
     dns:

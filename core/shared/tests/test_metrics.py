@@ -1,9 +1,9 @@
 import pytest
+from unittest.mock import patch
 from core.shared.metrics import (
     ANALYSIS_JOBS_TOTAL,
     ANALYSIS_DURATION,
     EXTERNAL_API_REQUESTS,
-    GEMINI_TOKENS,
     CALENDARS_CREATED,
 )
 from core.shared.metrics_utils import track_external_api, record_tokens
@@ -49,10 +49,8 @@ class TestTrackExternalApi:
 
 
 class TestRecordTokens:
-    def test_records_tokens_from_response(self):
-        before_in = GEMINI_TOKENS.labels(direction='input')._value.get()
-        before_out = GEMINI_TOKENS.labels(direction='output')._value.get()
-
+    def test_records_tokens_via_redis(self):
+        """record_tokens escribe en Redis — verifica que la clave correcta se incrementa."""
         class FakeUsage:
             prompt_token_count = 100
             candidates_token_count = 50
@@ -60,9 +58,16 @@ class TestRecordTokens:
         class FakeResp:
             usage_metadata = FakeUsage()
 
-        record_tokens(FakeResp())
-        assert GEMINI_TOKENS.labels(direction='input')._value.get() == before_in + 100
-        assert GEMINI_TOKENS.labels(direction='output')._value.get() == before_out + 50
+        increments = {}
+
+        def fake_redis_inc(key, amount=1.0):
+            increments[key] = increments.get(key, 0) + amount
+
+        with patch('core.shared.metrics_utils._redis_inc', side_effect=fake_redis_inc):
+            record_tokens(FakeResp(), operation='text_gen')
+
+        assert increments.get('cosmic:prom:G:input:text_gen', 0) == 100
+        assert increments.get('cosmic:prom:G:output:text_gen', 0) == 50
 
     def test_handles_missing_usage(self):
         class FakeResp:

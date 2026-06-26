@@ -19,6 +19,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from .views import health_check
 from core.tenant_management.admin import cosmic_admin
+from core.shared.metrics_endpoint import metrics_view
 
 handler400 = 'core.shared.error_handlers.handler400'
 handler403 = 'core.shared.error_handlers.handler403'
@@ -27,8 +28,8 @@ handler500 = 'core.shared.error_handlers.handler500'
 
 urlpatterns = [
     path('health/', health_check, name='health'),
+    path('metrics', metrics_view, name='metrics'),
     path('admin/', cosmic_admin.urls),
-    path('', include('django_prometheus.urls')),
     path('', include('core.brand_dna.urls')),
 ]
 

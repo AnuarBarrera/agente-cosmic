@@ -3,6 +3,10 @@
 # Create log directories required by Django file handlers
 mkdir -p /app/logs
 
+# Prometheus multiprocess mode: clear stale PID files from previous run
+rm -f /tmp/prometheus-multiproc/*.db 2>/dev/null || true
+mkdir -p /tmp/prometheus-multiproc
+
 # Apply database migrations
 echo "Applying database migrations..."
 python manage.py migrate

@@ -13,7 +13,7 @@ from google.cloud import storage
 from google.genai import types
 from django.conf import settings
 from playwright.sync_api import sync_playwright
-from core.shared.metrics import IMAGEN_GENERATIONS, IMAGEN_GENERATIONS_BY_TYPE, GCS_OPERATIONS
+from core.shared.metrics import GCS_OPERATIONS
 from core.shared.metrics_utils import track_external_api, record_tokens, record_imagen_generation
 
 from PIL import Image
@@ -270,7 +270,6 @@ class ImageGenerator:
                     ),
                 )
             if resp.generated_images:
-                IMAGEN_GENERATIONS.inc()
                 record_imagen_generation('bgswap')
                 logger.info("BGSWAP exitoso — producto sobre entorno premium")
                 return resp.generated_images[0].image.image_bytes, True
@@ -643,7 +642,6 @@ class ImageGenerator:
                     ),
                 )
             if resp.generated_images:
-                IMAGEN_GENERATIONS.inc()
                 record_imagen_generation('generate')
                 return resp.generated_images[0].image.image_bytes
             raise ValueError("No image returned by Imagen")
