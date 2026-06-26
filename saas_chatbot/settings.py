@@ -258,6 +258,7 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django_otp.middleware.OTPMiddleware',
+    'core.shared.middleware.tenant_rate_limiting.TenantRateLimitingMiddleware',
     'core.shared.middleware.tenant_isolation.TenantIsolationMiddleware',
     'core.shared.middleware.session_timeout.SessionTimeoutMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -364,6 +365,9 @@ AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'core.tenant_management.validators.CustomPasswordValidator',
     },
+    {
+        'NAME': 'core.tenant_management.validators.PasswordHistoryValidator',
+    },
 ]
 
 
@@ -393,6 +397,11 @@ STATIC_ROOT = '/app/staticfiles'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+if not DEBUG:
+    DEFAULT_FILE_STORAGE = 'storages.backends.gcloud.GoogleCloudStorage'
+    GS_BUCKET_NAME = GOOGLE_CLOUD_STORAGE_BUCKET
+    GS_DEFAULT_ACL = None
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
@@ -473,6 +482,10 @@ LOGGING = {
             'format': '{levelname} {message}',
             'style': '{',
         },
+        'json_line': {
+            'format': '{message}',
+            'style': '{',
+        },
     },
     'handlers': {
         'console': {
@@ -496,6 +509,14 @@ LOGGING = {
             'backupCount': 5,
             'formatter': 'verbose',
         },
+        'llm_audit_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': BASE_DIR / 'logs' / 'llm_audit.jsonl',
+            'maxBytes': 1024*1024*50,  # 50MB
+            'backupCount': 10,
+            'formatter': 'json_line',
+        },
     },
     'loggers': {
         '': {  # Root logger
@@ -512,9 +533,14 @@ LOGGING = {
             'level': 'WARNING',
             'propagate': False,
         },
-        'core': {  # Your app logs
+        'core': {
             'handlers': ['console'] + (['file'] if not DEBUG else []),
             'level': get_env('LOG_LEVEL', default='INFO'),
+            'propagate': False,
+        },
+        'cosmic.llm_audit': {
+            'handlers': ['llm_audit_file', 'console'],
+            'level': 'INFO',
             'propagate': False,
         },
     },

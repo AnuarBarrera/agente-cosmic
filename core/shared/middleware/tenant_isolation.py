@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class TenantIsolationMiddleware:
     PUBLIC_PATH_PREFIXES = (
         '/auth/', '/health/', '/admin/', '/static/', '/media/',
-        '/metrics', '/favicon',
+        '/favicon',
     )
 
     def __init__(self, get_response):

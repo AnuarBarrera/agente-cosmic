@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import os
@@ -5,6 +6,8 @@ import re
 import time as _time
 import django_rq
 import google.genai as genai
+from PIL import Image
+from core.shared.metrics_utils import track_external_api, record_tokens
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, FileResponse
@@ -12,6 +15,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 from core.brand_dna.models import AnalysisJob, BrandDNA
 from core.shared.metrics import POST_ACTIONS
+from core.shared.gcs_uploads import save_upload, read_upload, upload_exists
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +28,15 @@ def _safe_extension(filename: str) -> str:
         if ext in _ALLOWED_IMAGE_EXTENSIONS:
             return ext
     return 'jpg'
+
+
+def _validate_image_bytes(data: bytes) -> bool:
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.verify()
+        return True
+    except Exception:
+        return False
 
 
 def landing(request):
@@ -76,24 +89,22 @@ def analyze_submit(request):
 
     if 'logo' in request.FILES:
         logo_file = request.FILES['logo']
+        logo_bytes = logo_file.read()
+        if not _validate_image_bytes(logo_bytes):
+            return render(request, 'brand_dna/landing.html', {'error': 'El logo no es una imagen válida.'})
         ext = _safe_extension(logo_file.name)
         logo_path = f'uploads/logo_{job.id}.{ext}'
-        full_path = os.path.join(settings.MEDIA_ROOT, logo_path)
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, 'wb') as f:
-            for chunk in logo_file.chunks():
-                f.write(chunk)
+        save_upload(logo_bytes, logo_path)
         job.logo_file_path = logo_path
         job.save(update_fields=['logo_file_path'])
 
     post_paths = []
     for i, img_file in enumerate(request.FILES.getlist('post_images')):
+        img_bytes = img_file.read()
+        if not _validate_image_bytes(img_bytes):
+            continue
         img_path = f'uploads/post_{job.id}_{i}.jpg'
-        full_path = os.path.join(settings.MEDIA_ROOT, img_path)
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, 'wb') as f:
-            for chunk in img_file.chunks():
-                f.write(chunk)
+        save_upload(img_bytes, img_path)
         post_paths.append(img_path)
 
     if post_paths:
@@ -104,17 +115,17 @@ def analyze_submit(request):
     if prod_files:
         prod_paths = []
         for idx, prod_file in enumerate(prod_files):
+            prod_bytes = prod_file.read()
+            if not _validate_image_bytes(prod_bytes):
+                continue
             ext = _safe_extension(prod_file.name)
             prod_path = f'uploads/product_{job.id}_{idx}.{ext}'
-            full_path = os.path.join(settings.MEDIA_ROOT, prod_path)
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            with open(full_path, 'wb') as f:
-                for chunk in prod_file.chunks():
-                    f.write(chunk)
+            save_upload(prod_bytes, prod_path)
             prod_paths.append(prod_path)
-        job.product_image_paths = prod_paths
-        job.product_image_path = prod_paths[0]
-        job.save(update_fields=['product_image_path', 'product_image_paths'])
+        if prod_paths:
+            job.product_image_paths = prod_paths
+            job.product_image_path = prod_paths[0]
+            job.save(update_fields=['product_image_path', 'product_image_paths'])
 
     from core.brand_dna.tasks import analyze_brand_task
     django_rq.enqueue(analyze_brand_task, str(job.id))
@@ -296,10 +307,9 @@ def post_action_api(request, post_id):
             image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
             product_image_bytes = None
             if brand_dna.job.product_image_path:
-                prod_full = os.path.join(settings.MEDIA_ROOT, brand_dna.job.product_image_path)
-                if os.path.exists(prod_full):
-                    with open(prod_full, 'rb') as _f:
-                        product_image_bytes = _f.read()
+                gcs_path = brand_dna.job.product_image_path
+                if upload_exists(gcs_path):
+                    product_image_bytes = read_upload(gcs_path)
             generated = image_gen.generate(
                 caption=new_caption,
                 colors=brand_dna.primary_colors,
@@ -376,13 +386,12 @@ def _update_active_product_images(calendar, job, request, next_week):
         files = request.FILES.getlist('product_images')[:7]
         new_paths = []
         for idx, f in enumerate(files):
+            file_bytes = f.read()
+            if not _validate_image_bytes(file_bytes):
+                continue
             ext = f.name.rsplit('.', 1)[-1].lower() if '.' in f.name else 'jpg'
             path = f'uploads/product_{job.id}_w{next_week}_{idx}.{ext}'
-            full = os.path.join(settings.MEDIA_ROOT, path)
-            os.makedirs(os.path.dirname(full), exist_ok=True)
-            with open(full, 'wb') as out:
-                for chunk in f.chunks():
-                    out.write(chunk)
+            save_upload(file_bytes, path)
             new_paths.append(path)
         if new_paths:
             job.product_image_paths = job.product_image_paths + new_paths
@@ -417,7 +426,9 @@ def _regenerate_caption(post, feedback: str) -> str:
             project=settings.GOOGLE_CLOUD_PROJECT,
             location=settings.GOOGLE_CLOUD_LOCATION,
         )
-        resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        with track_external_api('gemini', operation='caption_regen'):
+            resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        record_tokens(resp, operation='caption_regen', response_preview=resp.text[:200] if resp.text else '')
         new_caption = resp.text.strip().strip('"').strip("'")
         raw = re.sub(r'^```.*?\n', '', new_caption, flags=re.DOTALL)
         raw = re.sub(r'\n?```$', '', raw)

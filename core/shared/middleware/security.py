@@ -71,6 +71,9 @@ class HTTPSRedirectMiddleware(MiddlewareMixin):
             
         # Only redirect in production (DEBUG=False) and if not already HTTPS
         if not settings.DEBUG and not request.is_secure():
+            # Prometheus scrapes /metrics directly on port 9091 without proxy
+            if request.path == '/metrics':
+                return None
             # Check if we're behind a proxy that handles HTTPS
             if request.META.get('HTTP_X_FORWARDED_PROTO') != 'https':
                 # Build the HTTPS URL
