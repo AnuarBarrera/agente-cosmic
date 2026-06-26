@@ -53,3 +53,5 @@ client_secret*.json
 
 # macOS
 .DS_Store
+.cybersec-exceptions.md
+cosmic-memory.md
