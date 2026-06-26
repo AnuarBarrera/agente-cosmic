@@ -13,8 +13,8 @@ from google.cloud import storage
 from google.genai import types
 from django.conf import settings
 from playwright.sync_api import sync_playwright
-from core.shared.metrics import IMAGEN_GENERATIONS, GCS_OPERATIONS
-from core.shared.metrics_utils import track_external_api, record_tokens
+from core.shared.metrics import IMAGEN_GENERATIONS, IMAGEN_GENERATIONS_BY_TYPE, GCS_OPERATIONS
+from core.shared.metrics_utils import track_external_api, record_tokens, record_imagen_generation
 
 from PIL import Image
 import io
@@ -172,7 +172,9 @@ class ImageGenerator:
             return result
         else:
             background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, max_qc_retries=max_qc_retries)
-            content = self._generate_post_content(caption, product_image_bytes=None)
+            kw_str = ', '.join((keywords or [])[:4])
+            brand_ctx = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
+            content = self._generate_post_content(caption, product_image_bytes=None, brand_context=brand_ctx)
             svg_overlay = ''
         return self._render_html_template(background_bytes, content, colors, svg_overlay=svg_overlay)
 
@@ -224,12 +226,12 @@ class ImageGenerator:
                 f"End with: 'NOT abstract. NOT 3D render. Absolutely NO text, NO logos.'\n"
                 f"Return ONLY the prompt text, no explanations."
             )
-            with track_external_api('gemini'):
+            with track_external_api('gemini', operation='image_product'):
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=[image_part, prompt],
                 )
-            record_tokens(resp)
+            record_tokens(resp, operation='image_product', response_preview=resp.text[:200] if resp.text else '')
             result = resp.text.strip().strip('"').strip("'")
             if result:
                 logger.info(f"Art Director env prompt: {result[:100]}...")
@@ -245,7 +247,7 @@ class ImageGenerator:
         mime = _detect_mime(product_image_bytes)
         try:
             client = _vertex_client()
-            with track_external_api('imagen3'):
+            with track_external_api('imagen3', operation='bgswap'):
                 resp = client.models.edit_image(
                     model=settings.VERTEX_IMAGE_EDIT_MODEL,
                     prompt=environment_prompt,
@@ -269,6 +271,7 @@ class ImageGenerator:
                 )
             if resp.generated_images:
                 IMAGEN_GENERATIONS.inc()
+                record_imagen_generation('bgswap')
                 logger.info("BGSWAP exitoso — producto sobre entorno premium")
                 return resp.generated_images[0].image.image_bytes, True
             logger.warning("BGSWAP sin imágenes, usando foto original")
@@ -294,12 +297,12 @@ class ImageGenerator:
                 f"- No solid opaque fills. SVG root has no background-color.\n"
                 f"- Return ONLY valid SVG starting with <svg and ending with </svg>. No markdown."
             )
-            with track_external_api('gemini'):
+            with track_external_api('gemini', operation='svg_overlay'):
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=[image_part, prompt],
                 )
-            record_tokens(resp)
+            record_tokens(resp, operation='svg_overlay')
             raw = resp.text.strip()
             svg_match = re.search(r'<svg[\s\S]*?</svg>', raw, re.DOTALL)
             if svg_match:
@@ -327,11 +330,12 @@ class ImageGenerator:
         Evita explícitamente escenas de oficina, laptops y escritorios."""
         color_str = ', '.join(colors[:3]) if colors else 'warm neutrals'
         kw_str = ', '.join(keywords[:4]) if keywords else ''
-        brand_ctx = description[:120] if description else caption[:120]
-        fallback_scene = random.choice(self._SCENE_FALLBACKS)
+        brand_ctx = description[:180] if description else caption[:180]
+        # Fallback determinístico basado en brand_ctx — no aleatorio
         _FALLBACK = (
-            f"Real-world lifestyle photograph, {fallback_scene}. "
+            f"Real-world lifestyle photograph inspired by: {brand_ctx[:100]}. "
             f"Natural lighting, shallow depth of field. Color palette: {color_str}. Mood: {tone}. "
+            f"Authentic setting, real textures, professional photography style. "
             f"NO laptops, NO computers, NO phones, NO desk, NO office, NO keyboard. "
             f"NO text, NO logos, NO UI elements. Square 1:1 format. Photorealistic."
         )
@@ -339,23 +343,23 @@ class ImageGenerator:
             client = _vertex_client()
             prompt = (
                 f"You are an Art Director creating Instagram post backgrounds for brand advertising.\n"
-                f"Brand: {brand_ctx}. Keywords: {kw_str}. Tone: {tone}. Colors: {color_str}.\n\n"
-                f"Generate ONE Imagen 3 prompt (max 80 words) for a LIFESTYLE BACKGROUND PHOTO.\n"
+                f"Brand description: {brand_ctx}. Keywords: {kw_str}. Tone: {tone}. Colors: {color_str}.\n\n"
+                f"Generate ONE Imagen 3 prompt (max 80 words) for a LIFESTYLE BACKGROUND PHOTO that visually represents THIS SPECIFIC brand.\n"
                 f"Rules:\n"
-                f"- Choose a creative real-world scene that EVOKES the brand's values emotionally\n"
+                f"- The scene must reflect the brand's actual industry and customers, not generic imagery\n"
                 f"- ABSOLUTELY NO offices, laptops, computers, desks, keyboards, or screens\n"
-                f"- Think: where do this brand's CUSTOMERS live their lives? Coffee shops? Outdoors? Home?\n"
+                f"- Think: what does the brand's world look, smell and feel like? What environment do their customers live in?\n"
                 f"- The scene should feel aspirational and authentic — real textures, natural light, depth\n"
-                f"- Vary the scene type: nature, urban, food, home, travel, craft, market, garden, etc.\n\n"
-                f"End with: 'Natural lighting. Photorealistic. NO laptops. NO computers. NO text. NO logos.'\n"
+                f"- Choose from: service environment, customer lifestyle moment, product context, nature matching brand values\n\n"
+                f"End with: 'Natural lighting. Photorealistic. NO text. NO logos.'\n"
                 f"Return ONLY the prompt text, no explanations."
             )
-            with track_external_api('gemini'):
+            with track_external_api('gemini', operation='image_bg'):
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=prompt,
                 )
-            record_tokens(resp)
+            record_tokens(resp, operation='image_bg', response_preview=resp.text[:200] if resp.text else '')
             result = resp.text.strip().strip('"').strip("'")
             if len(result) > 20:
                 logger.info(f"Brand scene prompt: {result[:120]}...")
@@ -409,12 +413,12 @@ class ImageGenerator:
                 "A screen must be completely BLACK or clearly turned off to not count. Be very strict.\n"
                 "ok: true ONLY if has_text=false AND is_abstract_3d=false AND has_screen_content=false."
             )
-            with track_external_api('gemini'):
+            with track_external_api('gemini', operation='image_qc'):
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=[image_part, prompt],
                 )
-            record_tokens(resp)
+            record_tokens(resp, operation='image_qc')
             raw = resp.text.strip()
             match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
             if match:
@@ -450,12 +454,12 @@ class ImageGenerator:
                 "A professional advertising image must have an interesting background, not a plain studio backdrop.\n"
                 "ok: true ONLY if has_background_text=false AND has_shadow_artifacts=false AND plain_white_background=false."
             )
-            with track_external_api('gemini'):
+            with track_external_api('gemini', operation='image_qc'):
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=[image_part, prompt],
                 )
-            record_tokens(resp)
+            record_tokens(resp, operation='image_qc')
             raw = resp.text.strip()
             match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
             if match:
@@ -519,7 +523,9 @@ class ImageGenerator:
                 )
                 contents = [image_part, prompt]
             else:
+                ctx_line = f"ADN de marca: {brand_context}\n" if brand_context else ""
                 prompt = (
+                    f"{ctx_line}"
                     f"Caption del post: \"{caption[:300]}\"\n\n"
                     "Genera el contenido para un post de Instagram con estos 4 elementos:\n"
                     "1. headline: 3-5 palabras. Frase gancho, memorable. Sin nombres de marca, URLs, hashtags.\n"
@@ -531,7 +537,7 @@ class ImageGenerator:
                     "{\"headline\":\"...\",\"subtitle\":\"...\",\"cta\":\"...\",\"tag\":\"...\"}"
                 )
                 contents = prompt
-            with track_external_api('gemini'):
+            with track_external_api('gemini', operation='post_content'):
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=contents,
@@ -544,7 +550,7 @@ class ImageGenerator:
                         ),
                     ),
                 )
-            record_tokens(resp)
+            record_tokens(resp, operation='post_content', response_preview=resp.text[:200] if resp.text else '')
             raw = resp.text.strip()
             match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
             if match:
@@ -627,7 +633,7 @@ class ImageGenerator:
         client = _vertex_client()
         model = settings.VERTEX_IMAGE_MODEL
         if 'imagen' in model:
-            with track_external_api('imagen3'):
+            with track_external_api('imagen3', operation='image_generate'):
                 resp = client.models.generate_images(
                     model=model,
                     prompt=prompt,
@@ -638,6 +644,7 @@ class ImageGenerator:
                 )
             if resp.generated_images:
                 IMAGEN_GENERATIONS.inc()
+                record_imagen_generation('generate')
                 return resp.generated_images[0].image.image_bytes
             raise ValueError("No image returned by Imagen")
         with track_external_api('gemini'):

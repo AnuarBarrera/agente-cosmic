@@ -1,9 +1,12 @@
 import logging
 from datetime import timedelta
 
-from prometheus_client import Counter, Gauge, Histogram
-from prometheus_client.core import GaugeMetricFamily, REGISTRY
+from prometheus_client import Counter, Gauge, Histogram, Info
+from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily, REGISTRY
 
+# ---------------------------------------------------------------------------
+# Pipeline de análisis
+# ---------------------------------------------------------------------------
 ANALYSIS_JOBS_TOTAL = Counter(
     'cosmic_analysis_jobs_total',
     'Total analysis jobs',
@@ -16,6 +19,9 @@ ANALYSIS_DURATION = Histogram(
     buckets=[10, 30, 60, 120, 300, 600],
 )
 
+# ---------------------------------------------------------------------------
+# Generación de contenido
+# ---------------------------------------------------------------------------
 CONTENT_GENERATION_DURATION = Histogram(
     'cosmic_content_generation_duration_seconds',
     'Duration of content generation task',
@@ -28,52 +34,33 @@ IMAGE_GENERATION_DURATION = Histogram(
     buckets=[5, 10, 20, 40, 60, 120],
 )
 
+CALENDARS_CREATED = Counter(
+    'cosmic_calendars_created_total',
+    'Content calendars created',
+)
+
+POST_ACTIONS = Counter(
+    'cosmic_post_actions_total',
+    'Content post actions',
+    ['action'],
+)
+
+# ---------------------------------------------------------------------------
+# Cola RQ
+# ---------------------------------------------------------------------------
 RQ_JOBS = Gauge(
     'cosmic_rq_jobs',
     'RQ jobs by state',
     ['state'],
 )
 
+# ---------------------------------------------------------------------------
+# Autenticación y usuarios
+# ---------------------------------------------------------------------------
 LOGIN_ATTEMPTS = Counter(
     'cosmic_login_attempts_total',
     'Login attempts',
     ['result'],
-)
-
-EXTERNAL_API_REQUESTS = Counter(
-    'cosmic_external_api_requests_total',
-    'External API requests',
-    ['service', 'status'],
-)
-
-EXTERNAL_API_DURATION = Histogram(
-    'cosmic_external_api_duration_seconds',
-    'External API call duration',
-    ['service'],
-    buckets=[0.5, 1, 2, 5, 10, 30, 60],
-)
-
-EXTERNAL_API_ERRORS = Counter(
-    'cosmic_external_api_errors_total',
-    'External API errors',
-    ['service', 'error_type'],
-)
-
-GEMINI_TOKENS = Counter(
-    'cosmic_gemini_tokens_total',
-    'Gemini tokens consumed',
-    ['direction'],
-)
-
-IMAGEN_GENERATIONS = Counter(
-    'cosmic_imagen_generations_total',
-    'Imagen 3 images generated',
-)
-
-GCS_OPERATIONS = Counter(
-    'cosmic_gcs_storage_operations_total',
-    'Google Cloud Storage operations',
-    ['operation'],
 )
 
 REGISTRATIONS = Counter(
@@ -93,30 +80,111 @@ INVITATION_CODES_REDEEMED = Counter(
     'Invitation codes redeemed',
 )
 
+ACTIVE_USERS = Gauge(
+    'cosmic_active_users',
+    'Users with login in last 24h',
+)
+
+# ---------------------------------------------------------------------------
+# Email
+# ---------------------------------------------------------------------------
 EMAILS_SENT = Counter(
     'cosmic_emails_sent_total',
     'Emails sent',
     ['type'],
 )
 
-POST_ACTIONS = Counter(
-    'cosmic_post_actions_total',
-    'Content post actions',
-    ['action'],
+# ---------------------------------------------------------------------------
+# APIs externas — latencia, errores, éxito
+# ---------------------------------------------------------------------------
+EXTERNAL_API_REQUESTS = Counter(
+    'cosmic_external_api_requests_total',
+    'External API requests',
+    ['service', 'status'],
 )
 
-ACTIVE_USERS = Gauge(
-    'cosmic_active_users',
-    'Users with login in last 24h',
+EXTERNAL_API_DURATION = Histogram(
+    'cosmic_external_api_duration_seconds',
+    'External API call duration',
+    ['service'],
+    buckets=[0.5, 1, 2, 5, 10, 30, 60],
 )
 
-CALENDARS_CREATED = Counter(
-    'cosmic_calendars_created_total',
-    'Content calendars created',
+EXTERNAL_API_ERRORS = Counter(
+    'cosmic_external_api_errors_total',
+    'External API errors',
+    ['service', 'error_type'],
+)
+
+# ---------------------------------------------------------------------------
+# Tokens Gemini — por dirección y por operación
+# ---------------------------------------------------------------------------
+GEMINI_TOKENS = Counter(
+    'cosmic_gemini_tokens_total',
+    'Gemini tokens consumed (aggregate)',
+    ['direction'],
+)
+
+GEMINI_TOKENS_BY_OP = Counter(
+    'cosmic_gemini_tokens_by_operation_total',
+    'Gemini tokens consumed by operation type',
+    ['direction', 'operation'],
+    # operations: brand_analysis | text_gen | image_bg | image_product | image_qc | caption_regen | svg_overlay
+)
+
+# ---------------------------------------------------------------------------
+# Costos estimados en USD (acumulados)
+# Precios Gemini 2.5 Flash: $0.075/1M input, $0.30/1M output
+# Imagen 3 generate: $0.04/imagen, BGSWAP: $0.04/imagen
+# ---------------------------------------------------------------------------
+GEMINI_COST_MICRODOLLARS = Counter(
+    'cosmic_gemini_cost_microdollars_total',
+    'Estimated Gemini cost in microdollars (÷1,000,000 = USD)',
+    ['operation'],
+)
+
+IMAGEN_COST_MICRODOLLARS = Counter(
+    'cosmic_imagen_cost_microdollars_total',
+    'Estimated Imagen 3 cost in microdollars (÷1,000,000 = USD)',
+    ['type'],
+    # types: generate | bgswap
+)
+
+# ---------------------------------------------------------------------------
+# Generación de imágenes
+# ---------------------------------------------------------------------------
+IMAGEN_GENERATIONS = Counter(
+    'cosmic_imagen_generations_total',
+    'Imagen 3 images generated',
+)
+
+IMAGEN_GENERATIONS_BY_TYPE = Counter(
+    'cosmic_imagen_generations_by_type_total',
+    'Imagen 3 images generated by pipeline type',
+    ['type'],
+    # types: generate | bgswap | qc_retry
+)
+
+GCS_OPERATIONS = Counter(
+    'cosmic_gcs_storage_operations_total',
+    'Google Cloud Storage operations',
+    ['operation'],
+)
+
+# ---------------------------------------------------------------------------
+# LLM Audit log — conteo de llamadas por operación (el detalle va al log)
+# ---------------------------------------------------------------------------
+LLM_CALLS = Counter(
+    'cosmic_llm_calls_total',
+    'LLM API calls by operation and result',
+    ['operation', 'result'],
 )
 
 _logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Colectores que leen de la BD en cada scrape
+# ---------------------------------------------------------------------------
 
 class RQJobsCollector:
     def describe(self):
@@ -131,6 +199,7 @@ class RQJobsCollector:
             g.add_metric(['started'], queue.started_job_registry.count)
             g.add_metric(['finished'], queue.finished_job_registry.count)
             g.add_metric(['failed'], queue.failed_job_registry.count)
+            g.add_metric(['scheduled'], queue.scheduled_job_registry.count)
             yield g
         except Exception as e:
             _logger.warning(f'RQJobsCollector error: {e}')
@@ -154,5 +223,82 @@ class ActiveUsersCollector:
             _logger.warning(f'ActiveUsersCollector error: {e}')
 
 
+class OperationalCollector:
+    """Colector de métricas operacionales de BD — scraped en cada pull de Prometheus."""
+
+    def describe(self):
+        return []
+
+    def collect(self):
+        try:
+            from django.contrib.auth import get_user_model
+            from django.utils import timezone
+            from core.content_pipeline.models import ContentCalendar, ContentPost
+            from core.brand_dna.models import AnalysisJob
+
+            User = get_user_model()
+            now = timezone.now()
+
+            # Usuarios totales registrados
+            g_users = GaugeMetricFamily('cosmic_total_users', 'Total registered users')
+            g_users.add_metric([], User.objects.count())
+            yield g_users
+
+            # Calendarios activos (no eliminados)
+            g_cals = GaugeMetricFamily('cosmic_active_calendars', 'Active calendars (not deleted)')
+            g_cals.add_metric([], ContentCalendar.objects.filter(
+                brand_dna__job__deleted_at__isnull=True
+            ).count())
+            yield g_cals
+
+            # Posts pendientes de enviar (imagen vacía o scheduled_at en el futuro)
+            g_pending = GaugeMetricFamily('cosmic_pending_posts', 'Posts pending email delivery')
+            g_pending.add_metric([], ContentPost.objects.filter(
+                calendar__brand_dna__job__deleted_at__isnull=True,
+                scheduled_at__gt=now,
+            ).count())
+            yield g_pending
+
+            # Posts entregados hoy (last 24h)
+            cutoff_24h = now - timedelta(hours=24)
+            g_delivered = GaugeMetricFamily('cosmic_posts_delivered_24h', 'Posts delivered in last 24h')
+            g_delivered.add_metric([], ContentPost.objects.filter(
+                scheduled_at__gte=cutoff_24h,
+                scheduled_at__lte=now,
+                image_url__gt='',
+            ).count())
+            yield g_delivered
+
+            # Jobs de análisis fallidos (acumulado)
+            g_failed = GaugeMetricFamily('cosmic_failed_analysis_jobs', 'Analysis jobs in failed state')
+            g_failed.add_metric([], AnalysisJob.objects.filter(status='failed').count())
+            yield g_failed
+
+            # Posts sin imagen generada (aún pendientes de render)
+            g_no_img = GaugeMetricFamily('cosmic_posts_without_image', 'Posts with no generated image')
+            g_no_img.add_metric([], ContentPost.objects.filter(
+                image_url='',
+                calendar__brand_dna__job__deleted_at__isnull=True,
+            ).count())
+            yield g_no_img
+
+            # Calendarios por usuario (top operacional — max 30 usuarios)
+            g_per_user = GaugeMetricFamily(
+                'cosmic_calendars_per_user', 'Active calendars per user', labels=['user_email']
+            )
+            for user in User.objects.filter(is_active=True):
+                count = ContentCalendar.objects.filter(
+                    brand_dna__job__user=user,
+                    brand_dna__job__deleted_at__isnull=True,
+                ).count()
+                if count > 0:
+                    g_per_user.add_metric([user.email], count)
+            yield g_per_user
+
+        except Exception as e:
+            _logger.warning(f'OperationalCollector error: {e}')
+
+
 REGISTRY.register(RQJobsCollector())
 REGISTRY.register(ActiveUsersCollector())
+REGISTRY.register(OperationalCollector())
