@@ -230,9 +230,29 @@ def calendar_review_view(request, job_id):
 @require_POST
 def delete_calendar_api(request, job_id):
     from django.utils import timezone
+    import django_rq
     job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
     job.deleted_at = timezone.now()
     job.save(update_fields=['deleted_at'])
+
+    # Cancelar todos los jobs RQ programados para los posts de este calendario
+    try:
+        calendar = job.brand_dna.calendar
+        post_ids = set(str(pid) for pid in calendar.posts.values_list('id', flat=True))
+        queue = django_rq.get_queue('default')
+        registry = queue.scheduled_job_registry
+        cancelled = 0
+        for rq_job_id in registry.get_job_ids():
+            rq_job = queue.fetch_job(rq_job_id)
+            if rq_job and rq_job.args and str(rq_job.args[0]) in post_ids:
+                registry.remove(rq_job)
+                rq_job.cancel()
+                cancelled += 1
+        if cancelled:
+            logger.info(f"delete_calendar: {cancelled} RQ jobs cancelados para job {job_id}")
+    except Exception as e:
+        logger.warning(f"delete_calendar: error cancelando RQ jobs: {e}")
+
     return JsonResponse({'status': 'ok'})
 
 
