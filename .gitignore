@@ -53,5 +53,8 @@ client_secret*.json
 
 # macOS
 .DS_Store
-.cybersec-exceptions.md
 cosmic-memory.md
+
+# Google Cloud SDK
+google-cloud-sdk/
+google-cloud-cli-*.tar.gz

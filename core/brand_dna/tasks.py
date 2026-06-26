@@ -9,6 +9,7 @@ from core.brand_dna.extractors.logo_analyzer import LogoAnalyzer
 from core.brand_dna.extractors.posts_analyzer import PostsAnalyzer
 from core.content_pipeline.image_utils import normalize_image
 from core.shared.metrics import ANALYSIS_JOBS_TOTAL, ANALYSIS_DURATION
+from core.shared.gcs_uploads import read_upload, upload_exists
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +36,8 @@ def analyze_brand_task(job_id: str) -> None:
         job.update_progress(AnalysisJob.STAGE_LOGO, 35)
         logo_data = {'primary_colors': [], 'logo_elements': ''}
         if job.logo_file_path:
-            logo_path = os.path.join(settings.MEDIA_ROOT, job.logo_file_path)
-            if os.path.exists(logo_path):
-                with open(logo_path, 'rb') as f:
-                    logo_bytes = normalize_image(f.read())
+            if upload_exists(job.logo_file_path):
+                logo_bytes = normalize_image(read_upload(job.logo_file_path))
                 analyzer = LogoAnalyzer()
                 logo_data = analyzer.analyze(logo_bytes, 'image/webp')
         job.update_progress(AnalysisJob.STAGE_LOGO, 55)
@@ -46,10 +45,8 @@ def analyze_brand_task(job_id: str) -> None:
         job.update_progress(AnalysisJob.STAGE_POSTS, 58)
         posts_images = []
         for img_path in (job.post_images_paths or []):
-            full_path = os.path.join(settings.MEDIA_ROOT, img_path)
-            if os.path.exists(full_path):
-                with open(full_path, 'rb') as f:
-                    posts_images.append(normalize_image(f.read()))
+            if upload_exists(img_path):
+                posts_images.append(normalize_image(read_upload(img_path)))
         posts_analyzer = PostsAnalyzer()
         posts_data = posts_analyzer.analyze(
             images=posts_images if posts_images else None,

@@ -47,7 +47,7 @@ services:
       - 8.8.8.8
       - 1.1.1.1
     ports:
-      - "127.0.0.1:9091:8000"
+      - "0.0.0.0:9091:8000"
     depends_on:
       - db
       - redis
@@ -61,6 +61,8 @@ services:
     init: true
     entrypoint: ""
     command: python manage.py rqworker default --worker-ttl 1800 --with-scheduler
+    deploy:
+      replicas: 3
     volumes:
       - .:/app
       - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
@@ -80,7 +82,7 @@ services:
   nginx:
     image: nginx:alpine
     ports:
-      - "127.0.0.1:3002:80"
+      - "0.0.0.0:80:80"
     volumes:
       - ./nginx.dev.conf:/etc/nginx/conf.d/default.conf
       - ./staticfiles:/app/staticfiles

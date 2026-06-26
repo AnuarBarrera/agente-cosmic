@@ -1,5 +1,4 @@
 import logging
-import os
 import time
 from datetime import datetime as dt_datetime, timedelta, timezone as dt_timezone
 from django.conf import settings
@@ -14,19 +13,23 @@ from core.content_pipeline.email_sender import EmailSender
 from core.content_pipeline.scheduler import schedule_daily_emails
 from core.content_pipeline.smart_scheduler import smart_schedule_dates
 from core.content_pipeline.image_utils import normalize_image
+from core.shared.gcs_uploads import read_upload, upload_exists
 from core.shared.metrics import CONTENT_GENERATION_DURATION, CALENDARS_CREATED
 
 logger = logging.getLogger(__name__)
 
 
 def _load_product_images(paths: list[str]) -> list[bytes]:
-    """Carga hasta 7 imágenes de producto normalizadas a WebP."""
+    """Carga hasta 7 imágenes de producto desde GCS, normalizadas a WebP."""
     result = []
     for path in (paths or [])[:7]:
-        full = os.path.join(settings.MEDIA_ROOT, path)
-        if os.path.exists(full):
-            with open(full, 'rb') as f:
-                result.append(normalize_image(f.read()))
+        try:
+            if upload_exists(path):
+                result.append(normalize_image(read_upload(path)))
+            else:
+                logger.warning(f"Producto no encontrado en GCS: {path}")
+        except Exception as e:
+            logger.warning(f"Error cargando imagen de producto {path}: {e}")
     return result
 
 
