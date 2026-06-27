@@ -61,12 +61,14 @@ def record_tokens(resp, operation: str = 'unknown', user_email: str = '', job_id
             output_tokens = getattr(usage, 'candidates_token_count', 0) or 0
             if input_tokens:
                 _redis_inc(f'cosmic:prom:G:input:{operation}', input_tokens)
-                cost_in = int(input_tokens * _GEMINI_INPUT_COST_PER_TOKEN / 1000)
+                # 0.075 microdólares/token (= $0.075 por 1M tokens)
+                cost_in = int(input_tokens * _GEMINI_INPUT_COST_PER_TOKEN)
                 if cost_in > 0:
                     _redis_inc(f'cosmic:prom:GC:{operation}', cost_in)
             if output_tokens:
                 _redis_inc(f'cosmic:prom:G:output:{operation}', output_tokens)
-                cost_out = int(output_tokens * _GEMINI_OUTPUT_COST_PER_TOKEN / 1000)
+                # 0.300 microdólares/token (= $0.30 por 1M tokens)
+                cost_out = int(output_tokens * _GEMINI_OUTPUT_COST_PER_TOKEN)
                 if cost_out > 0:
                     _redis_inc(f'cosmic:prom:GC:{operation}', cost_out)
     except Exception:
