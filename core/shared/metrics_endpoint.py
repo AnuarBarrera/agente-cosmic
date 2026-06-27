@@ -6,12 +6,18 @@ from prometheus_client import REGISTRY, CollectorRegistry, generate_latest, CONT
 
 def metrics_view(request):
     """
-    Endpoint /metrics con soporte multiprocess para Gunicorn + agregación Redis para rqworkers.
+    Endpoint /metrics con autenticación Bearer + soporte multiprocess Gunicorn + Redis.
 
-    - En modo multiprocess (PROMETHEUS_MULTIPROC_DIR set): usa MultiProcessCollector para
-      agregar todos los workers Gunicorn del mismo contenedor, más colectores de BD y Redis.
-    - En modo single-process (dev): usa el REGISTRY global directamente.
+    Requiere header: Authorization: Bearer <PROMETHEUS_METRICS_TOKEN>
+    Si la variable de entorno no está definida (dev local), el acceso es libre.
     """
+    expected_token = os.environ.get('PROMETHEUS_METRICS_TOKEN', '')
+    if expected_token:
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if auth_header != f'Bearer {expected_token}':
+            return HttpResponse('Unauthorized', status=401,
+                                content_type='text/plain')
+
     if 'PROMETHEUS_MULTIPROC_DIR' in os.environ:
         from prometheus_client import multiprocess
         from core.shared.metrics import (

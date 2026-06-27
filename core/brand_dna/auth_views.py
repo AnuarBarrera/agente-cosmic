@@ -530,6 +530,13 @@ def deactivate_account_view(request):
     user.deactivated_at = tz.now()
     user.save(update_fields=['is_active', 'deactivated_at'])
 
+    # Invalida todos los tokens JWT y sesiones activas en BD
+    try:
+        from core.tenant_management.services.jwt_service import CustomJWTService
+        CustomJWTService.logout_user(user)
+    except Exception:
+        pass
+
     if user.tenant:
         user.tenant.status = 'deactivated'
         user.tenant.save(update_fields=['status'])
