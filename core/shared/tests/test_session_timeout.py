@@ -19,7 +19,7 @@ def _activate_session_timeout(settings):
 @pytest.fixture
 def free_plan():
     plan, _ = Plan.objects.get_or_create(
-        name='Free',
+        name='User',
         defaults={
             'max_calendars_per_week': 2,
             'max_post_regenerations': 2,

@@ -26,7 +26,7 @@ class RegisterForm(forms.Form):
 
     def clean_email(self):
         email = self.cleaned_data['email'].lower().strip()
-        if User.objects.filter(email=email).exists():
+        if User.objects.filter(email=email, is_active=True).exists():
             raise ValidationError(
                 'Este correo no está disponible. Prueba iniciando sesión o recuperando tu contraseña.'
             )

@@ -14,7 +14,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def free_plan():
     from core.tenant_management.models import Plan
-    plan, _ = Plan.objects.get_or_create(name='Free', defaults={
+    plan, _ = Plan.objects.get_or_create(name='User', defaults={
         'max_calendars_per_week': 2, 'max_post_regenerations': 2,
         'max_post_edits': 2, 'price': 0,
     })

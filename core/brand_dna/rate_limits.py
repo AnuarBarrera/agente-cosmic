@@ -9,14 +9,14 @@ def get_user_plan(user):
         return user.tenant.subscription.plan
     except Exception:
         pass
-    _GROUP_TO_PLAN = {'admin': 'Admin', 'tester': 'Tester', 'user': 'Free'}
+    _GROUP_TO_PLAN = {'admin': 'Admin', 'tester': 'Tester', 'user': 'User'}
     group_names = set(user.groups.values_list('name', flat=True))
     for group_name, plan_name in _GROUP_TO_PLAN.items():
         if group_name in group_names:
             plan = Plan.objects.filter(name=plan_name).first()
             if plan:
                 return plan
-    return Plan.objects.filter(name='Free').first() or Plan(
+    return Plan.objects.filter(name='User').first() or Plan(
         max_calendars_per_week=2,
         max_post_regenerations=2,
         max_post_edits=2,

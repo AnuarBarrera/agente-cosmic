@@ -17,7 +17,7 @@ User = get_user_model()
 
 def _make_tenant(user):
     tenant = TenantModel.objects.create(name=user.email, status='active')
-    free, _ = Plan.objects.get_or_create(name='Free', defaults={
+    free, _ = Plan.objects.get_or_create(name='User', defaults={
         'max_calendars_per_week': 2, 'max_post_regenerations': 2,
         'max_post_edits': 2, 'price': 0,
     })
@@ -34,7 +34,7 @@ def client():
 
 @pytest.fixture
 def setup_plans_and_groups(db):
-    Plan.objects.get_or_create(name='Free', defaults={
+    Plan.objects.get_or_create(name='User', defaults={
         'max_calendars_per_week': 2, 'max_post_regenerations': 2, 'max_post_edits': 2,
     })
     Plan.objects.get_or_create(name='Tester', defaults={

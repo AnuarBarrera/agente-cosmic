@@ -360,6 +360,8 @@ class InvitationCode(models.Model):
             return False
         return True
 
+    _GROUP_TO_PLAN = {'admin': 'Admin', 'tester': 'Tester', 'user': 'User'}
+
     def redeem(self, user) -> bool:
         from django.contrib.auth.models import Group
         from django.db import transaction
@@ -370,6 +372,11 @@ class InvitationCode(models.Model):
             target, _ = Group.objects.get_or_create(name=locked.target_group)
             user.groups.clear()
             user.groups.add(target)
+            plan_name = self._GROUP_TO_PLAN.get(locked.target_group)
+            if plan_name and user.tenant:
+                plan = Plan.objects.filter(name=plan_name).first()
+                if plan:
+                    Subscription.objects.filter(tenant=user.tenant).update(plan=plan)
             locked.times_used += 1
             locked.save(update_fields=['times_used'])
             self.times_used = locked.times_used

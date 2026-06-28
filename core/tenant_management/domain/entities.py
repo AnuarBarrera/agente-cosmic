@@ -5,7 +5,8 @@ from enum import Enum
 from typing import Optional, Dict, Any
 
 class PlanName(Enum):
-    FREE = "Free"  # Reverted to match database data
+    FREE = "User"
+    USER = "User"
     PREMIUM = "Premium"
 
 class TenantStatus(Enum):

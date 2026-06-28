@@ -8,7 +8,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def free_plan():
     plan, _ = Plan.objects.get_or_create(
-        name='Free',
+        name='User',
         defaults={
             'max_calendars_per_week': 2,
             'max_post_regenerations': 2,

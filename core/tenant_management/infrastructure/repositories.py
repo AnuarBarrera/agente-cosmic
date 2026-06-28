@@ -77,9 +77,9 @@ class DjangoTenantRepository(TenantRepository):
                 plan_model = PlanModel.objects.get(name=plan_name)
             except PlanModel.DoesNotExist:
                 # Try case-insensitive search for common variations
-                if plan_name.lower() == 'free':
-                    # Try different capitalizations of "free"
-                    for variation in ['FREE', 'Free', 'free']:
+                if plan_name.lower() in ['free', 'user']:
+                    # Try different capitalizations of "user" (formerly "free")
+                    for variation in ['User', 'user', 'USER']:
                         try:
                             plan_model = PlanModel.objects.get(name=variation)
                             break
@@ -170,8 +170,8 @@ class DjangoTenantRepository(TenantRepository):
         # Normalize the string to handle different cases
         normalized = plan_name_str.lower()
         
-        if normalized == 'free':
-            return PlanName.FREE
+        if normalized in ['free', 'user']:
+            return PlanName.USER
         elif normalized in ['premium', 'pro']:
             return PlanName.PREMIUM
         else:
@@ -179,8 +179,8 @@ class DjangoTenantRepository(TenantRepository):
             try:
                 return PlanName(plan_name_str)
             except ValueError:
-                # Default to FREE if unknown
-                return PlanName.FREE
+                # Default to USER if unknown
+                return PlanName.USER
 
 class DjangoUsageRecordRepository(UsageRecordRepository):
     def add_record(self, tenant_id: uuid.UUID, count: int) -> None:

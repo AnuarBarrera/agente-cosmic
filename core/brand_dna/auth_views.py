@@ -27,7 +27,7 @@ def provision_tenant(user):
         return user.tenant
 
     tenant = TenantModel.objects.create(name=user.email, status='active')
-    free_plan = Plan.objects.filter(name='Free').first()
+    free_plan = Plan.objects.filter(name='User').first()
     if free_plan:
         Subscription.objects.create(tenant=tenant, plan=free_plan)
     user.tenant = tenant
@@ -269,7 +269,11 @@ def login_view(request):
                     return redirect(next_url)
                 cache.set(cache_key, attempts + 1, _LOGIN_LOCKOUT_SECONDS)
                 LOGIN_ATTEMPTS.labels(result='failed').inc()
-                error = 'Correo o contraseña incorrectos.'
+                deactivated = User.objects.filter(email=email, is_active=False).first()
+                if deactivated:
+                    error = 'Tu cuenta está desactivada. Regístrate de nuevo con este correo para reactivarla.'
+                else:
+                    error = 'Correo o contraseña incorrectos.'
     else:
         form = LoginForm()
 
@@ -575,7 +579,12 @@ def reactivate_account_view(request, token):
 
     user.is_active = True
     user.deactivated_at = None
-    user.save(update_fields=['is_active', 'deactivated_at'])
+    new_password = verification.user_data.get('password')
+    if new_password:
+        user.password = new_password
+        user.save(update_fields=['is_active', 'deactivated_at', 'password'])
+    else:
+        user.save(update_fields=['is_active', 'deactivated_at'])
 
     if user.tenant:
         user.tenant.status = 'active'
