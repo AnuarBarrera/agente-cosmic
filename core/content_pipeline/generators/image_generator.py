@@ -373,31 +373,33 @@ class ImageGenerator:
             logger.warning(f"Brand scene analysis failed (fallback): {e}")
         return _FALLBACK
 
+    _SAFE_CONSTRAINTS = (
+        " DSLR camera quality, shallow depth of field, photorealistic. "
+        "NOT a CGI render. NOT a 3D illustration. NOT abstract shapes. NOT minimalist. "
+        "Absolutely NO text, NO letters, NO words, NO logos, NO UI elements anywhere."
+    )
+
     def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', max_qc_retries: int = 2) -> bytes:
         scene_prompt = self._analyze_brand_scene(caption, keywords or [], description, tone, colors)
-        # Hard constraints appended regardless of what Gemini generated
-        prompt = (
-            f"{scene_prompt} "
-            f"DSLR camera quality, shallow depth of field, photorealistic. "
-            f"NOT a CGI render. NOT a 3D illustration. NOT abstract shapes. NOT minimalist. "
-            f"Absolutely NO text, NO letters, NO words, NO logos, NO UI elements anywhere."
-        )
+        prompt = scene_prompt + self._SAFE_CONSTRAINTS
         logger.info(f"Background prompt (first 150): {prompt[:150]}")
         last_bytes = None
         total_attempts = max_qc_retries + 1
         for attempt in range(total_attempts):
-            last_bytes = self._generate_with_retry(prompt)
+            try:
+                last_bytes = self._generate_with_retry(prompt)
+            except ValueError:
+                # Imagen rechazó el prompt (filtro de contenido) — reintenta con escena neutral
+                fallback_scene = self._SCENE_FALLBACKS[attempt % len(self._SCENE_FALLBACKS)]
+                prompt = fallback_scene + self._SAFE_CONSTRAINTS
+                logger.warning(f"Imagen rechazó prompt (intento {attempt + 1}), usando escena neutral: {fallback_scene[:60]}...")
+                last_bytes = self._generate_with_retry(prompt)
             if self._validate_background(last_bytes):
                 return last_bytes
             if attempt < max_qc_retries:
                 logger.warning(f"Background QC failed (attempt {attempt + 1}/{total_attempts}), regenerando con nueva escena...")
                 scene_prompt = self._analyze_brand_scene(caption, keywords or [], description, tone, colors)
-                prompt = (
-                    f"{scene_prompt} "
-                    f"DSLR camera quality, shallow depth of field, photorealistic. "
-                    f"NOT a CGI render. NOT abstract. "
-                    f"Absolutely NO text, NO letters, NO words, NO logos, NO UI elements anywhere."
-                )
+                prompt = scene_prompt + self._SAFE_CONSTRAINTS
         logger.warning("Background QC: reintentos agotados, usando última imagen generada")
         return last_bytes
 
