@@ -89,6 +89,7 @@ def content_generation_task(job_id: str) -> None:
                     brand_name=brand_dna.business_name,
                     keywords=brand_dna.keywords,
                     description=brand_dna.description,
+                    audience=brand_dna.audience,
                     product_image_bytes=day_product,
                 )
             else:
@@ -147,6 +148,7 @@ def send_daily_email_task(post_id: str) -> None:
                 brand_name=brand_dna.business_name,
                 keywords=brand_dna.keywords,
                 description=brand_dna.description,
+                audience=brand_dna.audience,
                 product_image_bytes=product_image_bytes,
             )
             post.save(update_fields=['image_url'])

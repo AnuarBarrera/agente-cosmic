@@ -145,9 +145,9 @@ class ImageGenerator:
     def __init__(self, bucket_name: str):
         self._bucket = bucket_name
 
-    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2) -> str:
+    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2) -> str:
         try:
-            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description, product_image_bytes=product_image_bytes, max_qc_retries=max_qc_retries)
+            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description, audience=audience, product_image_bytes=product_image_bytes, max_qc_retries=max_qc_retries)
             return self._upload_to_storage(image_bytes, filename)
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")
@@ -157,7 +157,7 @@ class ImageGenerator:
     # Layered pipeline
     # ------------------------------------------------------------------
 
-    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2) -> bytes:
+    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2) -> bytes:
         if product_image_bytes:
             kw_str = ', '.join((keywords or [])[:3])
             brand_context = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
@@ -171,7 +171,7 @@ class ImageGenerator:
                 result = self._render_html_template(background_bytes, content, colors, svg_overlay='')
             return result
         else:
-            background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, max_qc_retries=max_qc_retries)
+            background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
             kw_str = ', '.join((keywords or [])[:4])
             brand_ctx = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
             content = self._generate_post_content(caption, product_image_bytes=None, brand_context=brand_ctx)
@@ -316,47 +316,86 @@ class ImageGenerator:
         return ''
 
     _SCENE_FALLBACKS = [
-        "warm coffee shop interior, wooden tables, ambient light, steam from cups, cozy atmosphere",
-        "outdoor urban street scene, city architecture, natural daylight, people in motion blur",
-        "lush tropical plants and leaves, natural textures, soft green light filtering through",
-        "modern kitchen counter, fresh fruits and ingredients, warm morning light",
-        "beach or coastal scene, sand and waves, golden hour light, natural calm",
-        "vibrant local market, colorful products, warm candid atmosphere, authentic textures",
-        "creative studio workspace with paints, fabrics and textures — no screens",
-        "rooftop terrace at sunset, city skyline far in background, warm bokeh",
-        "minimalist zen garden, stones, water, natural wood textures, soft diffused light",
-        "artisanal workshop with hands working on materials, tools, warm focused light",
+        "warm coffee shop interior, wooden tables, ambient light, steam from cups, cozy atmosphere — no signs, no text",
+        "lush tropical plants and leaves, natural textures, soft green light filtering through — no text",
+        "modern kitchen counter, fresh fruits and ingredients, warm morning light — no text, no labels",
+        "beach or coastal scene, sand and waves, golden hour light, natural calm — no text",
+        "creative studio workspace with paints, fabrics and textures, no screens, no signs",
+        "rooftop terrace at sunset, city skyline far in background, warm bokeh — no text",
+        "minimalist zen garden, stones, water, natural wood textures, soft diffused light — no text",
+        "lush green forest path, dappled sunlight through leaves, peaceful atmosphere — no text",
+        "abstract warm bokeh lights, soft golden tones, shallow depth of field — no objects, no text",
+        "rustic wooden surface with natural props, warm candid atmosphere — no text, no signs",
     ]
 
-    def _analyze_brand_scene(self, caption: str, keywords: list[str], description: str, tone: str, colors: list[str]) -> str:
-        """Gemini Art Director: analiza la marca y genera prompt de escena lifestyle creativa.
-        Evita explícitamente escenas de oficina, laptops y escritorios."""
+    _PRODUCT_FALLBACKS = [
+        "colorful ice cream scoops and popsicles arranged on a vibrant pastel surface, overhead flat lay, studio lighting — no people, no text",
+        "fresh colorful food products arranged artfully on marble, top-down product photography — no people, no text",
+        "festive colorful balloons and ribbons on pastel background, party decoration flat lay — no people, no text",
+        "close-up of colorful frozen treats with vibrant sprinkles, shallow depth of field — no people, no text",
+        "abstract colorful bokeh background, festive warm tones, soft light — no people, no objects, no text",
+        "vibrant tropical fruits and sweet treats scattered on white background, product photography — no people, no text",
+        "artful arrangement of colorful sweets on wooden board, warm bokeh background — no people, no text",
+        "colorful gradient pastel background with soft light bokeh, festive feel — no people, no text",
+        "product photography of colorful treats on white marble, minimal props, studio light — no people, no text",
+    ]
+
+    _MINOR_KEYWORDS = frozenset([
+        'niños', 'ninos', 'niño', 'nino', 'kids', 'kid', 'infantil', 'menores', 'menor',
+        'children', 'child', 'bebés', 'bebes', 'bebé', 'bebe', 'escolares', 'escolar',
+        'infantes', 'infante', 'infant', 'infancia', 'preescolar',
+    ])
+
+    @classmethod
+    def _targets_minors(cls, audience: str) -> bool:
+        lower = (audience or '').lower()
+        return any(k in lower for k in cls._MINOR_KEYWORDS)
+
+    def _analyze_brand_scene(self, caption: str, keywords: list[str], description: str, tone: str, colors: list[str], audience: str = '') -> str:
+        """Gemini Art Director: genera prompt de escena para Imagen.
+        Si la audiencia incluye menores usa fotografía de producto (sin personas) para evitar content safety de Imagen."""
         color_str = ', '.join(colors[:3]) if colors else 'warm neutrals'
         kw_str = ', '.join(keywords[:4]) if keywords else ''
         brand_ctx = description[:180] if description else caption[:180]
-        # Fallback determinístico basado en brand_ctx — no aleatorio
+        targets_minors = self._targets_minors(audience)
+
         _FALLBACK = (
-            f"Real-world lifestyle photograph inspired by: {brand_ctx[:100]}. "
+            f"Real-world {'product photography' if targets_minors else 'lifestyle photograph'} inspired by: {brand_ctx[:100]}. "
             f"Natural lighting, shallow depth of field. Color palette: {color_str}. Mood: {tone}. "
-            f"Authentic setting, real textures, professional photography style. "
+            f"{'NO people, NO children, NO hands. Focus on the product itself.' if targets_minors else 'Authentic setting, real textures, professional photography style.'} "
             f"NO laptops, NO computers, NO phones, NO desk, NO office, NO keyboard. "
             f"NO text, NO logos, NO UI elements. Square 1:1 format. Photorealistic."
         )
         try:
             client = _vertex_client()
-            prompt = (
-                f"You are an Art Director creating Instagram post backgrounds for brand advertising.\n"
-                f"Brand description: {brand_ctx}. Keywords: {kw_str}. Tone: {tone}. Colors: {color_str}.\n\n"
-                f"Generate ONE Imagen 3 prompt (max 80 words) for a LIFESTYLE BACKGROUND PHOTO that visually represents THIS SPECIFIC brand.\n"
-                f"Rules:\n"
-                f"- The scene must reflect the brand's actual industry and customers, not generic imagery\n"
-                f"- ABSOLUTELY NO offices, laptops, computers, desks, keyboards, or screens\n"
-                f"- Think: what does the brand's world look, smell and feel like? What environment do their customers live in?\n"
-                f"- The scene should feel aspirational and authentic — real textures, natural light, depth\n"
-                f"- Choose from: service environment, customer lifestyle moment, product context, nature matching brand values\n\n"
-                f"End with: 'Natural lighting. Photorealistic. NO text. NO logos.'\n"
-                f"Return ONLY the prompt text, no explanations."
-            )
+            if targets_minors:
+                prompt = (
+                    f"You are an Art Director creating Instagram post backgrounds for brand advertising.\n"
+                    f"Brand description: {brand_ctx}. Keywords: {kw_str}. Tone: {tone}. Colors: {color_str}.\n\n"
+                    f"Generate ONE Imagen 3 prompt (max 80 words) for a PRODUCT PHOTOGRAPHY scene.\n"
+                    f"Rules:\n"
+                    f"- Focus ENTIRELY on the product, food, or objects — ABSOLUTELY NO people, NO children, NO faces, NO hands\n"
+                    f"- Think: overhead flat lay, artful product arrangement, close-up food textures\n"
+                    f"- Use props that match brand colors and mood (festive elements, ingredients, packaging)\n"
+                    f"- Professional food/product photography style: soft natural light, beautiful textures, depth\n"
+                    f"- STRICTLY no human elements of any kind\n\n"
+                    f"End with: 'Natural lighting. Photorealistic. NO text. NO logos. NO people.'\n"
+                    f"Return ONLY the prompt text, no explanations."
+                )
+            else:
+                prompt = (
+                    f"You are an Art Director creating Instagram post backgrounds for brand advertising.\n"
+                    f"Brand description: {brand_ctx}. Keywords: {kw_str}. Tone: {tone}. Colors: {color_str}.\n\n"
+                    f"Generate ONE Imagen 3 prompt (max 80 words) for a LIFESTYLE BACKGROUND PHOTO that visually represents THIS SPECIFIC brand.\n"
+                    f"Rules:\n"
+                    f"- The scene must reflect the brand's actual industry and customers, not generic imagery\n"
+                    f"- ABSOLUTELY NO offices, laptops, computers, desks, keyboards, or screens\n"
+                    f"- Think: what does the brand's world look, smell and feel like? What environment do their customers live in?\n"
+                    f"- The scene should feel aspirational and authentic — real textures, natural light, depth\n"
+                    f"- Choose from: service environment, customer lifestyle moment, product context, nature matching brand values\n\n"
+                    f"End with: 'Natural lighting. Photorealistic. NO text. NO logos.'\n"
+                    f"Return ONLY the prompt text, no explanations."
+                )
             with track_external_api('gemini', operation='image_bg'):
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL,
@@ -367,7 +406,7 @@ class ImageGenerator:
                           response_preview=resp.text[:500] if resp.text else '')
             result = resp.text.strip().strip('"').strip("'")
             if len(result) > 20:
-                logger.info(f"Brand scene prompt: {result[:120]}...")
+                logger.info(f"Brand scene prompt ({'product' if targets_minors else 'lifestyle'}): {result[:120]}...")
                 return result
         except Exception as e:
             logger.warning(f"Brand scene analysis failed (fallback): {e}")
@@ -379,26 +418,28 @@ class ImageGenerator:
         "Absolutely NO text, NO letters, NO words, NO logos, NO UI elements anywhere."
     )
 
-    def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', max_qc_retries: int = 2) -> bytes:
-        scene_prompt = self._analyze_brand_scene(caption, keywords or [], description, tone, colors)
+    def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2) -> bytes:
+        targets_minors = self._targets_minors(audience)
+        fallbacks = self._PRODUCT_FALLBACKS if targets_minors else self._SCENE_FALLBACKS
+        scene_prompt = self._analyze_brand_scene(caption, keywords or [], description, tone, colors, audience=audience)
         prompt = scene_prompt + self._SAFE_CONSTRAINTS
-        logger.info(f"Background prompt (first 150): {prompt[:150]}")
+        logger.info(f"Background prompt ({'product' if targets_minors else 'lifestyle'}, first 150): {prompt[:150]}")
         last_bytes = None
         total_attempts = max_qc_retries + 1
         for attempt in range(total_attempts):
             try:
                 last_bytes = self._generate_with_retry(prompt)
             except ValueError:
-                # Imagen rechazó el prompt (filtro de contenido) — reintenta con escena neutral
-                fallback_scene = self._SCENE_FALLBACKS[attempt % len(self._SCENE_FALLBACKS)]
+                # Imagen rechazó el prompt (filtro de contenido) — reintenta con escena de fallback
+                fallback_scene = fallbacks[attempt % len(fallbacks)]
                 prompt = fallback_scene + self._SAFE_CONSTRAINTS
-                logger.warning(f"Imagen rechazó prompt (intento {attempt + 1}), usando escena neutral: {fallback_scene[:60]}...")
+                logger.warning(f"Imagen rechazó prompt (intento {attempt + 1}), usando {'escena de producto' if targets_minors else 'escena neutral'}: {fallback_scene[:60]}...")
                 last_bytes = self._generate_with_retry(prompt)
             if self._validate_background(last_bytes):
                 return last_bytes
             if attempt < max_qc_retries:
                 logger.warning(f"Background QC failed (attempt {attempt + 1}/{total_attempts}), regenerando con nueva escena...")
-                scene_prompt = self._analyze_brand_scene(caption, keywords or [], description, tone, colors)
+                scene_prompt = self._analyze_brand_scene(caption, keywords or [], description, tone, colors, audience=audience)
                 prompt = scene_prompt + self._SAFE_CONSTRAINTS
         logger.warning("Background QC: reintentos agotados, usando última imagen generada")
         return last_bytes
