@@ -18,7 +18,10 @@
 
   {% if day1 %}
   <div style="background: #f9f9f9; padding: 16px 20px; border-left: 4px solid #e94560; border-radius: 4px; margin: 20px 0;">
-    <p style="margin: 0 0 6px; font-size: 0.85rem; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Vista previa — Día 1</p>
+    <p style="margin: 0 0 10px; font-size: 0.85rem; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Vista previa — Día 1</p>
+    {% if day1.image_url %}
+    <img src="{{ day1.image_url }}" style="width: 100%; border-radius: 8px; margin-bottom: 12px; display: block;" alt="Post Día 1">
+    {% endif %}
     <p style="margin: 0 0 8px; font-size: 0.95rem; line-height: 1.5;">{{ day1.caption }}</p>
     <p style="margin: 0; font-size: 0.82rem; color: #aaa;">{{ day1.hashtags|join:" " }}</p>
   </div>
