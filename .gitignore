@@ -62,3 +62,4 @@ google-cloud-cli-*.tar.gz
 # Documentos internos de seguridad — no exponer en repo público
 .cibersec-exceptions.md
 ciberaudit.txt
+hallazgos.txt
