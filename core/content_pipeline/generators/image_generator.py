@@ -343,74 +343,76 @@ class ImageGenerator:
     _MINOR_KEYWORDS = frozenset([
         'niños', 'ninos', 'niño', 'nino', 'kids', 'kid', 'infantil', 'menores', 'menor',
         'children', 'child', 'bebés', 'bebes', 'bebé', 'bebe', 'escolares', 'escolar',
-        'infantes', 'infante', 'infant', 'infancia', 'preescolar',
+        'escuelas', 'escuela', 'colegio', 'colegios', 'infantes', 'infante', 'infant',
+        'infancia', 'preescolar', 'jardín de niños', 'jardin de ninos',
     ])
 
     @classmethod
-    def _targets_minors(cls, audience: str) -> bool:
-        lower = (audience or '').lower()
-        return any(k in lower for k in cls._MINOR_KEYWORDS)
+    def _targets_minors(cls, audience: str, description: str = '') -> bool:
+        text = f"{audience or ''} {description or ''}".lower()
+        return any(k in text for k in cls._MINOR_KEYWORDS)
 
-    def _analyze_brand_scene(self, caption: str, keywords: list[str], description: str, tone: str, colors: list[str], audience: str = '') -> str:
-        """Gemini Art Director: genera prompt de escena para Imagen.
-        Si la audiencia incluye menores usa fotografía de producto (sin personas) para evitar content safety de Imagen."""
+    def _analyze_brand_scene(self, caption: str, keywords: list[str], description: str, tone: str, colors: list[str], audience: str = '') -> tuple[str, bool]:
+        """Gemini Art Director: decide el modo (product/lifestyle) y genera el prompt para Imagen 3.
+        Retorna (scene_prompt, product_mode). Gemini evalúa si la escena natural de la marca
+        activaría el content safety de Imagen (menores, eventos infantiles) y elige el modo."""
         color_str = ', '.join(colors[:3]) if colors else 'warm neutrals'
         kw_str = ', '.join(keywords[:4]) if keywords else ''
         brand_ctx = description[:180] if description else caption[:180]
-        targets_minors = self._targets_minors(audience)
+        # Detección rápida por keywords como safety net si Gemini falla
+        keyword_product_mode = self._targets_minors(audience, description)
 
-        _FALLBACK = (
-            f"Real-world {'product photography' if targets_minors else 'lifestyle photograph'} inspired by: {brand_ctx[:100]}. "
+        _FALLBACK_PROMPT = (
+            f"Real-world {'product photography' if keyword_product_mode else 'lifestyle photograph'} inspired by: {brand_ctx[:100]}. "
             f"Natural lighting, shallow depth of field. Color palette: {color_str}. Mood: {tone}. "
-            f"{'NO people, NO children, NO hands. Focus on the product itself.' if targets_minors else 'Authentic setting, real textures, professional photography style.'} "
+            f"{'NO people, NO children, NO hands. Focus on the product itself.' if keyword_product_mode else 'Authentic setting, real textures, professional photography style.'} "
             f"NO laptops, NO computers, NO phones, NO desk, NO office, NO keyboard. "
             f"NO text, NO logos, NO UI elements. Square 1:1 format. Photorealistic."
         )
         try:
             client = _vertex_client()
-            if targets_minors:
-                prompt = (
-                    f"You are an Art Director creating Instagram post backgrounds for brand advertising.\n"
-                    f"Brand description: {brand_ctx}. Keywords: {kw_str}. Tone: {tone}. Colors: {color_str}.\n\n"
-                    f"Generate ONE Imagen 3 prompt (max 80 words) for a PRODUCT PHOTOGRAPHY scene.\n"
-                    f"Rules:\n"
-                    f"- Focus ENTIRELY on the product, food, or objects — ABSOLUTELY NO people, NO children, NO faces, NO hands\n"
-                    f"- Think: overhead flat lay, artful product arrangement, close-up food textures\n"
-                    f"- Use props that match brand colors and mood (festive elements, ingredients, packaging)\n"
-                    f"- Professional food/product photography style: soft natural light, beautiful textures, depth\n"
-                    f"- STRICTLY no human elements of any kind\n\n"
-                    f"End with: 'Natural lighting. Photorealistic. NO text. NO logos. NO people.'\n"
-                    f"Return ONLY the prompt text, no explanations."
-                )
-            else:
-                prompt = (
-                    f"You are an Art Director creating Instagram post backgrounds for brand advertising.\n"
-                    f"Brand description: {brand_ctx}. Keywords: {kw_str}. Tone: {tone}. Colors: {color_str}.\n\n"
-                    f"Generate ONE Imagen 3 prompt (max 80 words) for a LIFESTYLE BACKGROUND PHOTO that visually represents THIS SPECIFIC brand.\n"
-                    f"Rules:\n"
-                    f"- The scene must reflect the brand's actual industry and customers, not generic imagery\n"
-                    f"- ABSOLUTELY NO offices, laptops, computers, desks, keyboards, or screens\n"
-                    f"- Think: what does the brand's world look, smell and feel like? What environment do their customers live in?\n"
-                    f"- The scene should feel aspirational and authentic — real textures, natural light, depth\n"
-                    f"- Choose from: service environment, customer lifestyle moment, product context, nature matching brand values\n\n"
-                    f"End with: 'Natural lighting. Photorealistic. NO text. NO logos.'\n"
-                    f"Return ONLY the prompt text, no explanations."
-                )
+            gemini_prompt = (
+                f"You are an Art Director creating Instagram post backgrounds for brand advertising.\n"
+                f"Brand: {brand_ctx}. Audience: {(audience or '')[:120]}. Keywords: {kw_str}. Tone: {tone}. Colors: {color_str}.\n\n"
+                f"STEP 1 — Imagen 3 content safety check:\n"
+                f"Imagen 3 BLOCKS any scene that includes or implies: children, minors, school events with kids,\n"
+                f"birthday parties with children, or any person under 18 years old.\n"
+                f"Would a natural lifestyle photo for this brand risk triggering that restriction?\n\n"
+                f"STEP 2 — Generate a background prompt (max 80 words):\n"
+                f"- If risk=YES → mode=\"product\": focus on the product/food/objects only, NO people of any age, NO hands.\n"
+                f"  Think: overhead flat lay, artful food arrangement, colorful props matching brand palette.\n"
+                f"- If risk=NO  → mode=\"lifestyle\": real-world scene reflecting the brand's world and customers.\n"
+                f"  Think: service environment, lifestyle moment, nature matching brand values. NO offices or screens.\n\n"
+                f"Both modes: real textures, natural light, depth. "
+                f"End with: 'Natural lighting. Photorealistic. NO text. NO logos.' (add 'NO people.' if mode=product)\n\n"
+                f"Respond ONLY with this JSON (no markdown, no explanation):\n"
+                f'{{\"mode\": \"product\", \"prompt\": \"...\"}} or {{\"mode\": \"lifestyle\", \"prompt\": \"...\"}}'
+            )
             with track_external_api('gemini', operation='image_bg'):
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL,
-                    contents=prompt,
+                    contents=gemini_prompt,
                 )
             record_tokens(resp, operation='image_bg',
-                          prompt_preview=prompt[:500],
+                          prompt_preview=gemini_prompt[:500],
                           response_preview=resp.text[:500] if resp.text else '')
-            result = resp.text.strip().strip('"').strip("'")
-            if len(result) > 20:
-                logger.info(f"Brand scene prompt ({'product' if targets_minors else 'lifestyle'}): {result[:120]}...")
-                return result
+            raw = resp.text.strip()
+            match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                mode = data.get('mode', '')
+                scene_prompt = (data.get('prompt') or '').strip().strip('"').strip("'")
+                if mode in ('product', 'lifestyle') and len(scene_prompt) > 20:
+                    product_mode = (mode == 'product')
+                    logger.info(f"Brand scene prompt (mode={mode}): {scene_prompt[:120]}...")
+                    return scene_prompt, product_mode
+            # Gemini respondió texto libre sin JSON válido — intentar extraer el prompt
+            if len(raw) > 20:
+                logger.warning("image_bg: Gemini no devolvió JSON válido, usando keyword fallback para modo")
+                return raw[:400], keyword_product_mode
         except Exception as e:
             logger.warning(f"Brand scene analysis failed (fallback): {e}")
-        return _FALLBACK
+        return _FALLBACK_PROMPT, keyword_product_mode
 
     _SAFE_CONSTRAINTS = (
         " DSLR camera quality, shallow depth of field, photorealistic. "
@@ -419,27 +421,26 @@ class ImageGenerator:
     )
 
     def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2) -> bytes:
-        targets_minors = self._targets_minors(audience)
-        fallbacks = self._PRODUCT_FALLBACKS if targets_minors else self._SCENE_FALLBACKS
-        scene_prompt = self._analyze_brand_scene(caption, keywords or [], description, tone, colors, audience=audience)
+        scene_prompt, product_mode = self._analyze_brand_scene(caption, keywords or [], description, tone, colors, audience=audience)
+        fallbacks = self._PRODUCT_FALLBACKS if product_mode else self._SCENE_FALLBACKS
         prompt = scene_prompt + self._SAFE_CONSTRAINTS
-        logger.info(f"Background prompt ({'product' if targets_minors else 'lifestyle'}, first 150): {prompt[:150]}")
+        logger.info(f"Background prompt (mode={'product' if product_mode else 'lifestyle'}, first 150): {prompt[:150]}")
         last_bytes = None
         total_attempts = max_qc_retries + 1
         for attempt in range(total_attempts):
             try:
                 last_bytes = self._generate_with_retry(prompt)
             except ValueError:
-                # Imagen rechazó el prompt (filtro de contenido) — reintenta con escena de fallback
                 fallback_scene = fallbacks[attempt % len(fallbacks)]
                 prompt = fallback_scene + self._SAFE_CONSTRAINTS
-                logger.warning(f"Imagen rechazó prompt (intento {attempt + 1}), usando {'escena de producto' if targets_minors else 'escena neutral'}: {fallback_scene[:60]}...")
+                logger.warning(f"Imagen rechazó prompt (intento {attempt + 1}), usando {'producto' if product_mode else 'escena neutral'}: {fallback_scene[:60]}...")
                 last_bytes = self._generate_with_retry(prompt)
             if self._validate_background(last_bytes):
                 return last_bytes
             if attempt < max_qc_retries:
                 logger.warning(f"Background QC failed (attempt {attempt + 1}/{total_attempts}), regenerando con nueva escena...")
-                scene_prompt = self._analyze_brand_scene(caption, keywords or [], description, tone, colors, audience=audience)
+                scene_prompt, product_mode = self._analyze_brand_scene(caption, keywords or [], description, tone, colors, audience=audience)
+                fallbacks = self._PRODUCT_FALLBACKS if product_mode else self._SCENE_FALLBACKS
                 prompt = scene_prompt + self._SAFE_CONSTRAINTS
         logger.warning("Background QC: reintentos agotados, usando última imagen generada")
         return last_bytes
