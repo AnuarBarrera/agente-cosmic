@@ -1,37 +1,33 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>Tu ADN de Marca — Agente Cosmic</title></head>
-<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
-  <h1 style="color: #1a1a2e;">Tu ADN de Marca esta listo</h1>
-  <p>Hola, aqui esta el analisis completo de <strong>{{ brand_dna.business_name }}</strong>.</p>
+<head><meta charset="utf-8"><title>Tu calendario está listo — Agente Cosmic</title></head>
+<body style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px 20px; color: #333;">
 
-  <h2 style="border-bottom: 2px solid #e94560; padding-bottom: 8px;">ADN de Marca</h2>
-  <p><strong>Descripcion:</strong> {{ brand_dna.description }}</p>
-  <p><strong>Audiencia:</strong> {{ brand_dna.audience }}</p>
-  <p><strong>Tono:</strong> {{ brand_dna.tone }}</p>
-  <p><strong>Keywords:</strong> {{ brand_dna.keywords|join:", " }}</p>
-  {% if brand_dna.primary_colors %}
-  <p><strong>Colores de marca:</strong> {{ brand_dna.primary_colors|join:", " }}</p>
-  {% endif %}
+  <p style="font-size: 1.1rem; margin-bottom: 8px;">Hola,</p>
+  <p>Tu calendario de contenido para <strong>{{ brand_dna.business_name }}</strong> ya está listo.</p>
 
-  <h2 style="border-bottom: 2px solid #e94560; padding-bottom: 8px;">Tu Calendario de Contenido</h2>
-  {% for post in posts %}
-  <div style="background: #f9f9f9; padding: 12px; margin: 8px 0; border-left: 4px solid #e94560;">
-    <strong>Dia {{ post.day_number }}</strong> — {{ post.suggested_time|time:"H:i" }}
-    <p>{{ post.caption }}</p>
-    <small>{{ post.hashtags|join:" " }}</small>
+  <p>Generamos 7 posts con imágenes personalizadas para tu marca. Puedes revisarlos y aprobarlos desde la plataforma:</p>
+
+  <div style="text-align: center; margin: 28px 0;">
+    <a href="{{ calendar_url }}"
+       style="display: inline-block; padding: 14px 32px; background: #e94560; color: #fff;
+              border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 1rem;">
+      Ver mi calendario →
+    </a>
   </div>
-  {% endfor %}
 
-  <h2 style="border-bottom: 2px solid #e94560; padding-bottom: 8px;">Contenido del Dia 1</h2>
-  <p>{{ day1.caption }}</p>
-  {% if day1.image_url %}
-  <img src="{{ day1.image_url }}" style="max-width: 100%; border-radius: 8px;" alt="Post dia 1">
+  {% if day1 %}
+  <div style="background: #f9f9f9; padding: 16px 20px; border-left: 4px solid #e94560; border-radius: 4px; margin: 20px 0;">
+    <p style="margin: 0 0 6px; font-size: 0.85rem; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Vista previa — Día 1</p>
+    <p style="margin: 0 0 8px; font-size: 0.95rem; line-height: 1.5;">{{ day1.caption }}</p>
+    <p style="margin: 0; font-size: 0.82rem; color: #aaa;">{{ day1.hashtags|join:" " }}</p>
+  </div>
   {% endif %}
-  <p>Hashtags: {{ day1.hashtags|join:" " }}</p>
-  <p><em>Manana recibiras el contenido del Dia 2 en este correo.</em></p>
 
-  <hr>
-  <p style="font-size: 12px; color: #999;">Agente Cosmic — Powered by Google Cloud</p>
+  <p style="color: #555;">A partir de mañana recibirás un correo diario con el post del día, en el horario que programaste para cada uno.</p>
+
+  <hr style="border: none; border-top: 1px solid #eee; margin: 28px 0;">
+  <p style="font-size: 11px; color: #bbb; margin: 0;">Agente Cosmic · agente-cosmic.anuarbarrera.dev</p>
+
 </body>
 </html>

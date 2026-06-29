@@ -15,10 +15,11 @@ class EmailSender:
     def send_initial(self, job: AnalysisJob, brand_dna: BrandDNA, calendar: ContentCalendar) -> None:
         posts = list(calendar.posts.order_by('day_number'))
         day1 = posts[0] if posts else None
+        calendar_url = settings.COSMIC_BASE_URL + reverse('calendar_review', args=[job.id])
         html = render_to_string('content_pipeline/email_initial.html', {
             'brand_dna': brand_dna,
-            'posts': posts,
             'day1': day1,
+            'calendar_url': calendar_url,
         })
         name = brand_dna.business_name.strip() if brand_dna.business_name else ''
         subject = f'Tu plan de contenido está listo — {name}' if name else 'Tu plan de contenido está listo — Agente Cosmic'
