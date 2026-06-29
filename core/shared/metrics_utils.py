@@ -51,7 +51,7 @@ def track_external_api(service: str, operation: str = ''):
         raise
 
 
-def record_tokens(resp, operation: str = 'unknown', user_email: str = '', job_id: str = '', response_preview: str = ''):
+def record_tokens(resp, operation: str = 'unknown', user_email: str = '', job_id: str = '', response_preview: str = '', prompt_preview: str = ''):
     input_tokens = 0
     output_tokens = 0
     try:
@@ -84,7 +84,8 @@ def record_tokens(resp, operation: str = 'unknown', user_email: str = '', job_id
             'input_tokens': input_tokens,
             'output_tokens': output_tokens,
             'est_cost_usd': round((input_tokens * 0.075 + output_tokens * 0.300) / 1_000_000, 6),
-            'response_preview': (response_preview or '')[:300],
+            'prompt_preview': (prompt_preview or '')[:500],
+            'response_preview': (response_preview or '')[:500],
         }, ensure_ascii=False))
     except Exception:
         pass

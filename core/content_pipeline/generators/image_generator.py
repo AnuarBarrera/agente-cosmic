@@ -231,7 +231,9 @@ class ImageGenerator:
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=[image_part, prompt],
                 )
-            record_tokens(resp, operation='image_product', response_preview=resp.text[:200] if resp.text else '')
+            record_tokens(resp, operation='image_product',
+                          prompt_preview=prompt[:500],
+                          response_preview=resp.text[:500] if resp.text else '')
             result = resp.text.strip().strip('"').strip("'")
             if result:
                 logger.info(f"Art Director env prompt: {result[:100]}...")
@@ -301,7 +303,9 @@ class ImageGenerator:
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=[image_part, prompt],
                 )
-            record_tokens(resp, operation='svg_overlay')
+            record_tokens(resp, operation='svg_overlay',
+                          prompt_preview=prompt[:500],
+                          response_preview=resp.text[:500] if resp.text else '')
             raw = resp.text.strip()
             svg_match = re.search(r'<svg[\s\S]*?</svg>', raw, re.DOTALL)
             if svg_match:
@@ -358,7 +362,9 @@ class ImageGenerator:
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=prompt,
                 )
-            record_tokens(resp, operation='image_bg', response_preview=resp.text[:200] if resp.text else '')
+            record_tokens(resp, operation='image_bg',
+                          prompt_preview=prompt[:500],
+                          response_preview=resp.text[:500] if resp.text else '')
             result = resp.text.strip().strip('"').strip("'")
             if len(result) > 20:
                 logger.info(f"Brand scene prompt: {result[:120]}...")
@@ -417,7 +423,9 @@ class ImageGenerator:
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=[image_part, prompt],
                 )
-            record_tokens(resp, operation='image_qc')
+            record_tokens(resp, operation='image_qc',
+                          prompt_preview=prompt[:500],
+                          response_preview=resp.text[:500] if resp.text else '')
             raw = resp.text.strip()
             match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
             if match:
@@ -458,7 +466,9 @@ class ImageGenerator:
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=[image_part, prompt],
                 )
-            record_tokens(resp, operation='image_qc')
+            record_tokens(resp, operation='image_qc',
+                          prompt_preview=prompt[:500],
+                          response_preview=resp.text[:500] if resp.text else '')
             raw = resp.text.strip()
             match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
             if match:
@@ -549,7 +559,9 @@ class ImageGenerator:
                         ),
                     ),
                 )
-            record_tokens(resp, operation='post_content', response_preview=resp.text[:200] if resp.text else '')
+            record_tokens(resp, operation='post_content',
+                          prompt_preview=prompt[:500],
+                          response_preview=resp.text[:500] if resp.text else '')
             raw = resp.text.strip()
             match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
             if match:

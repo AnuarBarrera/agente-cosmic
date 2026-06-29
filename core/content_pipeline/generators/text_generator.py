@@ -52,7 +52,8 @@ class TextGenerator:
         with track_external_api('gemini', operation='text_gen'):
             resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
         record_tokens(resp, operation='text_gen',
-                      response_preview=resp.text[:200] if resp.text else '')
+                      prompt_preview=prompt[:500],
+                      response_preview=resp.text[:500] if resp.text else '')
         raw = resp.text.strip()
         raw = re.sub(r'^```(?:json)?\n?', '', raw)
         raw = re.sub(r'\n?```$', '', raw)

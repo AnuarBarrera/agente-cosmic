@@ -20,9 +20,12 @@ class EmailSender:
             'posts': posts,
             'day1': day1,
         })
+        name = brand_dna.business_name.strip() if brand_dna.business_name else ''
+        subject = f'Tu plan de contenido está listo — {name}' if name else 'Tu plan de contenido está listo — Agente Cosmic'
+        plain = f'Tu plan de contenido de {name} está listo.' if name else 'Tu plan de contenido está listo.'
         send_mail(
-            f'Tu ADN de Marca esta listo — {brand_dna.business_name}',
-            f'Tu ADN de Marca de {brand_dna.business_name} esta listo.',
+            subject,
+            plain,
             settings.DEFAULT_FROM_EMAIL,
             recipient_list=[job.email],
             html_message=html,
@@ -39,11 +42,12 @@ class EmailSender:
             'post': post,
             'calendar_review_url': calendar_review_url,
         })
-        business_name = post.calendar.brand_dna.business_name
+        business_name = (post.calendar.brand_dna.business_name or '').strip()
         email = post.calendar.brand_dna.job.email
+        subject = f'Día {post.day_number} de tu calendario — {business_name}' if business_name else f'Día {post.day_number} de tu calendario — Agente Cosmic'
         send_mail(
-            f'Dia {post.day_number} de tu calendario — {business_name}',
-            f'Tu contenido del dia {post.day_number} esta listo.',
+            subject,
+            f'Tu contenido del día {post.day_number} está listo.',
             settings.DEFAULT_FROM_EMAIL,
             recipient_list=[email],
             html_message=html,
