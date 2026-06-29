@@ -207,6 +207,61 @@ Solución a largo plazo (cambio de modelo):
 Severidad: Baja (workaround inmediato disponible)
 
 =================================================================
+HALLAZGO 7 — Riesgo de ban en Vertex AI por contenido indebido de usuarios
+=================================================================
+Contexto:
+  Imagen 3 ya tiene filtros de content safety propios (content safety filter
+  de Google). Estos bloquean contenido ilegal o +18 en la generación, lo que
+  protege el resultado final. Sin embargo, el RIESGO real no es el contenido
+  generado — es que un usuario malintencionado envíe prompts con intención
+  de explotar o abusar la API de Vertex AI, lo que podría resultar en la
+  suspensión de toda la cuenta GCP del proyecto.
+
+Escenario de riesgo:
+  En fase tester el riesgo es bajo (usuarios conocidos y controlados).
+  En producción con usuarios anónimos, cualquiera podría ingresar una URL
+  o descripción de negocio diseñada para:
+    - Generar imágenes de contenido prohibido (eludir filtros con prompts
+      indirectos o jailbreaks)
+    - Hacer prompt injection en el análisis de marca
+    - Abusar de la API para generar volumen masivo de contenido
+    - Enviar contenido que viole ToS de Google y derive en ban de cuenta
+
+Impacto potencial:
+  - Suspensión de la cuenta de Vertex AI → caída total del servicio
+  - No hay cuenta de respaldo — toda la infraestructura de IA depende de
+    un solo proyecto GCP (agente-cosmic)
+  - Recuperar una cuenta suspendida puede tomar días o ser permanente
+
+Ideas iniciales para mitigación (a evaluar en detalle):
+  A) Validación de input ANTES de llegar a Vertex:
+       - Filtro de keywords prohibidas en URL/descripción al momento del registro
+       - Lista de dominios/categorías bloqueadas (adultos, armas, etc.)
+  B) Moderación con IA ligera:
+       - Llamada previa a Gemini Flash con prompt de moderación:
+         "¿Este texto describe un negocio legítimo? Responde YES/NO + categoría"
+       - Si NO → rechazar análisis antes de consumir Imagen/texto
+  C) Rate limiting agresivo por cuenta nueva:
+       - Limitar análisis a 1 por sesión hasta verificación de email
+       - Impedir regeneraciones masivas de imágenes en poco tiempo
+  D) Audit log de inputs:
+       - Ya tenemos llm_audit.jsonl con prompt_preview — extenderlo también
+         al input del usuario (URL, descripción manual) para tener trazabilidad
+       - Permite detectar patrones de abuso post-facto
+  E) Cuota de Vertex AI por proyecto:
+       - Configurar budget alerts y quotas en GCP para limitar daño máximo
+         en caso de abuso (ej: max 1000 imágenes/día)
+
+Nota: Imagen 3 bloquea la GENERACIÓN de contenido prohibido, pero no
+  protege contra un usuario que intenta hacer jailbreak del análisis de marca
+  o que usa el sistema como proxy para llamadas masivas a Vertex AI.
+
+Severidad: Alta (impacto potencial catastrófico en producción)
+Acción recomendada: NO implementar en testers. Diseñar estrategia de
+  moderación antes del lanzamiento a producción. Prioridad alta para
+  la hoja de ruta de producción.
+
+=================================================================
 RESUMEN ACTUALIZADO DE ACCIONES
 =================================================================
   INMEDIATO:
@@ -228,3 +283,8 @@ RESUMEN ACTUALIZADO DE ACCIONES
     - H5: Ocultar campos max_daily_interactions/max_monthly_interactions
       del admin o eliminar código heredado de Dialogix.
     - H6: Hacer created_by opcional en InvitationCode (null=True, blank=True).
+
+  ANTES DE PRODUCCIÓN (bloqueante):
+    - H7: Diseñar e implementar estrategia de moderación de inputs para
+      proteger la cuenta de Vertex AI de abuso por usuarios malintencionados.
+      Ver opciones A-E en el hallazgo. Mínimo recomendado: B + D + E.
