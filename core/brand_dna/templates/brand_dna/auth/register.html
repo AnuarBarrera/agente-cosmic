@@ -69,7 +69,7 @@
       <div class="form-group">
         <label for="password1">Contraseña</label>
         <input type="password" id="password1" name="password1" placeholder="Mínimo 8 caracteres" required>
-        <div class="hint">Cifrada con PBKDF2-SHA256 + salt único — nunca almacenamos tu contraseña en texto plano.</div>
+        <div class="hint">Tu información está protegida.</div>
         {% if form.password1.errors %}
         <div class="field-errors">
           {% for e in form.password1.errors %}<div class="error-box">{{ e }}</div>{% endfor %}

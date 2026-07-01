@@ -40,6 +40,12 @@
     .mode-tabs { display: flex; gap: 0; margin-bottom: 24px; border-radius: 8px; overflow: hidden; border: 1px solid #333; }
     .mode-tab { flex: 1; padding: 12px; background: #0d0d1a; color: #aaa; border: none; font-size: 0.95rem; cursor: pointer; transition: background 0.2s, color 0.2s; }
     .mode-tab.active { background: #e94560; color: #fff; font-weight: 600; }
+    details.extra-info { margin-top: 20px; }
+    details.extra-info > summary { cursor: pointer; color: #e94560; font-size: 0.9rem; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid #2a2a4a; user-select: none; }
+    details.extra-info > summary::-webkit-details-marker { display: none; }
+    details.extra-info > summary .arrow { display: inline-block; transition: transform 0.2s; font-style: normal; }
+    details.extra-info[open] > summary .arrow { transform: rotate(90deg); }
+    details.extra-info .extra-body { padding-top: 8px; }
     @media (max-width: 640px) {
       .l-nav { padding: 10px 16px; flex-wrap: wrap; gap: 6px; }
       .l-nav-brand { flex: 1; font-size: 1rem; }
@@ -62,7 +68,7 @@
 
   <div class="hero">
     <h1>Agente Cosmic</h1>
-    <p>Da la URL de tu negocio o describe lo que haces — 7 dias de contenido listo para publicar, imagenes generadas con Imagen 3 y captions escritos por Gemini.</p>
+    <p>Da la URL de tu negocio o describe lo que haces — en minutos tienes 7 días de contenido listo para publicar: imágenes profesionales y textos listos para copiar y publicar.</p>
   </div>
 
   {% if error %}
@@ -103,26 +109,37 @@
         <input type="file" name="logo" accept="image/*">
       </div>
 
-      <div class="section-title">Posts anteriores <span class="optional-badge">opcional — mejora el resultado</span></div>
-      <div class="form-group">
-        <label>Sube hasta 5 imagenes de tus posts</label>
-        <input type="file" name="post_images" accept="image/*" multiple>
-      </div>
-      <div class="form-group">
-        <label>O pega el texto de tus ultimos posts</label>
-        <textarea name="posts_text" placeholder="Post 1: Hoy lanzamos..."></textarea>
-      </div>
-      <div class="form-group">
-        <label>O ingresa la URL de tu perfil publico</label>
-        <input type="url" name="profile_url" placeholder="https://facebook.com/tupagina">
-      </div>
+      <details class="extra-info">
+        <summary>
+          <span class="arrow">&#9654;</span>
+          ¿Quieres mejorar el resultado? Agrega más info
+          <span class="optional-badge">opcional</span>
+        </summary>
+        <div class="extra-body">
+          <div class="section-title" style="margin-top:16px;">Publicaciones anteriores</div>
+          <div class="form-group">
+            <label>Sube capturas de tus mejores publicaciones</label>
+            <input type="file" name="post_images" accept="image/*" multiple>
+            <small style="color:#666;font-size:0.8rem;margin-top:4px;display:block;">Si tienes publicaciones que te gustan, súbelas como imagen. Las usaremos como referencia de estilo. Sin esto generamos desde cero.</small>
+          </div>
+          <div class="form-group">
+            <label>O pega el texto de tus ultimos posts</label>
+            <textarea name="posts_text" placeholder="Post 1: Hoy lanzamos..."></textarea>
+          </div>
+          <div class="form-group">
+            <label>O ingresa la URL de tu perfil de Facebook</label>
+            <input type="url" name="profile_url" placeholder="https://facebook.com/tupagina">
+          </div>
 
-      <div class="section-title">Fotos de tu producto <span class="optional-badge">opcional — hasta 7 imagenes, una por dia</span></div>
-      <div class="form-group">
-        <label>Sube hasta 7 fotos de tu producto <span style="color:#666;font-weight:400;">(cada dia usa una diferente)</span></label>
-        <input type="file" name="product_images" accept="image/*" multiple>
-        <small style="color:#666;font-size:0.8rem;margin-top:4px;display:block;">Ej: collar de plata, platillo del menu, prenda de ropa. Con 1 imagen se usa 2 dias; con 3-7 imagenes, una distinta por dia.</small>
-      </div>
+          <div class="section-title">Fotos de tu producto</div>
+          <div class="form-group">
+            <label>Sube hasta 7 fotos de tu producto <span style="color:#666;font-weight:400;">(cada dia usa una diferente)</span></label>
+            <input type="file" name="product_images" accept="image/*" multiple>
+            <small style="color:#666;font-size:0.8rem;margin-top:4px;display:block;">Ej: collar de plata, platillo del menu, prenda de ropa. Con 1 imagen se usa 2 dias; con 3-7 imagenes, una distinta por dia.</small>
+            <small style="color:#555;font-size:0.78rem;margin-top:2px;display:block;">Sube imágenes sin texto ni marcas de agua para mejores resultados.</small>
+          </div>
+        </div>
+      </details>
 
       <button type="submit" class="btn" id="submitBtn">
         <span class="btn-spinner" id="btnSpinner"></span>
