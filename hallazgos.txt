@@ -1,0 +1,1441 @@
+HALLAZGOS — Agente Cosmic
+Fecha: 2026-06-27
+Analizado por: Claude (Agente Cosmic session)
+
+=================================================================
+CONTEXTO
+=================================================================
+El tester reportó no haber recibido:
+  1. Su "calendario semanal"
+  2. El "post del día 1"
+
+=================================================================
+RESULTADO: EMAILS ENTREGADOS CORRECTAMENTE
+=================================================================
+Mailgun confirma delivery a avatar1094@gmail.com:
+
+  - "Tu ADN de Marca esta listo —"   2026-06-27 01:26 UTC   DELIVERED
+  - "Dia 2 de tu calendario —"        2026-06-27 16:01 UTC   DELIVERED
+
+Conclusión: no es un problema de entrega de email ni de Mailgun.
+
+=================================================================
+HALLAZGO 1 — business_name vacío
+=================================================================
+Tabla: brand_dna_brand_dna
+Campo business_name = '' (cadena vacía)
+
+Impacto:
+  - Asunto del email inicial: "Tu ADN de Marca esta listo — "
+    (termina en guión sin nombre, aspecto de spam o phishing)
+  - Asunto del email diario: "Dia 2 de tu calendario — "
+  - Posible causa de que el tester no reconociera el email inicial
+    y lo descartara o que Gmail lo clasificara como promoción/spam
+
+Causa probable:
+  El analysis job procesó el perfil pero no extrajo el nombre del negocio
+  del URL/descripción proporcionados. El job terminó con status=done,
+  por lo que no fue un error fatal — pasó a brand_dna con business_name=''.
+
+Archivo relevante: core/brand_dna/ (lógica de extracción de brand DNA)
+
+Severidad: Media
+Acción recomendada: Revisar si el análisis del URL del tester falló en
+  extraer el nombre, y considerar validar que business_name no quede vacío
+  antes de continuar con la generación de contenido.
+
+=================================================================
+HALLAZGO 2 — Day 1 no tiene email diario propio (gap de diseño)
+=================================================================
+Archivo: core/content_pipeline/scheduler.py línea 15
+
+  posts = list(calendar.posts.filter(
+      day_number__gt=1,   ← excluye Day 1 explícitamente
+      status=ContentPost.STATUS_PENDING
+  ).order_by('day_number'))
+
+Comportamiento actual:
+  - Day 1: imagen generada durante el análisis (content_generation_task)
+    y su contenido va embebido en el email "Tu ADN de Marca esta listo"
+  - Days 2-7: cada uno tiene su propio job RQ y email "Dia N de tu calendario"
+
+Problema:
+  El tester recibió "Dia 2 de tu calendario — Dia 2" con imagen y CTA claro.
+  Espera un equivalente "Dia 1 de tu calendario" que por diseño no existe.
+  La inconsistencia de UX genera confusión: los días 2-7 tienen emails
+  individuales pero el día 1 solo aparece en el email de bienvenida.
+
+Datos del tester:
+  - post Day 1 (id: 9c0df05b): sent_at=NULL, status=pending, imagen=true
+    → la imagen existe pero nunca se envió un email diario para este post
+  - post Day 2 (id: 2ae05009): sent_at=2026-06-27 16:01, status=sent ✓
+
+Opciones para resolver:
+  A) Enviar Day 1 también con send_daily() justo después de send_initial()
+     → requiere cambio en content_generation_task y/o scheduler
+     → el tester recibiría 2 emails al registrarse (bienvenida + día 1)
+     → consistencia total con días 2-7
+
+  B) Mantener diseño actual pero hacer el email inicial más explícito
+     → template email_initial.html puede mostrar el post del día 1 con
+        el mismo formato visual que los emails diarios
+     → sin cambio en scheduler ni en lógica de envío
+
+  C) Añadir Day 1 al scheduler con delta=timedelta(minutes=5)
+     → llega 5 min después del email inicial
+     → mismo formato que los demás días, flujo natural
+
+Severidad: Baja (funcional, pero UX confusa)
+Acción recomendada: Decidir entre A, B o C según expectativas del producto.
+
+=================================================================
+HALLAZGO 3 — Fecha de Day 1 en el pasado al momento del registro
+=================================================================
+El scheduler de fechas (smart_schedule_dates) asigna Day 1 al día
+actual en CDMX al momento que termina content_generation_task.
+
+El analysis job del tester:
+  - created_at: 2026-06-27 01:24 UTC = 2026-06-26 19:24 CDMX
+  - Day 1 scheduled_at: 2026-06-26 15:00 UTC = 2026-06-26 09:00 CDMX
+
+El análisis terminó a las 19:24 CDMX pero Day 1 fue programado para
+las 09:00 CDMX del mismo día — 10 horas en el pasado.
+
+Esto ocurre porque el análisis tarda varios minutos en completarse:
+el scheduler toma la fecha de México al inicio/durante el job, pero
+para cuando termina el job ya puede ser tarde en el día.
+
+Impacto actual: ninguno grave — el email inicial incluye Day 1 de todas
+formas. Si se implementa Opción A o C del Hallazgo 2, habría que asegurar
+que Day 1 no se programe para una hora pasada (usar max(scheduled, now+5min)).
+
+Severidad: Baja
+Acción recomendada: Encadenado a la resolución del Hallazgo 2.
+
+=================================================================
+RESUMEN DE ACCIONES RECOMENDADAS
+=================================================================
+  INMEDIATO:
+    - Informar al tester que revise spam/promociones buscando el asunto
+      "Tu ADN de Marca esta listo" — el email fue entregado por Mailgun.
+    - El contenido de su Día 1 está dentro de ese email de bienvenida.
+
+  CORTO PLAZO:
+    - H1: Investigar por qué business_name quedó vacío para este usuario.
+      Si el URL analizado no tenía nombre evidente, considerar pedírselo
+      al usuario en el formulario de registro.
+
+  MEDIO PLAZO:
+    - H2: Decidir si Day 1 debe tener email diario propio (Opciones A/B/C).
+    - H3: Garantizar que Day 1 no se programe para hora pasada si se
+      implementa email diario para Day 1.
+
+=================================================================
+HALLAZGO 4 — Expectativa vs realidad: bug de comunicación, no de producto
+=================================================================
+El tester no entendió si la herramienta analiza contenido existente para
+mejorarlo o si crea un plan desde cero. No es un defecto del flujo, es
+una falta de claridad en el onboarding.
+
+Causa: el copy dentro de la herramienta no anticipa al usuario qué va a
+pasar ni cuándo va a pasar. El usuario llega al formulario sin saber que
+recibirá un plan de contenido nuevo, no una auditoría de lo existente.
+
+Solución propuesta (mínima):
+  Agregar UNA línea antes de que empiece el análisis, en la pantalla
+  inicial o justo antes del CTA de "Analizar":
+
+    "Vamos a crear tu plan de contenido de la próxima semana basado en
+     tu marca."
+
+  Esto alinea expectativas sin cambiar nada del flujo técnico.
+
+Severidad: Baja (no bloquea uso, pero genera fricción y soporte)
+Acción recomendada: Cambio de copy en el template de onboarding.
+  Sin cambios de backend ni lógica de negocio requeridos.
+
+=================================================================
+HALLAZGO 5 — Campos heredados de Dialogix no usados en Cosmic
+         (max_daily_interactions / max_monthly_interactions)
+=================================================================
+El modelo Plan tiene dos campos que aparecen en el admin:
+  - max_daily_interactions (default: 100)
+  - max_monthly_interactions (default: 1000)
+
+Estos campos existen en BD y son visibles en el admin, generando confusión
+sobre si son límites activos que pueden bloquear a testers.
+
+Diagnóstico: NO están activos en el flujo de Agente Cosmic.
+  - TenantRateLimitingMiddleware (sí activo en settings) usa límites
+    hardcodeados por plan (FREE/BASIC/PREMIUM/ENTERPRISE) en memoria/cache.
+    No lee max_daily_interactions del modelo.
+  - record_interaction() existe en los servicios pero nunca es llamada
+    desde ningún endpoint de Cosmic — es código de Dialogix sin uso.
+  - APIThrottlingMiddleware referencia /api/v1/ai/ y /api/v1/channels/
+    que no existen en Cosmic, y además no está en MIDDLEWARE de settings.
+
+Los límites REALES que sí se verifican en Cosmic son:
+  - max_calendars_per_week → via can_create_calendar() en rate_limits.py
+  - max_post_regenerations → en la lógica de regeneración de posts
+  - max_post_edits → en la lógica de edición de posts
+
+Severidad: Baja (no genera error, solo confusión en admin)
+Acción recomendada: Ocultar o eliminar los campos max_daily_interactions
+  y max_monthly_interactions del admin para reducir ruido. Limpiar
+  código de record_interaction() en una sesión de deuda técnica futura.
+
+=================================================================
+HALLAZGO 6 — Campo "Created by" en InvitationCode es obligatorio
+=================================================================
+El formulario de creación de códigos de invitación requiere el campo
+"Created by" (FK a User sin null=True en el modelo). Si se deja en
+blanco con el selector "----------" da error de validación.
+
+Contexto: el campo es para auditoría (quién generó el código), no para
+asignar el código a un usuario futuro — el usuario que usará el código
+puede no existir aún en el sistema.
+
+Solución inmediata (sin cambiar código):
+  Seleccionar el usuario administrador (contacto.neia@gmail.com) como
+  "Created by" al generar todos los códigos de invitación durante la
+  fase de testers. El admin crea los códigos; quien los usa es independiente.
+
+Solución a largo plazo (cambio de modelo):
+  Hacer el campo opcional: null=True, blank=True en el FK, y ajustar
+  el admin para que sea opcional. Requiere migración de BD.
+
+Severidad: Baja (workaround inmediato disponible)
+
+=================================================================
+HALLAZGO 7 — Riesgo de ban en Vertex AI por contenido indebido de usuarios
+=================================================================
+Contexto:
+  Imagen 3 ya tiene filtros de content safety propios (content safety filter
+  de Google). Estos bloquean contenido ilegal o +18 en la generación, lo que
+  protege el resultado final. Sin embargo, el RIESGO real no es el contenido
+  generado — es que un usuario malintencionado envíe prompts con intención
+  de explotar o abusar la API de Vertex AI, lo que podría resultar en la
+  suspensión de toda la cuenta GCP del proyecto.
+
+Escenario de riesgo:
+  En fase tester el riesgo es bajo (usuarios conocidos y controlados).
+  En producción con usuarios anónimos, cualquiera podría ingresar una URL
+  o descripción de negocio diseñada para:
+    - Generar imágenes de contenido prohibido (eludir filtros con prompts
+      indirectos o jailbreaks)
+    - Hacer prompt injection en el análisis de marca
+    - Abusar de la API para generar volumen masivo de contenido
+    - Enviar contenido que viole ToS de Google y derive en ban de cuenta
+
+Impacto potencial:
+  - Suspensión de la cuenta de Vertex AI → caída total del servicio
+  - No hay cuenta de respaldo — toda la infraestructura de IA depende de
+    un solo proyecto GCP (agente-cosmic)
+  - Recuperar una cuenta suspendida puede tomar días o ser permanente
+
+Ideas iniciales para mitigación (a evaluar en detalle):
+  A) Validación de input ANTES de llegar a Vertex:
+       - Filtro de keywords prohibidas en URL/descripción al momento del registro
+       - Lista de dominios/categorías bloqueadas (adultos, armas, etc.)
+  B) Moderación con IA ligera:
+       - Llamada previa a Gemini Flash con prompt de moderación:
+         "¿Este texto describe un negocio legítimo? Responde YES/NO + categoría"
+       - Si NO → rechazar análisis antes de consumir Imagen/texto
+  C) Rate limiting agresivo por cuenta nueva:
+       - Limitar análisis a 1 por sesión hasta verificación de email
+       - Impedir regeneraciones masivas de imágenes en poco tiempo
+  D) Audit log de inputs:
+       - Ya tenemos llm_audit.jsonl con prompt_preview — extenderlo también
+         al input del usuario (URL, descripción manual) para tener trazabilidad
+       - Permite detectar patrones de abuso post-facto
+  E) Cuota de Vertex AI por proyecto:
+       - Configurar budget alerts y quotas en GCP para limitar daño máximo
+         en caso de abuso (ej: max 1000 imágenes/día)
+  F) Fijar temperature/top_p/top_k explícitos (verificado 2026-07-02):
+       - Ninguna llamada a Vertex AI en el código fija estos parámetros
+         (text_generator.py, posts_analyzer.py, logo_analyzer.py,
+         manual_extractor.py, web_scraper.py, image_generator.py). Todas
+         usan client.models.generate_content() sin GenerateContentConfig
+         de sampling — solo image_generator.py pasa config, pero nada más
+         que system_instruction/response_modalities.
+       - Efecto: el modelo (gemini-2.5-flash) corre con defaults de Google
+         (~temperature=1.0, top_p=0.95, top_k=64) — sampling "creativo" y
+         menos determinista.
+       - Relevancia para H7: temperature más baja no es un filtro de
+         moderación en sí, pero reduce variabilidad de salida y la chance
+         de que el modelo se desvíe hacia interpretaciones inesperadas de
+         un prompt adversarial. Es una mitigación menor/complementaria a
+         A-E, no un sustituto.
+       - PENDIENTE DE DECISIÓN: evaluar si vale la pena fijar estos
+         parámetros (ej. temperature=0.7-0.8) para mayor consistencia de
+         marca, o dejar default porque la variedad es deseable en
+         contenido de marketing. No implementado — solo diagnóstico.
+
+Nota: Imagen 3 bloquea la GENERACIÓN de contenido prohibido, pero no
+  protege contra un usuario que intenta hacer jailbreak del análisis de marca
+  o que usa el sistema como proxy para llamadas masivas a Vertex AI.
+
+Severidad: Alta (impacto potencial catastrófico en producción)
+Acción recomendada: NO implementar en testers. Diseñar estrategia de
+  moderación antes del lanzamiento a producción. Prioridad alta para
+  la hoja de ruta de producción.
+
+=================================================================
+RESUMEN ACTUALIZADO DE ACCIONES
+(Ver hallazgos completos abajo. Prioridad P0 = bloquea siguiente batch.)
+=================================================================
+  INMEDIATO:
+    - [Tester] Informar que revise spam/promociones: "Tu ADN de Marca
+      esta listo" — Mailgun confirma delivery. Day 1 está dentro.
+    - [Invitación] Usar contacto.neia@gmail.com como "Created by" al
+      crear códigos de invitación para testers.
+
+  P0 — ANTES DEL SIGUIENTE BATCH DE TESTERS:
+    - H9:  Clarificar propósito en landing + agregar ejemplo de resultado
+    - H10/H26: Pantalla de confirmación post-análisis CON Brand DNA editable
+           (H10 pide el flujo claro, V1/H26 pide poder corregir datos —
+           resolver juntos en la misma pantalla)
+    - H12: Renombrar/aclarar campo "posts anteriores" en onboarding
+    - H13: Reducir fricción en onboarding self-service (tooltips, progress bar)
+           — patrón definitivo con 6 testers: guiado 100% completó/75%
+           activó, self-service 50% completó/0% activó (ver H28)
+    - H24: Registrar perfil de madurez digital de cada tester (G1)
+    - H33: Configurar SPF/DKIM/DMARC del dominio de envío (deliverability)
+    - H36: Capa 1 (negocio) de protección contra ban de Meta — pregunta de
+           nicho sensible en onboarding, sin código. Capas 2-3 son P1/antes
+           de producción — ver hallazgo completo.
+    - H1:  Investigar por qué business_name quedó vacío para Tienda de Plata
+
+  P1 — PRÓXIMAS 1-2 SEMANAS:
+    - H4/H11: Ajustar copy del análisis ("ADN de Marca" → input del calendario)
+    - H15: Dar 10 cambios por defecto a testers (hoy el límite de 2 bloquea)
+    - H16: Investigar delay en primer email (SLA: ≤5 min post-análisis)
+    - H18: Hacer transformación de imagen más visible (fondo de marca)
+    - H21: Agregar CTA de renovación en email del día 7
+    - H23: Corregir messaging: quitar "automatiza", fijar posicionamiento para
+            principiantes, reencuadrar expectativa de ventas/vistas en onboarding
+    - H32: Fix de login con múltiples sesiones Google + priorizar UX mobile
+    - H36: Capa 2 (técnico) — system prompt conservador + detección de
+           nicho sensible en Brand DNA, para proteger contra ban de Meta
+    - H37: Color picker / hex en vez de descripción en palabras para colores
+    - H2:  Decidir si Day 1 tiene email diario propio (Opciones A/B/C)
+
+  P2 — PRÓXIMAS 2-4 SEMANAS:
+    - H14: Agregar las 3 preguntas guía visibles en campo de descripción
+    - H17: Optimizar subject lines de emails (incluir nombre del usuario)
+    - H19: Selector de tono de copy en onboarding
+    - H20: Implementar pilares de contenido rotatorios (variedad temática)
+    - H22: Agregar preview integrada del post (image + copy + frame de Facebook)
+    - H34: Invertir jerarquía del formulario — "sin sitio web" como default
+    - H35: Comunicar consistencia visual de marca como diferenciador
+
+  DEUDA TÉCNICA (medio plazo):
+    - H3:  Garantizar Day 1 no se programe para hora pasada
+    - H5:  Ocultar campos max_daily/monthly_interactions del admin
+    - H6:  Hacer created_by opcional en InvitationCode (null=True, blank=True)
+
+  ANTES DE PRODUCCIÓN (bloqueante):
+    - H7:  Estrategia de moderación de inputs para proteger cuenta Vertex AI.
+           Mínimo recomendado: B (Gemini moderación previa) + D (audit log) + E (quotas GCP)
+    - H36: Capa 3 (legal) — cláusula de responsabilidad en TyC + nota en
+           pantalla de aprobación de posts (ban de Meta, distinto de H7)
+
+  ROADMAP P3 — Ver H25 para detalle:
+    - Auto-publicación en redes sociales (E1) — investigar integración
+      tipo Hootsuite/Hook antes de construir contra Graph API directo
+    - Dashboard de constancia/racha para el usuario (E4)
+    - Soporte multi-plataforma Instagram/TikTok (E5)
+    - Dashboard de actividad para el admin/operador (E6)
+    - Variedad de formatos: reels, stories, carruseles (D3)
+    - Selección de modelo de IA por el usuario — evaluada y DESCARTADA
+      para el ICP actual (ver H25, VP3c)
+    - H27: Canal B2B2C — consultores/coaches/fundaciones como distribuidores
+           + workspace colaborativo tipo Airtable (VP3a). No actuar antes
+           de Q3 (esperar validación del ICP directo).
+    - H30: Positioning "creatividad de respaldo" para usuarios avanzados.
+
+  OPERATIVO (no requiere código):
+    - H28: ICP de baja madurez digital confirmado 6/6 testers, ciclo 1
+           cerrado — decisión cerrada, no diluir messaging con el
+           segmento avanzado.
+    - H29: Pedir a Victor que refiera a Alejo (catering/bar) como tester —
+           primera prueba real del canal de referidos.
+
+=================================================================
+NOTA DE CAMPO — Primer tester que publicó (2026-06-29)
+Tester: Jorge (batas de carniceR / ropa de trabajo)
+=================================================================
+Lo publicó. Eso es lo más importante.
+
+El post funciona bien para ser el primero. El copy conecta directo con su
+diferenciador ("15 tallas", "ajuste perfecto"), el CTA es claro, y usó la
+imagen de producto que subió. Para un negocio que antes publicaba
+esporádicamente y sin estructura, esto ya es un salto.
+
+Sobre los hashtags:
+  No es un problema de la herramienta, es un problema de flujo. Jorge publicó
+  la imagen directamente pero probablemente no copió el copy completo con
+  hashtags que llegó en el correo. Pendiente preguntarle en la siguiente
+  llamada o por WhatsApp: ¿copió el texto del correo o escribió el suyo?
+
+=================================================================
+HALLAZGO 8 — Imágenes de producto con watermark generan posts ruidosos
+Categoría: Sugerencia / UX de imagen
+=================================================================
+Observación:
+  El fondo de la imagen de producto de Jorge se transparentó conservando su
+  marca de agua del Facebook (#BATAS DE CARNICER, número de teléfono).
+  La herramienta usó la imagen tal como estaba — watermark incluido — lo que
+  hace el post visualmente ruidoso y poco profesional.
+
+Causa:
+  El pipeline de BGSWAP (Imagen 3 background swap) recibe la imagen del
+  usuario sin ningún preprocesamiento. Si la imagen tiene watermark, texto
+  superpuesto o fondo con ruido, todo eso pasa al post final.
+
+Opciones para roadmap:
+  A) Detección de watermark antes de procesar:
+       - Usar el QC de Gemini para detectar texto en la imagen de producto
+         antes de llamar a BGSWAP.
+       - Si detecta watermark → avisar al usuario que suba una imagen limpia.
+  B) Limpieza automática de fondo:
+       - Usar un servicio de remoción de fondo (ej: rembg, Cloudflare AI,
+         o el propio BGSWAP con prompt de "clean background") antes de componer.
+       - Más complejo pero experiencia transparente para el usuario.
+  C) Instrucción en el formulario de subida:
+       - Texto de ayuda: "Sube una imagen sin texto ni marcas de agua para
+         mejores resultados." — solución mínima sin cambio técnico.
+
+Severidad: Baja (el post funciona, pero la calidad visual se ve comprometida)
+Acción recomendada: Implementar C de inmediato (copy en el formulario).
+  Evaluar A para la siguiente iteración.
+
+=================================================================
+HALLAZGO 9 — Propósito de la herramienta no es claro en la landing
+Categoría: Claridad de propósito
+Backlog ref: A1, A4
+=================================================================
+Confirmado por: 4/4 testers (Tienda de Plata, Jorge, Aurora, Bryan)
+
+Patrón absoluto (con/sin llamada guiada):
+  Con llamada guiada: Jorge activó, Aurora activó → 2/2 éxito
+  Sin llamada: Tienda de Plata confundida, Bryan abandonó → 0/2 éxito
+
+Qué pasa:
+  Ningún usuario entendió el propósito de la herramienta sin explicación
+  verbal. Tienda de Plata: "No entiendo si analiza lo que ya tengo o me
+  hace un plan desde cero." Bryan (7 años en marketing): "Hasta el momento
+  no sé qué voy a encontrar o cómo funciona."
+  Adicionalmente, no hay ningún ejemplo del resultado final visible antes
+  de llenar el formulario — el usuario no sabe qué va a recibir.
+
+Dónde ocurre: Landing page, antes y durante el formulario.
+
+Acciones recomendadas:
+  1. Bloque de clarificación en el hero:
+       "Analiza tu negocio una vez y recibe 7 días de contenido listo para
+        publicar: imagen, texto, hashtags y horario. Cada día te llega un
+        post a tu correo. Tú solo copias y publicas."
+  2. Ejemplo visual de un post generado ANTES del formulario.
+     El usuario debe ver el resultado antes de invertir tiempo.
+
+Severidad: Alta (bloquea activación en self-service — tasa actual: 0%)
+Prioridad: P0
+
+=================================================================
+HALLAZGO 10 — Falta pantalla de confirmación post-análisis
+Categoría: Onboarding / flujo post-análisis
+Backlog ref: A2
+=================================================================
+Confirmado por: Tienda de Plata, Jorge (explicado verbalmente por Anuar)
+
+Qué pasa:
+  Después del análisis, el usuario no sabe qué esperar ni cuándo va a
+  recibir qué. Tienda de Plata esperaba todo junto (análisis + posts).
+  Jorge entendió el flujo solo porque Anuar lo explicó en llamada.
+
+Acción recomendada:
+  Agregar pantalla o modal post-análisis con el flujo claro:
+    1. Tu ADN de marca está generado — revísalo aquí.
+    2. Cada día recibirás un correo con tu post del día.
+    3. Tu primer post está listo para hoy. Revísalo ahora →
+
+Severidad: Media
+Prioridad: P0
+
+=================================================================
+HALLAZGO 11 — "ADN de Marca" genera expectativa de auditoría completa
+Categoría: Comunicación / expectativas
+Backlog ref: A3
+=================================================================
+Surfaceado por: Tienda de Plata
+
+Qué pasa:
+  El nombre "ADN de Marca" y el concepto de "análisis" sugieren un
+  entregable tipo auditoría (paleta de colores, análisis del logo,
+  recomendaciones estratégicas). Lo que recibe el usuario es un resumen
+  breve que sirve de input para el calendario. La expectativa no se cumple.
+
+Opciones:
+  Rápida: reencuadrar el ADN de Marca como "esto es lo que entendimos
+    de tu marca — ajústalo si algo no es correcto."
+  Con esfuerzo: enriquecer el resultado con recomendaciones breves
+    por campo (tono, colores, audiencia) para que se sienta como análisis.
+
+Severidad: Baja
+Prioridad: P1
+
+=================================================================
+HALLAZGO 12 — Campo "posts anteriores" genera confusión en onboarding
+Categoría: UX de formulario
+Backlog ref: B1
+=================================================================
+Confirmado por: Tienda de Plata ("complejo subir textos"), Jorge ("¿le copio post?")
+
+Qué pasa:
+  Los usuarios no entienden qué subir: ¿texto copiado? ¿captura de
+  pantalla? ¿las imágenes de los posts? La sección detiene el flujo
+  en ambos perfiles (guiado y self-service).
+
+Acciones recomendadas:
+  1. Renombrar: "Sube capturas de tus mejores publicaciones (opcional)"
+  2. Micro-copy: "Si tienes publicaciones que te gustan, súbelas como
+     imagen. Las usaremos como referencia de estilo. Si no tienes, no
+     te preocupes — generamos todo desde cero."
+  3. Evaluar si el campo es necesario cuando ya se ingresa URL de Facebook.
+
+Severidad: Media (bloquea flujo en ambos perfiles)
+Prioridad: P0
+
+=================================================================
+HALLAZGO 13 — Onboarding no funciona en self-service / demasiados pasos
+Categoría: UX de onboarding
+Backlog ref: B2, B5
+=================================================================
+Confirmado por: Bryan ("son muchos pasos, llega un punto que prefiero no
+  continuar"), Tienda de Plata (completó pero quedó confundida)
+
+Qué pasa:
+  Demasiados pasos antes de ver el primer resultado. Para el segmento
+  primario sin experiencia digital, cada campo sin contexto es fricción.
+  Jorge necesitó asistencia en cada paso: contraseña, subir imágenes,
+  URL de Facebook. Sin Anuar probablemente habría abandonado.
+
+Acciones recomendadas:
+  Corto plazo: mostrar ejemplo del resultado ANTES de pedir datos.
+    Esto reencuadra el formulario como "inversión breve por este resultado"
+    en lugar de burocracia.
+  Mediano plazo:
+    - Progress bar: "Paso 1 de 3: Tu negocio → Tu marca → Generar"
+    - Tooltips con ejemplos concretos por campo
+    - Reducir a campos mínimos obligatorios (nombre + descripción)
+    - Video walkthrough de 60 seg
+
+Severidad: Alta (0% activación self-service sin llamada)
+Prioridad: P0
+
+=================================================================
+HALLAZGO 14 — Las 3 preguntas clave no están visibles en el formulario
+Categoría: UX de formulario
+Backlog ref: B3
+=================================================================
+Surfaceado por: Jorge (sesión guiada)
+
+Qué pasa:
+  "¿Qué vendes? ¿A quién? ¿Qué te hace diferente?" funcionan perfecto
+  cuando Anuar las verbaliza — Jorge las respondió con fluidez y el ADN
+  de marca resultó preciso. El campo libre de descripción no las incluye,
+  por lo que en self-service el usuario no sabe qué escribir.
+
+Acción recomendada:
+  Mínimo: placeholder del textarea con las 3 preguntas como guía.
+  Con esfuerzo: separar en 3 campos independientes.
+
+Severidad: Baja
+Prioridad: P2
+
+=================================================================
+HALLAZGO 15 — Límite de 2 cambios genera fricción y confusión en testers
+Categoría: UX / tier de beta
+Backlog ref: B4
+=================================================================
+Surfaceado por: Jorge
+
+Qué pasa:
+  Jorge vio "Dos cambios" y la conversación se detuvo. El mecanismo de
+  código de redención para desbloquear más cambios no es autodescubierto
+  — depende de que Anuar lo explique en llamada. Sin llamada, el usuario
+  no sabe cómo obtener más cambios.
+
+Acciones recomendadas:
+  Fase beta: dar 10 cambios por defecto a todos los testers. El dato
+    relevante es cuántos usan realmente, no la comparación 2 vs 10.
+  Si se mantiene el código: hacerlo visible dentro de la plataforma con
+    instrucciones claras, sin depender del facilitador.
+
+Severidad: Baja (workaround: explicarlo en llamada)
+Prioridad: P1
+
+=================================================================
+HALLAZGO 16 — Delay no determinístico en entrega del primer email
+Categoría: Backend / RQ
+Backlog ref: C2
+=================================================================
+Surfaceado por: Tienda de Plata (email llegó al día siguiente)
+Contraste: Jorge recibió el email en ~3 min durante la sesión.
+
+Qué pasa:
+  La discrepancia sugiere un delay en la cola RQ o en el job de
+  generación de contenido que no es reproducible consistentemente.
+  Si el primer email llega al día siguiente, el usuario ya no tiene
+  contexto y puede no reconocerlo o ignorarlo.
+
+Acción recomendada:
+  Investigar causa del delay para el caso de Tienda de Plata
+  (¿cola saturada? ¿worker caído? ¿job demorado en scraping?).
+  SLA interno: primer email ≤5 min post-análisis.
+  Agregar mensaje en plataforma: "Tu calendario se está generando.
+  Recibirás un correo en los próximos minutos."
+
+Severidad: Media
+Prioridad: P1
+
+=================================================================
+HALLAZGO 17 — Subject line del email no comunica utilidad inmediata
+Categoría: Email / comunicación
+Backlog ref: C3
+=================================================================
+Surfaceado por: Análisis de comunicación post-tester
+
+Qué pasa:
+  El subject actual ("Tu plan de contenido está listo — [negocio]")
+  describe el estado interno de la herramienta, no el beneficio del
+  usuario. Para el segmento primario (baja madurez digital), "ADN de Marca"
+  o "plan de contenido" no motivan apertura. Incluir el nombre del usuario
+  en el subject aumenta la señal de correo personal y reduce la probabilidad
+  de que Gmail lo clasifique como Promociones.
+
+Propuesta de subjects:
+  Email inicial:  "[Nombre], tu primer post está listo para publicar"
+  Emails diarios: "[Nombre], tu post de hoy — [hora sugerida]"
+  Email día 7:    "[Nombre], ¿quieres tu calendario de la próxima semana?"
+
+Severidad: Baja (email llega, pero la apertura se puede mejorar)
+Prioridad: P2
+
+=================================================================
+HALLAZGO 18 — Imagen generada no muestra transformación visible
+Categoría: Generación de imágenes / UX
+Backlog ref: D1
+=================================================================
+Surfaceado por: Jorge ("parece que está igual a la que subí")
+
+Qué pasa:
+  Jorge subió fotos de sus batas y percibió que la imagen del post se
+  ve igual a la original. El pipeline de BGSWAP genera un fondo pero si
+  el fondo es neutro o similar al de la foto original, la diferencia no
+  es perceptible para el usuario y el valor de la herramienta no se ve.
+
+  Nota: distinto a H8 (watermarks que pasan al post). H18 = la
+  transformación existe pero no se percibe como diferente.
+
+Acciones recomendadas:
+  - Usar fondos con mayor contraste visual (colores de marca del usuario,
+    fondos estilizados, texturas) para que la diferencia sea evidente.
+  - Comunicar explícitamente: "Usamos tu foto con un fondo profesional
+    basado en los colores de tu marca."
+
+Severidad: Baja (funcional, pero reduce percepción de valor)
+Prioridad: P1
+
+=================================================================
+HALLAZGO 19 — Tono del copy generado es demasiado formal para algunos negocios
+Categoría: Generación de copy
+Backlog ref: D2
+=================================================================
+Surfaceado por: Jorge (implícito, revisión del copy generado)
+
+Qué pasa:
+  El copy de Jorge usó frases corporativas: "Explore nuestro catálogo",
+  "Confíe en expertos", "garantizamos la máxima calidad." El tono real
+  de Jorge es informal y directo. El sistema no capta bien el registro
+  del dueño aunque tenga acceso a sus posts anteriores.
+
+Acciones recomendadas:
+  Mínimo: selector de tono en onboarding: Profesional / Casual / Directo.
+  Avanzado: inferir tono de los posts subidos y URL de Facebook.
+
+Severidad: Baja (el copy es funcional, pero no "suena como yo")
+Prioridad: P2
+
+=================================================================
+HALLAZGO 20 — No hay variedad temática explícita en el calendario de 7 días
+Categoría: Generación de contenido
+Backlog ref: D4
+=================================================================
+Surfaceado por: Revisión del calendario de Jorge
+
+Qué pasa:
+  Los 7 posts siguen un patrón repetitivo (calidad, diferenciador y
+  profesionalismo todos los días). Para 1 semana funciona; para semanas
+  recurrentes genera fatiga de contenido y el usuario percibe que la
+  herramienta "siempre dice lo mismo."
+
+Acción recomendada:
+  Implementar pilares de contenido rotatorios por día:
+    Día 1: Producto (qué vendes)
+    Día 2: Diferenciador (qué te hace único)
+    Día 3: Prueba social (testimonio / cliente satisfecho)
+    Día 4: Detrás de cámaras (proceso / fabricación)
+    Día 5: Educativo (tip relevante para tu cliente)
+    Día 6: CTA / Oferta
+    Día 7: Historia del fundador / marca personal
+
+Severidad: Baja (semana 1 funciona, semanas posteriores afectadas)
+Prioridad: P2
+
+=================================================================
+HALLAZGO 21 — No existe regeneración del calendario al terminar los 7 días
+Categoría: Retención / flujo post-semana
+Backlog ref: E2
+=================================================================
+Surfaceado por: Análisis de retención
+
+Qué pasa:
+  Después del día 7, el usuario cae en un vacío: no recibe más posts,
+  no hay CTA claro para renovar, y la inercia de constancia construida
+  durante la semana se pierde. Para el segmento primario (baja disciplina
+  digital), si la renovación no es de 1 clic, no vuelven.
+
+Impacto directo en el KPI de retención semana 2 (target: ≥80%).
+
+Acciones recomendadas:
+  Corto plazo: email del día 7 con CTA prominente:
+    "¿Quieres tu semana que viene? → Generar ahora (1 clic)."
+  Si no responde en 24h: correo recordatorio.
+  Ideal: regeneración automática opt-out con notificación al usuario.
+
+Severidad: Alta (impacta retención semana 2 directamente)
+Prioridad: P1
+
+=================================================================
+HALLAZGO 22 — No existe preview integrada del post (imagen + copy)
+Categoría: UX / revisión de calendario
+Backlog ref: E3
+=================================================================
+Surfaceado por: Análisis de UX
+
+Qué pasa:
+  El usuario ve la imagen y el copy por separado en la pantalla de
+  revisión. No hay una vista integrada que muestre "así se verá tu post
+  en Facebook" con imagen + texto + nombre del negocio en un frame.
+  Para el segmento primario (sin experiencia en diseño), ver el mockup
+  aumenta confianza en que el resultado es profesional.
+
+Acción recomendada:
+  Agregar mockup visual tipo "Facebook post frame" en la pantalla de
+  revisión/aprobación. No necesita ser pixel-perfect: un marco visual
+  básico con imagen + copy es suficiente para dar contexto.
+
+Severidad: Baja
+Prioridad: P2
+
+=================================================================
+HALLAZGO 23 — Problemas de messaging: "automatiza", principiantes y expectativa de ventas
+Categoría: Comunicación / posicionamiento
+Backlog ref: F1, F2, F3
+=================================================================
+
+F1 — "Automatiza" genera expectativa de auto-publicación:
+  Jorge preguntó directamente por un autopublicador para Facebook.
+  Para el usuario, "automatizar" = "me lo publica solo." La herramienta
+  genera y entrega, pero NO autopublica.
+  Acción: reemplazar "automatiza" con "te genera y entrega tu contenido
+  listo para publicar." Reservar "automatización" para cuando exista.
+
+F2 — El posicionamiento no declara que es para principiantes:
+  Patrón confirmado cruzando los 4 testers:
+    Baja madurez + guiado → activación (Jorge, Aurora)
+    Media/alta madurez → no activó o abandonó (Tienda de Plata, Bryan)
+  Bryan (experto): "Para alguien que inicia llama mucho la atención."
+  Acción: declararlo explícito:
+    "¿Tienes un negocio pero no publicas en redes? Esto es para ti."
+    "No necesitas saber de marketing. Solo dinos sobre tu negocio."
+
+F3 — 100% de testers espera un resultado externo (ventas o vistas) como
+  criterio de éxito (4/4 confirmado, actualizado con Cris):
+  Jorge: "ventas y alcance." Aurora: "que se concrete en ventas."
+  Cris: "que tuviera muchas vistas."
+  La herramienta genera contenido, no ventas ni vistas directas. Si en 7
+  días no ven el resultado externo esperado (y probablemente no lo habrá
+  en una semana), percibirán que la herramienta no funcionó aunque el
+  contenido sea excelente.
+
+  Matiz nuevo (Cris, backlog N4-A): no todo el segmento primario mide lo
+  mismo. Hay dos sub-motivaciones distintas:
+    - Conversión: "quiero que me contacten y me compren" (Jorge, Aurora)
+    - Visibilidad: "quiero que me vean más, que mi marca crezca" (Cris)
+  Ambas se resuelven con la misma acción (publicar con constancia), pero
+  el messaging debe ser inclusivo de ambas, no solo hablar de ventas:
+  "Publica cada día → más personas te ven → más personas te compran."
+
+  Acción: reencuadrar en onboarding/llamada: la métrica de la semana 1 es
+  constancia + calidad percibida del contenido, no ventas ni vistas. Esos
+  resultados son consecuencia a mediano plazo, no promesa inmediata.
+
+Severidad: Alta en conjunto (impacta percepción de valor y retención)
+Prioridad: P1
+
+=================================================================
+HALLAZGO 24 — Tracking insuficiente de testers y métricas de activación
+Categoría: Operaciones / métricas de beta
+Backlog ref: G1, G2
+=================================================================
+
+G1 — Testers sin etiqueta de perfil de madurez digital:
+  Sin segmentación, los datos de los 20 testers serán un promedio que no
+  dice nada. Un NPS de 6 podría ser "10 principiantes y 2 expertos", que
+  es una señal completamente diferente a "6 parejo en todos."
+
+  Datos recopilados hasta ahora (4 testers):
+    Jorge (Batas) — Baja madurez, guiado → publicó día 1
+    Aurora (Ice Party) — Baja madurez, guiada → activó mismo día
+    Tienda de Plata — Madurez media, self-service → no activó día 1
+    Bryan — Alta madurez (experto agencia), self-service → abandonó
+
+  Acción: registrar para cada tester: madurez (Baja/Media/Alta), canal
+  de adquisición (Comunidad/Referido/etc.), modo (Guiado/Self-service).
+  Cruzar todas las métricas de retención contra estos atributos al final.
+
+G2 — No se mide "time to first publish":
+  La velocidad entre "generé mi calendario" → "publiqué mi primer post"
+  es la métrica de activación más reveladora. Jorge publicó ~2h post-análisis.
+  Tienda de Plata no publicó el día 1.
+  Actualmente se trackea first_post_approved pero no la publicación real.
+  Acción: confirmación del usuario en la plataforma: "¿Ya publicaste tu
+  post de hoy? → Sí / No" — o usar first_post_approved como proxy con
+  timestamp delta.
+
+Severidad: Media (sin esto los datos del batch no son accionables)
+Prioridad: G1=P0, G2=P1
+
+=================================================================
+HALLAZGO 25 — Funcionalidades faltantes para el roadmap (P3)
+Categoría: Roadmap
+Backlog ref: D3, E1, E4, E5, E6
+=================================================================
+Documentadas para el roadmap. No accionables durante la fase de beta.
+
+D3 — No hay variedad de formatos (reels, stories, carruseles):
+  El segmento primario no lo necesita ni espera. Roadmap Q3-Q4.
+
+E1 — No existe auto-publicación en redes sociales:
+  Jorge lo pidió explícitamente. Requiere integración con Facebook Graph API.
+  Flujo ideal: generar → revisar → aprobar → publicar a la hora sugerida.
+  Corto plazo mientras no existe: ajustar messaging para no prometer autopublicación.
+  Reforzado por Victor (notas de voz, VP3b): mencionó una herramienta tipo
+  "Hootsuite" que integra varias redes en una sola interfaz — investigar
+  si existe una API/integración de terceros que simplifique este desarrollo
+  en vez de construir contra Graph API directamente para cada plataforma.
+
+VP3c (Victor, notas de voz) — Selección de modelo de IA por el usuario:
+  Propuesta evaluada y descartada para el ICP actual: agrega complejidad
+  que el segmento primario no necesita ni sabría aprovechar. La ventaja
+  de la herramienta es que el usuario no tiene que saber nada de IA — ella
+  decide todo por él. Solo relevante si el producto se expande algún día
+  al segmento profesional de marketing (ver H30, fatiga creativa en
+  usuarios avanzados). No incluir en ningún roadmap cercano.
+
+E4 — No existe dashboard de constancia / "racha de publicación":
+  Jorge expresó que su objetivo es "ganar constancia." Un contador
+  "llevas 5 días publicando seguidos" refuerza el hábito y genera
+  engagement. Gamification ligera sin complejidad técnica alta.
+
+E5 — No existe soporte multi-plataforma (Instagram, TikTok):
+  Jorge tiene cuentas dormidas en ambas. Roadmap Q3-Q4.
+
+E6 — No existe dashboard de actividad para el admin/operador:
+  Anuar sabe que Jorge publicó porque lo vio manualmente. Con 30+ testers
+  esto no escala. Un panel que muestre: quién abrió el correo, quién aprobó,
+  quién lleva X días inactivo es necesario para gestionar el beta.
+  Corto plazo: hoja de cálculo manual alimentada con logs de GCP.
+
+Prioridad: P3 (roadmap)
+
+=================================================================
+HALLAZGO 26 — Análisis de sitio web puede "alucinar" y contaminar el Brand DNA
+Categoría: Confiabilidad / onboarding
+Backlog ref: Victor V1
+=================================================================
+Surfaceado por: Victor (Academia de matemáticas, alta madurez, anticipó el
+  riesgo sin haberlo experimentado — "el análisis del sitio web podría alucinar")
+
+Qué pasa:
+  El scraping web puede generar un Brand DNA con datos incorrectos. Si eso
+  ocurre y el usuario no tiene forma de corregirlo antes de que se genere
+  el calendario, los 7 días de contenido quedan contaminados con información
+  que no representa al negocio. Pierde confianza desde el primer paso.
+
+Relación con H10: mismo punto del flujo (pantalla post-análisis). H10 pide
+  la pantalla de confirmación por claridad de flujo ("qué sigue ahora");
+  V1 pide que esa misma pantalla permita revisar y EDITAR el Brand DNA
+  antes de generar contenido. Son el mismo hallazgo con dos motivaciones —
+  conviene resolverlos juntos en la misma pantalla.
+
+Acción recomendada:
+  Corto plazo: pantalla de validación post-análisis — "Esto es lo que
+  entendimos de tu marca. ¿Es correcto?" con campos editables antes de
+  generar el calendario.
+  Fallback inmediato (sugerido por Victor, ya existe en la herramienta):
+  si el análisis web da resultados dudosos, ofrecer explícitamente el
+  path manual ("sin sitio web") como opción de re-análisis. Falta
+  comunicarlo — no falta construirlo.
+
+Criterio de éxito: el usuario puede verificar y corregir el Brand DNA
+  antes de que se genere contenido. Cero testers reciben posts basados
+  en información incorrecta de su marca.
+
+Segunda confirmación (Victor, notas de voz post-sesión, VP2 — 2026-07-03):
+  Victor probó él mismo el path "sin web" con su URL de Facebook,
+  describiendo misión, valores, diferenciadores y colores con palabras
+  ("rosa coral", "azul turquesa"). Resultado: sin código de tester,
+  alucinó en descripción del negocio y colores; con código de tester,
+  redujo alucinaciones pero seguía generando tonos de azul incorrectos.
+  Cuando puso los códigos hexadecimales exactos, sí los reconoció bien.
+  Esto confirma el hallazgo con un segundo tester y añade un dato nuevo
+  específico sobre colores — ver H37 para el detalle y la acción
+  recomendada de ese punto en particular (color picker / hex).
+
+Severidad: Alta (contamina todo el ciclo de 7 días si ocurre)
+Prioridad: P0
+
+=================================================================
+HALLAZGO 27 — Canal B2B2C: consultores/coaches/fundaciones como distribuidores
+Categoría: Roadmap / estrategia de adquisición
+Backlog ref: Victor V2
+=================================================================
+Surfaceado por: Victor, espontáneamente. Trabaja con una fundación que
+  atiende mujeres migrantes emprendedoras y se posicionó él mismo como
+  intermediario, no como usuario final: "Con esta herramienta podría
+  trabajarle los temas de su contenido sin necesidad de que ellas tengan
+  que pensar esas cosas."
+
+Por qué importa:
+  En vez de adquirir emprendedores uno por uno (costoso, lento), adquirir
+  un consultor/coach que atiende 10-20 emprendedores escala más rápido.
+  El intermediario usa la herramienta con sus clientes y se convierte en
+  canal de adquisición y retención.
+
+Perfil del intermediario: consultores de negocio independientes, coaches
+  de emprendimiento, fundaciones/ONGs, incubadoras pequeñas, profesores
+  de marketing/negocio.
+
+Modelo potencial: plan "consultor/agencia" con multi-marca por cuenta,
+  pricing por número de marcas gestionadas (no por usuario individual).
+
+Feature concreta que requeriría (backlog consolidado, ref V2-F):
+  "Vista multi-negocio para facilitadores" — una cuenta que pueda ver y
+  gestionar varios Brand DNA/calendarios distintos (uno por cliente del
+  consultor), en vez de la relación 1 cuenta = 1 negocio actual. Sin
+  esto, un facilitador tipo Victor tendría que crear una cuenta separada
+  por cada emprendedor que atienda — funciona para probar el canal, pero
+  no escala como producto "consultor". Documentar junto con el resto de
+  este hallazgo para Q3; no construir antes de validar el ICP directo.
+
+Segunda feature relacionada (Victor, notas de voz, VP3a) — Workspace
+  colaborativo tipo Airtable: invitar personas a un workspace compartido
+  con roles (jefe de marketing, creativo, asistente, dueño del negocio) y
+  compartir link con permisos de editor/lector. Aplica al mismo perfil de
+  facilitador/agencia que este hallazgo ya describe — es la capa de
+  colaboración sobre la vista multi-negocio (V2-F), no una feature
+  independiente. Dependencia explícita de Victor: "solo tiene sentido
+  cuando el producto funcione de forma estable para un solo usuario" —
+  no construir antes de validar retención individual del ICP primario.
+
+Acción: NO actuar ahora. Documentar para evaluación en Q3, cuando el
+  producto esté validado con el segmento primario directo (ICP de baja
+  madurez digital — ver H23-F2). La oportunidad B2B2C se construye sobre
+  un producto que ya funciona para el usuario final.
+
+Severidad: N/A (roadmap)
+Prioridad: P3
+
+=================================================================
+HALLAZGO 28 — ICP de baja madurez digital confirmado 6/6 testers (ciclo cerrado)
+Categoría: Validación de producto (informativo, no requiere código)
+Backlog ref: Victor V3, Cris C2
+=================================================================
+Qué pasó: Con Cris (6to y último tester del primer ciclo) el patrón se
+  cierra sin ambigüedad. Cita textual de Victor: el producto "está más
+  enfocado y le va a hacer mucho más ayuda a alguien que no sabe nada y
+  que no se ha estado dedicando realmente a las redes." Cris tuvo la
+  reacción emocional más fuerte de los 6 testers: "está perfecto eso, es
+  lo que ando buscando" y cerró con "estoy muy contenta" — no cortesía,
+  conexión emocional real con un problema resuelto.
+
+Tabla de validación cruzada final (6/6 testers, ciclo 1 cerrado):
+  Tester           Madurez     Onboarding   Activó         Validación
+  Tienda de Plata  Media-Alta  Self-service No             "Viable para quien inicia de cero"
+  Jorge (Batas)    Baja        Guiado       Sí, día 1      Es el ICP — publicó mismo día
+  Aurora (Ice Party) Baja      Guiado       Sí, día 1      Es el ICP — publicó mismo día
+  Bryan (Agencia)  Alta        Self-service No (abandonó)  "Llama la atención" pero abandonó
+  Victor (Academia) Alta       Guiado       En proceso     "Perfecto para quien no sabe nada" + B2B2C
+  Cris (Perro Rebelde) Baja    Guiado       Sí (esperado)  "Estoy muy contenta" — reacción más fuerte del ciclo
+
+Resultado consolidado (ver documento "Consolidado Fase 1"):
+  3 de 3 testers del segmento primario (Jorge, Aurora, Cris) encontraron
+  valor directo e inmediato. 3 de 3 testers fuera del segmento (Tienda
+  de Plata, Bryan, Victor) NO encontraron valor directo para sí mismos
+  — Victor lo reconoció desde afuera y se posicionó como facilitador
+  (ver H27). Segmentación con 100% de match en ambos lados.
+
+  Patrón onboarding (definitivo con 6 testers): guiado 4/4 completaron
+  (100%), 3/4 activaron o comprometieron (75%). Self-service 1/2
+  completó (50%), 0/2 activó (0%). Refuerza H13 — el onboarding
+  self-service no es una mejora incremental, es prerrequisito para
+  escalar sin guía humana.
+
+Decisión que esto habilita: el posicionamiento para principiantes ya no
+  es hipótesis, es dato con 6/6 testers y ciclo cerrado. Todo el
+  messaging, copy, onboarding y pricing debe diseñarse para el perfil de
+  baja madurez digital. Ya se implementó parcialmente en H23-F2 (copy de
+  landing); este hallazgo es la confirmación final que cierra esa
+  decisión — no diluir el mensaje intentando atraer también al usuario
+  avanzado.
+
+Severidad: N/A (informativo — cierra el debate de ICP para el ciclo 1)
+Prioridad: Ninguna (decisión, no falta código)
+
+=================================================================
+HALLAZGO 29 — Referido potencial: Alejo (catering/bar)
+Categoría: Operaciones / canal de referidos
+Backlog ref: Victor V4
+=================================================================
+Qué pasa: Victor mencionó a "Alejo", contacto de su comunidad con un
+  negocio de producción/catering con barra — "su negocio tiene bastante
+  potencia." Victor ya trabajó con él en estructura de costos y
+  propuesta de valor.
+
+Acción: preguntar a Victor si puede presentar a Alejo para el test. No
+  buscarlo directamente — que la introducción venga de Victor. Sirve
+  también como primera prueba real del canal de referidos orgánicos.
+
+Criterio de éxito: Alejo se convierte en tester vía referido de Victor.
+
+Severidad: N/A (oportunidad operativa)
+Prioridad: P2
+
+=================================================================
+HALLAZGO 30 — Fatiga creativa en usuarios avanzados: oportunidad de valor no explorada
+Categoría: Roadmap / positioning
+Backlog ref: Victor V5
+=================================================================
+Qué pasa: Victor, al atender negocios similares entre sí, "ya no se me
+  ocurre nada" porque la comunicación termina siendo casi la misma aunque
+  el producto cambie. Cita: "la señora que hace pan y agua, aunque los
+  productos son distintos en sabor, para la comunicación es casi lo
+  mismo, entonces uno queda como que ya no se me ocurre nada."
+
+Por qué importa: sugiere que incluso el usuario avanzado (fuera del ICP
+  primario, ver H28) puede encontrar valor en la herramienta — no como
+  generador principal de contenido, sino como "creatividad de respaldo"
+  cuando se le acaban las ideas. No reemplaza su proceso, lo alimenta.
+
+Implicación para el roadmap: si se expande al segmento de mayor madurez
+  más adelante, el positioning no sería "te hacemos el contenido" (lo
+  perciben como básico, ver H28) sino "te damos ideas frescas cuando se
+  te acaban." Propuesta de valor distinta para segmento distinto — no
+  mezclar con el mensaje del ICP primario.
+
+Severidad: N/A (roadmap)
+Prioridad: P3
+
+=================================================================
+HALLAZGO 31 — "Horario sugerido" del email no coincide con la hora real de envío
+Categoría: Bug / backend / scheduling
+Backlog ref: —
+Estado: ✅ RESUELTO — 2026-07-02
+=================================================================
+Surfaceado por: Anuar (Ágora Barra de Café: correo decía "Horario
+  sugerido: 17:00" y llegó a las 18:00). Verificado con DB: ocurría en
+  TODOS los testers reales, no era un caso aislado.
+
+Causa raíz (dos fuentes de hora independientes que nunca se cruzaban):
+  1. `suggested_time` (lo que el email MOSTRABA, "Horario sugerido"):
+     lo inventaba Gemini al generar el texto del post (text_generator.py,
+     prompt pide variar entre 09:00/12:00/17:00/19:00). Era decorativo.
+  2. `scheduled_at` (la hora REAL de envío, usada por
+     schedule_daily_emails() para el enqueue en RQ): la calcula
+     smart_scheduler.py con tabla fija por industria/día de la semana —
+     sin mirar el suggested_time de Gemini.
+  tasks.py parseaba el suggested_time de Gemini y lo guardaba tal cual,
+  mientras `scheduled` (la variable real de envío) venía de
+  smart_schedule_dates() — nunca se sincronizaban.
+
+Verificación en DB previa al fix (testers reales, excluyendo cuentas de
+  prueba de Anuar): 5 de 6 testers con 6/7 posts con hora NO coincidente,
+  1 tester con 5/7 no coincidente. Sistémico al 100% de testers reales.
+
+Fix aplicado:
+  core/content_pipeline/tasks.py — en content_generation_task() y
+  generate_next_week(), `suggested_time` ahora se deriva de la hora real
+  ya calculada (`scheduled.astimezone(MEXICO_TZ).time()`) en vez del
+  valor inventado por Gemini. No se tocó scheduled_at (hora real de
+  envío, ya era correcta) ni el prompt de Gemini.
+  Tests: 8/9 pasan en test_tasks.py (el 1 que falla es un mock de GCS
+  preexistente, no relacionado — confirmado corriendo en el commit previo).
+  Backend y rqworker reiniciados para tomar el cambio.
+
+Backfill de datos: 108 ContentPost con status='pending' tenían
+  suggested_time desincronizado — corregidos con UPDATE directo en
+  producción (solo el campo de texto suggested_time, no scheduled_at).
+  0 registros pendientes con desajuste tras el backfill.
+
+Severidad: Media-Alta (afectaba percepción de confiabilidad en ~100% de
+  los testers, aunque no rompía la entrega real del contenido)
+Prioridad: P0 — resuelto el mismo día que se reportó.
+
+=================================================================
+HALLAZGO 32 — Login/registro falla con múltiples sesiones de Google activas en desktop
+Categoría: UX / autenticación
+Backlog ref: Cris C1, consolidado C6-A, C6-B
+=================================================================
+Surfaceado por: Cris (El Perro Rebelde). Intentó registrarse en
+  computadora pero tenía una sesión previa activa de otro servicio (su
+  prepa en línea) y varias cuentas de correo — no recordaba cuál era la
+  del negocio. El login no avanzó. Cambió al teléfono y completó todo el
+  registro sin más problemas.
+
+Costo medido: ~8 de los 30 minutos de sesión se fueron en esta fricción
+  (~5 min según el backlog de Cris, ~8 min según el desglose del
+  consolidado). Sin eliminar esta fricción, la sesión hubiera bajado a
+  ~22 min, dentro del rango objetivo.
+
+Por qué importa: el ICP es de baja madurez digital. Si el registro
+  falla en el primer intento y no hay alguien guiando en llamada (como
+  sí tenía Cris), el riesgo de abandono es alto — cerrar la pestaña es
+  más fácil que resolver un conflicto de sesión de Google.
+
+Dos acciones, un mismo origen:
+  1. Verificar que el flujo de OAuth maneje bien múltiples sesiones de
+     Google en el mismo navegador. Agregar opción "Usar otra cuenta" si
+     Google preselecciona la cuenta equivocada.
+  2. Priorizar experiencia mobile: el teléfono funcionó sin fricción
+     para Cris y es probablemente el dispositivo de trabajo principal
+     del segmento (micro-emprendedores sin oficina/setup de escritorio).
+     Hacer "Continuar con Google" visualmente más prominente que el
+     formulario manual — es menos fricción y evita el problema de
+     contraseñas olvidadas entre las "varias cuentas" que maneja el ICP.
+
+Criterio de éxito: el usuario completa el registro en menos de 2 minutos
+  sin asistencia, incluso con sesiones de Google previas activas.
+
+Severidad: Media (no bloquea si hay guía humana, pero sí en self-service)
+Prioridad: P1
+
+=================================================================
+HALLAZGO 33 — Falta autenticación de dominio de email (SPF/DKIM/DMARC)
+Categoría: Infraestructura / deliverability
+Backlog ref: consolidado C1 (P0)
+=================================================================
+Surfaceado por: Análisis consolidado de Fase 1, a partir del caso de
+  Tienda de Plata (email cayó en Promociones/spam — ver nota en sección
+  INMEDIATO al inicio de este documento y H17).
+
+Qué pasa: H17 ya cubre el copy del subject line para mejorar apertura,
+  pero el consolidado señala un problema de capa distinta y anterior: la
+  configuración de autenticación de dominio (SPF, DKIM, DMARC) para el
+  dominio de envío. Sin estos registros DNS correctos, Gmail/Outlook
+  tienen más probabilidad de clasificar el correo como Promociones o
+  spam sin importar qué tan bueno sea el subject o el contenido — es un
+  problema de reputación/infraestructura, no de copy.
+
+Relación con H17: complementarios, no duplicados. H17 = qué dice el
+  asunto. H33 = si el correo tiene la credibilidad técnica para llegar
+  a Principal antes de que el usuario siquiera lea el asunto.
+
+Acción recomendada:
+  Verificar en el proveedor de envío (Mailgun, según referencias previas
+  en este documento) que el dominio tenga SPF, DKIM y, si es posible,
+  DMARC configurados y verificados — no solo el registro por defecto del
+  proveedor. Confirmar con una herramienta de test de deliverability
+  (ej. mail-tester.com) antes del siguiente batch de testers.
+
+Severidad: Alta (afecta si el usuario ve el correo en absoluto — todo lo
+  demás en el producto es irrelevante si el email no llega a Principal)
+Prioridad: P0
+
+=================================================================
+HALLAZGO 34 — El path "sin sitio web" debería ser la opción por default, no la alternativa
+Categoría: UX de formulario / onboarding
+Backlog ref: Cris C3
+=================================================================
+Surfaceado por: Cris (El Perro Rebelde). No tiene sitio web, usó el path
+  manual, y el Brand DNA generado acertó al 100% — ella lo validó punto
+  por punto en voz alta (negocio, audiencia, tono, keywords, todo
+  correcto).
+
+Por qué importa: Victor (H26) había sugerido el path manual como
+  fallback cuando el scraping web alucina. La sesión de Cris muestra
+  algo más fuerte: el path manual no es solo un fallback técnico, es
+  probablemente el path PRIMARIO para el ICP, que en su mayoría no tiene
+  sitio web. Y funciona bien cuando se usa directamente.
+
+Acción recomendada: invertir el orden/jerarquía visual de las dos
+  opciones en el formulario de landing.html. Hoy el tab activo por
+  default es "Tengo sitio web"; considerar cambiar a algo como
+  "Describe tu negocio" como opción principal y "¿Tienes sitio web?
+  Agrégalo para mejorar el resultado" como complemento opcional — en
+  vez de presentar ambos paths como alternativas simétricas.
+
+Severidad: Baja (ambos paths ya funcionan; esto es optimización de
+  jerarquía visual, no un fix de funcionalidad rota)
+Prioridad: P2
+
+=================================================================
+HALLAZGO 35 — Falta comunicar la consistencia visual de marca como diferenciador
+Categoría: Messaging / posicionamiento
+Backlog ref: consolidado N6-A (Aurora)
+=================================================================
+Surfaceado por: Análisis consolidado de Fase 1, atribuido a Aurora. El
+  detalle completo de esta observación está en un backlog anterior de
+  Aurora no revisado en esta sesión — este hallazgo documenta la entrada
+  del consolidado tal como aparece ahí; conviene confirmar el contexto
+  exacto con el backlog original de Aurora antes de actuar.
+
+Qué pasa (según el consolidado): la herramienta genera imágenes con
+  colores y estilo consistentes con la marca del usuario en cada post,
+  pero esto no se comunica explícitamente en ningún punto del producto
+  (landing, onboarding, o el propio email) como un diferenciador de
+  valor frente a hacerlo manualmente o con herramientas genéricas.
+
+Acción recomendada: agregar una línea de copy en landing u onboarding
+  que lo explicite, ej. "Cada post usa los colores y el estilo de tu
+  marca — no una plantilla genérica." Bajo prioridad porque es un ajuste
+  de mensaje, no de producto.
+
+Severidad: Baja
+Prioridad: P2
+
+=================================================================
+HALLAZGO 36 — Riesgo de ban en Meta/Facebook por copy en audiencias sensibles
+Categoría: Confiabilidad / moderación de contenido / legal
+Backlog ref: Victor VP1, VP4 (notas de voz post-sesión, 2026-07-03)
+=================================================================
+Surfaceado por: Victor — con experiencia real, no hipotética: fue
+  baneado de Facebook por copy con promesas infladas ("resultados
+  garantizados", "tu hijo no fallará", "superar su potencial") dirigido
+  a audiencia infantil, en un negocio educativo previo suyo (no generado
+  por Cosmic, pero mismo patrón de riesgo que el copy de Cosmic puede
+  reproducir).
+
+Distinción importante con H7: H7 es el riesgo de que Google suspenda la
+  cuenta de Vertex AI de Cosmic por abuso de la API (prompts maliciosos,
+  jailbreaks, volumen). H36 es distinto: el riesgo de que la cuenta de
+  Facebook/Instagram DEL USUARIO sea baneada porque el copy que Cosmic le
+  entrega, aunque generado sin mala intención, viola políticas de Meta
+  para audiencias sensibles. Son dos plataformas, dos cuentas, y dos
+  mecanismos de riesgo distintos — no duplican, se complementan.
+
+Qué pasa: Meta tiene políticas estrictas para audiencias sensibles:
+  menores de edad, salud/medicina, servicios financieros/créditos,
+  suplementos alimenticios, alcohol/tabaco, temas político-sociales. El
+  copy generado por Cosmic no considera estas restricciones. Un usuario
+  con criterio de marketing detectaría el riesgo y ajustaría el copy
+  antes de publicar; el ICP actual (baja madurez digital) aprueba lo que
+  "se ve bonito" sin evaluar riesgo de políticas. Cita de Victor: "le
+  estás dando una cuchilla a un mono" — no como insulto al usuario, sino
+  para describir la asimetría entre una herramienta potente y un usuario
+  sin la capa de criterio para usarla con audiencias sensibles.
+
+Matiz importante (reduce urgencia, no la elimina): la mayoría del ICP
+  actual (batas de carnicero, ropa para perros upcycled, postres) NO
+  opera en nichos sensibles — el riesgo hoy es bajo. Pero la herramienta
+  está abierta a cualquier negocio; si un doctor, una escuela o un asesor
+  financiero se registran, el riesgo es real e inmediato.
+
+VP4 — matiz de segmentación que se desprende de esto: el ICP no cambia
+  (sigue siendo baja madurez digital), pero necesita una distinción
+  interna de riesgo:
+    Novato + nicho no sensible (ropa, comida, artesanía) → riesgo bajo,
+      copy estándar funciona.
+    Novato + nicho sensible (niños, salud, finanzas)     → riesgo alto,
+      necesita copy conservador + advertencia explícita.
+    Experto + cualquier nicho                             → riesgo muy
+      bajo, él mismo filtra el copy.
+  No se trata de excluir usuarios, sino de detectar el nicho sensible en
+  onboarding y activar protecciones automáticas solo ahí.
+
+Solución recomendada en 3 capas:
+
+  Capa 1 — Negocio (inmediato, sin código):
+    En la llamada de onboarding preguntar: "¿Tu producto o servicio
+    involucra niños, salud o temas financieros?" Si sí, advertir
+    verbalmente que revise cada post antes de publicar por las políticas
+    de Meta. Documentar qué testers operan en nichos sensibles para
+    monitoreo especial.
+
+  Capa 2 — Técnico (corto plazo):
+    Agregar al system prompt de generación de copy (image_generator.py /
+    text_generator.py): evitar promesas absolutas ("garantizado", "nunca
+    fallará"), evitar lenguaje retador con audiencias vulnerables, tono
+    neutro-positivo por default en nichos sensibles, sin superlativos de
+    resultado en salud/educación/finanzas.
+    Detectar nicho sensible en el Brand DNA (keywords: "niños", "salud",
+    "médico", "clínica", "finanzas", "crédito") → activar automáticamente
+    modo de copy conservador para ese negocio. No elimina el riesgo, lo
+    reduce significativamente.
+
+  Capa 3 — Legal (antes del lanzamiento público):
+    Cláusula en términos y condiciones: "El contenido generado es una
+    sugerencia. El usuario es responsable de verificar que cumple con
+    las políticas de la plataforma donde lo publique."
+    Nota breve y no intrusiva en la pantalla de aprobación de posts:
+    "Revisa que el contenido cumpla con las políticas de tu red social
+    antes de publicar." Sin disclaimer largo que nadie lea.
+
+Criterio de éxito: ningún tester ni usuario futuro recibe un baneo de
+  Meta atribuible a contenido generado por la herramienta.
+
+Severidad: Alta (impacto catastrófico y específico para el usuario si
+  ocurre — pierde su cuenta de Facebook/Instagram, no solo un post)
+Prioridad: P0 — Capa 1 es inmediata y no requiere código; capas 2 y 3
+  antes del siguiente batch de testers con negocios fuera del nicho
+  actual, y obligatorias antes de producción pública.
+
+=================================================================
+HALLAZGO 37 — Colores de marca alucinados cuando se describen con palabras (no hex)
+Categoría: Confiabilidad / generación de imágenes
+Backlog ref: Victor VP2 (notas de voz post-sesión, 2026-07-03)
+=================================================================
+Surfaceado por: Victor, en la misma prueba del path "sin web" (ver H26
+  para el hallazgo general de alucinación del Brand DNA). Describió sus
+  colores de marca como "rosa coral" y "azul turquesa": el modelo
+  alucinó variaciones de azul incorrectas incluso con código de tester
+  activo (que sí redujo otras alucinaciones de descripción del negocio).
+  Cuando Victor puso los códigos hexadecimales exactos, el modelo los
+  reconoció y usó correctamente.
+
+Qué pasa: el modelo es notablemente menos confiable interpretando color
+  en lenguaje natural que en hex explícito. Para el ICP actual, que no
+  sabe qué es un código hexadecimal, describir el color con palabras es
+  la única opción disponible hoy — y es precisamente el modo menos
+  confiable.
+
+Acción recomendada:
+  Corto plazo: agregar un color picker visual en el formulario de
+  landing.html en vez de (o adicional a) un campo de texto libre para
+  colores — el usuario selecciona visualmente, la herramienta captura el
+  hex automáticamente, sin que el usuario necesite saber qué es un hex.
+  Complementario: si el usuario ya subió un logo, extraer los colores
+  del logo automáticamente (pipeline técnico aparte — potencialmente
+  reutiliza lógica ya existente en logo_analyzer.py).
+  En el prompt de generación: instruir explícitamente al modelo a usar
+  SOLO los colores hex proporcionados y no inventar variaciones cuando
+  reciba una descripción en palabras.
+
+Criterio de éxito: los colores generados en las imágenes coinciden con
+  la paleta de marca del usuario en al menos 80% de los posts.
+
+Severidad: Media (afecta consistencia de marca, no rompe el flujo)
+Prioridad: P1
+
+=================================================================
+CAMBIOS APLICADOS — 2026-06-30
+=================================================================
+Los siguientes hallazgos tienen cambios de UI implementados (pendientes de commit):
+
+H8  — C IMPLEMENTADO: copy warning en formulario de fotos de producto.
+      "Sube imágenes sin texto ni marcas de agua para mejores resultados."
+      Archivo: landing.html (dentro de <details> de secciones opcionales)
+
+H9  — PARCIAL: login subtitle y hero text actualizados.
+      Login: "Un post diario listo para publicar — imagen, texto y hashtags."
+      Hero: "...imágenes profesionales y textos listos para copiar y publicar."
+      Pendiente: ejemplo visual del resultado antes del formulario.
+
+H12 — PARCIAL: campo renombrado + micro-copy mejorado + colapsado con H13.
+      "Posts anteriores" → "Publicaciones anteriores"
+      Micro-copy: "Si tienes publicaciones que te gustan, súbelas como imagen.
+      Las usaremos como referencia de estilo. Sin esto generamos desde cero."
+
+H13 — PARCIAL: secciones opcionales colapsadas en <details> expandible.
+      "Publicaciones anteriores" + "Fotos de producto" ahora están bajo:
+      "¿Quieres mejorar el resultado? Agrega más info (opcional)"
+      El formulario visible por defecto queda: URL/nombre → logo → botón.
+      Pendiente: progress bar, tooltips, video walkthrough.
+      VALIDADO por Cris (2026-07-02, backlog C5): vio la opción de fotos
+      de producto, entendió que era opcional, decidió no usarla en el
+      momento sin sentirse obligada ni confundida. Confirma que colapsar
+      campos opcionales fue la dirección correcta.
+
+H14 — RESUELTO (ya estaba): placeholder de descripción ya incluye las 3
+      preguntas: "¿Qué vendes? ¿A quién? ¿Qué te hace diferente?"
+
+H23 — PARCIAL (F1): eliminada la jerga técnica "Imagen 3 y Gemini" del hero.
+      F2 → PENDIENTE: copy en landing. Propuesta: "¿Tienes un negocio pero
+        no publicas en redes? Esto es para ti." Va en hero o features.
+      F3 → NO ES UI: es el guión de la llamada de onboarding verbal.
+        Decirle al tester explícitamente: "esta semana medimos constancia y
+        calidad del contenido, no ventas." También aplica al cuestionario del
+        viernes — no preguntar por ventas. No requiere cambio de código.
+
+Registro técnico: "Cifrada con PBKDF2-SHA256 + salt único..." en registro
+      reemplazada por "Tu información está protegida." (register.html L72)
+      Scope: mejora de ICP, dentro del contexto de H13.
+
+=================================================================
+ACLARACIÓN DE ALCANCE — H10 y H23
+=================================================================
+H10 — "Pantalla de confirmación post-análisis":
+  Es la pantalla de RESULTADOS que aparece cuando el análisis YA terminó
+  (results.html), no la pantalla del spinner durante el análisis.
+  La pantalla del spinner ya tiene mensajes de progreso — eso está bien.
+  Lo que falta es un bloque en results.html que explique el flujo siguiente:
+    "Así funciona de aquí en adelante:
+     1. Tu ADN de marca ya está — revísalo aquí.
+     2. Cada día recibirás un correo con tu post del día.
+     3. Tu primer post está listo para hoy. Revísalo ahora →"
+  Archivo a editar: core/brand_dna/templates/brand_dna/results.html
+
+H23 F2 vs F3 — desglose de responsabilidad:
+  F2 (posicionamiento principiantes) → cambio de COPY en landing.html
+  F3 (expectativa de ventas) → guión de la llamada de onboarding + cuestionario.
+    No requiere cambio en código. Es un cambio operativo, no de producto.
+
+=================================================================
+INCIDENTE TÉCNICO — Scheduler: 76 jobs cancelados el 2026-06-26
+=================================================================
+Fecha: 2026-06-26 19:59 UTC
+Commit relacionado: 154dfd6 (fix: cancelar RQ jobs al eliminar calendario)
+
+Qué pasó:
+  Al hacer deploy del commit 154dfd6, se realizó una "limpieza manual de jobs
+  huérfanos" que canceló 76 jobs de la cola RQ. El problema: la limpieza no
+  distinguió entre calendarios eliminados (soft delete) y calendarios activos,
+  cancelando también los jobs de correos diarios de cuentas de prueba activas.
+
+Impacto:
+  - Cuentas afectadas: SOLO cuentas de prueba de Anuar
+    (contacto.neia@gmail.com, ventas@anuarbarrera.dev, contacto@anuarbarrera.dev)
+  - Posts vencidos sin enviar: 35 posts desde el 25 de junio
+  - Testers reales: NINGUNO afectado (sus jobs no estaban en el lote cancelado)
+
+Calendarios afectados (sin envío de correos diarios desde la fecha):
+  Veterinaria Gregorio, DIALOGIX, Pilar Olivares, Tienda de Plata (pruebas),
+  Ice Party (varias), El perro rebelde/Rebelde, Tu Web MX — todos en cuentas
+  de Anuar.
+
+Estado actual:
+  - Los 35 posts siguen en status=pending en la BD
+  - Los nuevos calendarios (Agora Cafe, etc.) tienen sus jobs correctamente
+    programados en rq:scheduled:default con fechas futuras → funcionan bien
+  - El scheduler con --with-scheduler está activo y procesando correctamente
+
+Acción tomada:
+  Ninguna — posts vencidos son de cuentas de prueba, no afectan testers reales.
+  Los nuevos análisis funcionan con normalidad.
+
+Pendiente (opcional):
+  Decidir si se re-envían manualmente los posts vencidos de las cuentas de
+  prueba o se dejan como están (son test data, no producción real).
