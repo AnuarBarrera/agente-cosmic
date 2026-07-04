@@ -76,7 +76,6 @@ def content_generation_task(job_id: str) -> None:
         product_images_bytes = _load_product_images(calendar.active_product_images)
 
         for i, post_data in enumerate(posts_data, start=1):
-            hour, minute = map(int, post_data.get('suggested_time', '19:00').split(':'))
             scheduled = scheduled_dates[i - 1]
 
             day_product = _product_image_for_day(i, product_images_bytes)
@@ -100,7 +99,7 @@ def content_generation_task(job_id: str) -> None:
                 day_number=i,
                 caption=post_data['caption'],
                 image_url=image_url,
-                suggested_time=f"{hour:02d}:{minute:02d}",
+                suggested_time=scheduled.astimezone(MEXICO_TZ).time(),
                 hashtags=post_data.get('hashtags', []),
                 scheduled_at=scheduled,
             )
@@ -173,15 +172,15 @@ def generate_next_week(calendar: ContentCalendar, week_number: int) -> None:
     base_day = (week_number - 1) * 7
 
     for i, post_data in enumerate(posts_data, start=1):
-        hour, minute = map(int, post_data.get('suggested_time', '19:00').split(':'))
+        scheduled = scheduled_dates[i - 1]
         ContentPost.objects.create(
             calendar=calendar,
             day_number=base_day + i,
             caption=post_data['caption'],
             image_url='',
-            suggested_time=f"{hour:02d}:{minute:02d}",
+            suggested_time=scheduled.astimezone(MEXICO_TZ).time(),
             hashtags=post_data.get('hashtags', []),
-            scheduled_at=scheduled_dates[i - 1],
+            scheduled_at=scheduled,
         )
 
     schedule_daily_emails(calendar)
