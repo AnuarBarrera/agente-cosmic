@@ -5,8 +5,8 @@ import django_rq
 from django.conf import settings
 from core.brand_dna.models import AnalysisJob, BrandDNA
 from core.brand_dna.extractors.web_scraper import WebScraper
+from core.brand_dna.extractors.manual_extractor import ManualBrandExtractor
 from core.brand_dna.extractors.logo_analyzer import LogoAnalyzer
-from core.brand_dna.extractors.posts_analyzer import PostsAnalyzer
 from core.content_pipeline.image_utils import normalize_image
 from core.shared.metrics import ANALYSIS_JOBS_TOTAL, ANALYSIS_DURATION
 from core.shared.gcs_uploads import read_upload, upload_exists
@@ -22,15 +22,19 @@ def analyze_brand_task(job_id: str) -> None:
     start = time.monotonic()
     try:
         job.update_progress(AnalysisJob.STAGE_WEB, 10)
+        scraped_context, scraped_colors = '', []
         if job.business_url:
-            scraper = WebScraper()
-            web_data = scraper.extract(job.business_url)
-        else:
-            from core.brand_dna.extractors.manual_extractor import ManualBrandExtractor
-            web_data = ManualBrandExtractor().extract(
-                business_name=job.business_description.split('\n')[0][:100],
-                description=job.business_description,
-            )
+            try:
+                scraped_context, scraped_colors = WebScraper().fetch_context(job.business_url)
+            except Exception as e:
+                logger.warning(f"No se pudo escrapear {job.business_url} para job {job_id}: {e}")
+        literal_business_name = job.business_description.split('\n')[0][:100].strip()
+        web_data = ManualBrandExtractor().extract(
+            business_name=literal_business_name,
+            description=job.business_description,
+            scraped_context=scraped_context,
+            scraped_colors=scraped_colors,
+        )
         job.update_progress(AnalysisJob.STAGE_WEB, 30)
 
         job.update_progress(AnalysisJob.STAGE_LOGO, 35)
@@ -42,22 +46,11 @@ def analyze_brand_task(job_id: str) -> None:
                 logo_data = analyzer.analyze(logo_bytes, 'image/webp')
         job.update_progress(AnalysisJob.STAGE_LOGO, 55)
 
-        job.update_progress(AnalysisJob.STAGE_POSTS, 58)
-        posts_images = []
-        for img_path in (job.post_images_paths or []):
-            if upload_exists(img_path):
-                posts_images.append(normalize_image(read_upload(img_path)))
-        posts_analyzer = PostsAnalyzer()
-        posts_data = posts_analyzer.analyze(
-            images=posts_images if posts_images else None,
-            text=job.posts_text if job.posts_text else None,
-            profile_url=job.profile_url if job.profile_url else None,
-        )
         job.update_progress(AnalysisJob.STAGE_POSTS, 75)
 
         BrandDNA.objects.create(
             job=job,
-            business_name=web_data.get('business_name', 'Mi Negocio'),
+            business_name=literal_business_name or 'Mi Negocio',
             business_url=job.business_url,
             description=web_data.get('description', ''),
             keywords=web_data.get('keywords', []),
@@ -65,9 +58,6 @@ def analyze_brand_task(job_id: str) -> None:
             tone=web_data.get('tone', 'profesional'),
             primary_colors=logo_data.get('primary_colors') or web_data.get('brand_colors', []),
             logo_elements=logo_data.get('logo_elements', ''),
-            posting_style=posts_data.get('posting_style', ''),
-            avg_caption_length=posts_data.get('avg_caption_length', 150),
-            common_hashtags=posts_data.get('common_hashtags', []),
         )
         job.update_progress(AnalysisJob.STAGE_CONTENT, 78)
 
@@ -75,7 +65,9 @@ def analyze_brand_task(job_id: str) -> None:
         ANALYSIS_JOBS_TOTAL.labels(status='completed').inc()
 
         from core.content_pipeline.tasks import content_generation_task
-        django_rq.enqueue(content_generation_task, str(job_id))
+        # Genera 7 imagenes con reintentos de QC — el timeout global (360s) se queda
+        # corto. 25 min da margen amplio incluso con reintentos en varios dias.
+        django_rq.enqueue(content_generation_task, str(job_id), job_timeout=1500)
 
     except Exception as e:
         ANALYSIS_DURATION.observe(time.monotonic() - start)

@@ -1,18 +1,18 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>Dia {{ post.day_number }} — Agente Cosmic</title></head>
+<head><meta charset="utf-8"><title>Recordatorio Día {{ post.day_number }} — Agente Cosmic</title></head>
 <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
-  <h1 style="color: #1a1a2e;">Dia {{ post.day_number }} de tu calendario</h1>
-  <p>Contenido listo para publicar hoy en <strong>{{ post.calendar.brand_dna.business_name }}</strong>.</p>
+  <p style="margin: 0 0 16px; font-size: 0.72rem; color: #999; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;">📬 Recordatorio automático</p>
 
-  <div style="background: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
-    <h2 style="margin-top: 0;">Tu post de hoy</h2>
-    <p style="font-size: 16px;">{{ post.caption }}</p>
-    {% if post.image_url %}
-    <img src="{{ post.image_url }}" style="max-width: 100%; border-radius: 8px; margin: 12px 0;" alt="Imagen del post">
-    {% endif %}
-    <p><strong>Horario sugerido:</strong> {{ post.suggested_time|time:"H:i" }}</p>
-    <p><strong>Hashtags:</strong> {{ post.hashtags|join:" " }}</p>
+  <h1 style="color: #1a1a2e;">Hoy es tu Día {{ post.day_number }}</h1>
+  <p>Tu post para <strong>{{ post.calendar.brand_dna.business_name }}</strong> ya está listo — solo falta que lo publiques.</p>
+
+  <div style="text-align: center; margin: 28px 0;">
+    <a href="{{ calendar_review_url }}"
+       style="display: inline-block; padding: 14px 32px; background: #e94560; color: #fff;
+              border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 1rem;">
+      Ver mi post de hoy →
+    </a>
   </div>
 
   {% if post.day_number|divisibleby:7 %}

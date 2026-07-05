@@ -12,11 +12,11 @@ def schedule_daily_emails(calendar: ContentCalendar) -> None:
     queue = django_rq.get_queue('default')
     now = timezone.now()
     posts = list(calendar.posts.filter(
-        day_number__gt=1, status=ContentPost.STATUS_PENDING
+        status=ContentPost.STATUS_PENDING
     ).order_by('day_number'))
     for post in posts:
         delta = post.scheduled_at - now
-        if delta.total_seconds() < 0:
-            delta = timedelta(minutes=1)
+        if delta.total_seconds() < 300:
+            delta = timedelta(minutes=5)
         queue.enqueue_in(delta, send_daily_email_task, str(post.id))
         logger.info(f"Dia {post.day_number} programado en {delta}")

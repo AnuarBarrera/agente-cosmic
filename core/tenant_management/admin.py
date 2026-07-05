@@ -87,6 +87,9 @@ class InvitationCodeAdmin(admin.ModelAdmin):
 
 class PlanAdmin(admin.ModelAdmin):
     list_display = ('name', 'max_calendars_per_week', 'max_post_regenerations', 'max_post_edits', 'price')
+    # max_daily_interactions / max_monthly_interactions son campos heredados de Dialogix,
+    # no usados en el flujo de Agente Cosmic — ocultos para reducir confusión en el admin.
+    exclude = ('max_daily_interactions', 'max_monthly_interactions')
 
 
 class AnalysisJobAdmin(admin.ModelAdmin):

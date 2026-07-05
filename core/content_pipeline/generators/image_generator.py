@@ -364,7 +364,9 @@ class ImageGenerator:
 
         _FALLBACK_PROMPT = (
             f"Real-world {'product photography' if keyword_product_mode else 'lifestyle photograph'} inspired by: {brand_ctx[:100]}. "
-            f"Natural lighting, shallow depth of field. Color palette: {color_str}. Mood: {tone}. "
+            f"Natural lighting, shallow depth of field. Prominently feature the brand color palette ({color_str}) "
+            f"in props, backdrop, or accent elements — the background should visibly reflect these colors, not "
+            f"look like a generic neutral stock photo. Mood: {tone}. "
             f"{'NO people, NO children, NO hands. Focus on the product itself.' if keyword_product_mode else 'Authentic setting, real textures, professional photography style.'} "
             f"NO laptops, NO computers, NO phones, NO desk, NO office, NO keyboard. "
             f"NO text, NO logos, NO UI elements. Square 1:1 format. Photorealistic."
@@ -383,7 +385,9 @@ class ImageGenerator:
                 f"  Think: overhead flat lay, artful food arrangement, colorful props matching brand palette.\n"
                 f"- If risk=NO  → mode=\"lifestyle\": real-world scene reflecting the brand's world and customers.\n"
                 f"  Think: service environment, lifestyle moment, nature matching brand values. NO offices or screens.\n\n"
-                f"Both modes: real textures, natural light, depth. "
+                f"Both modes: real textures, natural light, depth. Make the brand colors ({color_str}) VISUALLY "
+                f"PROMINENT in the scene (props, walls, fabrics, accents) — avoid plain neutral/beige backgrounds "
+                f"that could belong to any brand; the color palette should be clearly recognizable at a glance. "
                 f"End with: 'Natural lighting. Photorealistic. NO text. NO logos.' (add 'NO people.' if mode=product)\n\n"
                 f"Respond ONLY with this JSON (no markdown, no explanation):\n"
                 f'{{\"mode\": \"product\", \"prompt\": \"...\"}} or {{\"mode\": \"lifestyle\", \"prompt\": \"...\"}}'
@@ -599,7 +603,11 @@ class ImageGenerator:
                             "Eres 'Cosmic', Director Creativo de Agente Cosmic. "
                             "Generas contenido de marketing para redes sociales. "
                             "Español impecable. Cero errores ortográficos. Nunca inventes palabras. "
-                            "Frases para imagen: cortas, impactantes, máximo 5 palabras."
+                            "Frases para imagen: cortas, impactantes, máximo 5 palabras. "
+                            "Regla de seguridad (siempre aplica): si la marca pertenece a un nicho "
+                            "sensible (niños, salud, medicina, finanzas, crédito, temas legales), usa "
+                            "tono neutro-positivo, evita promesas absolutas y evita lenguaje retador "
+                            "o de urgencia con audiencias vulnerables."
                         ),
                     ),
                 )
@@ -626,9 +634,54 @@ class ImageGenerator:
         'instagram_post_top.html',     # upper third — texto arriba
     ]
 
+    _TEMPLATE_ZONE_MAP = {
+        'bottom': 'instagram_post.html',
+        'top': 'instagram_post_top.html',
+        'center': 'instagram_post_center.html',
+    }
+
+    def _choose_template_for_image(self, background_bytes: bytes) -> str:
+        """Gemini analiza la imagen final (ya recortada al cuadrado) y elige la plantilla
+        que menos interfiere con el sujeto principal, en vez de una elección aleatoria."""
+        try:
+            client = _vertex_client()
+            image_part = types.Part.from_bytes(data=background_bytes, mime_type='image/png')
+            prompt = (
+                "Esta imagen es el fondo de un post de Instagram. Se superpondrá texto "
+                "(titulo, subtitulo, boton) en una franja de la imagen.\n"
+                "Responde UNICAMENTE con este JSON (sin markdown):\n"
+                '{"safe_zone": "top" | "bottom" | "center"}\n\n'
+                "safe_zone es la zona con MENOS elementos visuales importantes (sujeto "
+                "principal, producto, rostros, logos, detalles) para superponer texto:\n"
+                "- 'bottom': el tercio inferior esta vacio o es fondo simple.\n"
+                "- 'top': el tercio superior esta vacio o es fondo simple.\n"
+                "- 'center': ningun tercio esta claramente vacio, pero hay espacio para un "
+                "panel central semi-transparente sin tapar el sujeto por completo."
+            )
+            with track_external_api('gemini', operation='template_select'):
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL,
+                    contents=[image_part, prompt],
+                )
+            record_tokens(resp, operation='template_select',
+                          response_preview=resp.text[:200] if resp.text else '')
+            raw = resp.text.strip()
+            match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                zone = data.get('safe_zone', '')
+                if zone in self._TEMPLATE_ZONE_MAP:
+                    logger.info(f"Zona segura detectada: {zone} -> {self._TEMPLATE_ZONE_MAP[zone]}")
+                    return self._TEMPLATE_ZONE_MAP[zone]
+        except Exception as e:
+            logger.warning(f"Selección de plantilla por IA falló, usando aleatorio: {e}")
+        return random.choice(self._TEMPLATES)
+
     def _render_html_template(self, background_bytes: bytes, content: dict, colors: list[str], svg_overlay: str = '') -> bytes:
-        """Inject background + content + optional SVG overlay into a randomly chosen HTML template → PNG."""
-        template_name = random.choice(self._TEMPLATES)
+        """Inject background + content + optional SVG overlay into an HTML template chosen by
+        Gemini based on where the image has visual space for text → PNG."""
+        background_bytes = _crop_to_square(background_bytes)
+        template_name = self._choose_template_for_image(background_bytes)
         _TEMPLATE_PATH = os.path.normpath(os.path.join(
             os.path.dirname(__file__),
             '..', 'templates', 'content_pipeline', template_name,
@@ -636,8 +689,6 @@ class ImageGenerator:
         logger.info(f"Template seleccionado: {template_name}")
         with open(_TEMPLATE_PATH) as f:
             html = f.read()
-
-        background_bytes = _crop_to_square(background_bytes)
         bg_mime = _detect_mime(background_bytes)
         bg_b64 = base64.b64encode(background_bytes).decode()
         primary = colors[0] if colors else '#e94560'

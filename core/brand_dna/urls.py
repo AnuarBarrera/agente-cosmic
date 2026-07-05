@@ -25,4 +25,6 @@ urlpatterns = [
     path('api/post/<uuid:post_id>/action/', views.post_action_api, name='post_action_api'),
     path('api/calendar/<uuid:job_id>/delete/', views.delete_calendar_api, name='delete_calendar_api'),
     path('api/calendar/<uuid:job_id>/feedback/', views.calendar_feedback_api, name='calendar_feedback_api'),
+    path('api/brand-dna/<uuid:job_id>/field/', views.brand_dna_field_action_api, name='brand_dna_field_action_api'),
+    path('api/calendar/<uuid:job_id>/regenerate/', views.regenerate_calendar_api, name='regenerate_calendar_api'),
 ]

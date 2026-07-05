@@ -37,7 +37,7 @@ def test_send_initial_email_calls_django_send(full_setup):
     job, dna, calendar, posts = full_setup
     with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
         sender = EmailSender()
-        sender.send_initial(job=job, brand_dna=dna, calendar=calendar)
+        sender.send_initial(job=job, brand_dna=dna)
     mock_send.assert_called_once()
     call_kwargs = mock_send.call_args
     assert job.email in call_kwargs[1]['recipient_list']
@@ -49,7 +49,7 @@ def test_send_initial_email_subject_contains_business_name(full_setup):
     job, dna, calendar, posts = full_setup
     with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
         sender = EmailSender()
-        sender.send_initial(job=job, brand_dna=dna, calendar=calendar)
+        sender.send_initial(job=job, brand_dna=dna)
     subject = mock_send.call_args[0][0]
     assert 'Tu Web MX' in subject
 

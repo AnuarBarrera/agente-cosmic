@@ -66,13 +66,13 @@ def _is_neutral(h: str) -> bool:
 class WebScraper:
     def extract(self, url: str) -> dict:
         try:
-            text, css_colors = self._fetch_text_and_colors(url)
+            text, css_colors = self.fetch_context(url)
             return self._analyze_with_vertex(text, css_colors)
         except Exception as e:
             logger.error(f"WebScraper error para {url}: {e}")
             return _FALLBACK.copy()
 
-    def _fetch_text_and_colors(self, url: str) -> tuple[str, list[str]]:
+    def fetch_context(self, url: str) -> tuple[str, list[str]]:
         validate_url_safe(url)
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, timeout=15, headers=headers, allow_redirects=False)

@@ -328,7 +328,7 @@ class InvitationCode(models.Model):
     target_group = models.CharField(max_length=20, default='tester')
     max_uses = models.PositiveIntegerField(default=1)
     times_used = models.PositiveIntegerField(default=0)
-    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_codes')
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_codes', null=True, blank=True)
     is_active = models.BooleanField(default=True)
     expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

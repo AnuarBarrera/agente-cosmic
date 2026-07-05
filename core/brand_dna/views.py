@@ -20,6 +20,10 @@ from core.shared.gcs_uploads import save_upload, read_upload, upload_exists
 logger = logging.getLogger(__name__)
 
 _ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'gif'}
+_ALLOWED_TONES = ('formal', 'casual', 'inspiracional', 'urgente', 'profesional', 'amigable')
+_BRAND_DNA_EDITABLE_FIELDS = {'description', 'audience', 'tone', 'keywords', 'primary_colors'}
+_BRAND_DNA_REANALYZABLE_FIELDS = {'description', 'audience', 'keywords', 'primary_colors'}
+_HEX_COLOR_RE = re.compile(r'^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$')
 
 
 def _safe_extension(filename: str) -> str:
@@ -67,23 +71,18 @@ def analyze_submit(request):
     business_url = request.POST.get('business_url', '').strip()
     business_description = request.POST.get('business_description', '').strip()
     business_name = request.POST.get('business_name', '').strip()
-    posts_text = request.POST.get('posts_text', '').strip()
-    profile_url = request.POST.get('profile_url', '').strip()
 
-    if not business_url and not business_description:
+    if not business_name or not business_description:
         return render(request, 'brand_dna/landing.html', {
-            'error': 'Ingresa la URL de tu negocio o una descripción.',
+            'error': 'Ingresa el nombre y la descripción de tu negocio.',
         })
 
-    if business_name and business_description:
-        business_description = f"{business_name}\n{business_description}"
+    business_description = f"{business_name}\n{business_description}"
 
     job = AnalysisJob.objects.create(
         email=email,
         business_url=business_url,
         business_description=business_description,
-        posts_text=posts_text,
-        profile_url=profile_url,
         user=request.user,
     )
 
@@ -97,19 +96,6 @@ def analyze_submit(request):
         save_upload(logo_bytes, logo_path)
         job.logo_file_path = logo_path
         job.save(update_fields=['logo_file_path'])
-
-    post_paths = []
-    for i, img_file in enumerate(request.FILES.getlist('post_images')):
-        img_bytes = img_file.read()
-        if not _validate_image_bytes(img_bytes):
-            continue
-        img_path = f'uploads/post_{job.id}_{i}.jpg'
-        save_upload(img_bytes, img_path)
-        post_paths.append(img_path)
-
-    if post_paths:
-        job.post_images_paths = post_paths
-        job.save(update_fields=['post_images_paths'])
 
     prod_files = request.FILES.getlist('product_images')[:7]
     if prod_files:
@@ -130,7 +116,7 @@ def analyze_submit(request):
     from core.brand_dna.tasks import analyze_brand_task
     django_rq.enqueue(analyze_brand_task, str(job.id))
 
-    return redirect('results', job_id=str(job.id))
+    return redirect('dashboard')
 
 
 @login_required
@@ -147,6 +133,7 @@ def results(request, job_id):
         'brand_dna': brand_dna,
         'calendar': calendar,
         'can_create_calendar': can_create,
+        'tone_choices': _ALLOWED_TONES,
     })
 
 
@@ -285,6 +272,20 @@ def post_action_api(request, post_id):
         )
         return JsonResponse({'status': 'ok'})
 
+    if action == 'mark_published':
+        from django.utils import timezone
+        if not post.published_at:
+            post.published_at = timezone.now()
+            post.save(update_fields=['published_at'])
+            POST_ACTIONS.labels(action='published').inc()
+            delta = post.published_at - post.scheduled_at
+            logger.info(
+                f"POST PUBLICADO | user={request.user.email} | "
+                f"job={post.calendar.brand_dna.job_id} | día={post.day_number} | "
+                f"post={post_id} | delta_desde_programado={delta}"
+            )
+        return JsonResponse({'status': 'ok', 'published_at': post.published_at.isoformat()})
+
     if action == 'edit':
         if not value:
             return JsonResponse({'error': 'Caption vacío'}, status=400)
@@ -395,7 +396,7 @@ def calendar_feedback_api(request, job_id):
     if feedback.continue_decision == WeeklyFeedback.CONTINUE_YES:
         next_week = feedback.week_number + 1
         _update_active_product_images(calendar, job, request, next_week)
-        generate_next_week(calendar, next_week)
+        django_rq.enqueue(generate_next_week, str(calendar.id), next_week, job_timeout=1500)
 
     return JsonResponse({'status': 'ok', 'continue_decision': feedback.continue_decision})
 
@@ -456,3 +457,175 @@ def _regenerate_caption(post, feedback: str) -> str:
     except Exception as e:
         logger.error(f"Caption regeneration error: {e}")
         return post.caption
+
+
+@login_required
+@require_POST
+def brand_dna_field_action_api(request, job_id):
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'JSON inválido'}, status=400)
+
+    field = data.get('field')
+    action = data.get('action')
+    raw_value = data.get('value', '')
+    value = raw_value.strip() if isinstance(raw_value, str) else raw_value
+
+    if field not in _BRAND_DNA_EDITABLE_FIELDS:
+        return JsonResponse({'error': 'Campo no editable'}, status=400)
+
+    job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
+    brand_dna = getattr(job, 'brand_dna', None)
+    if not brand_dna:
+        return JsonResponse({'error': 'Sin análisis de marca todavía'}, status=404)
+
+    if action == 'edit':
+        if field == 'tone':
+            if value not in _ALLOWED_TONES:
+                return JsonResponse({'error': 'Tono inválido'}, status=400)
+            brand_dna.tone = value
+        elif field == 'keywords':
+            keywords = [k.strip() for k in (value or '').split(',') if k.strip()]
+            if not keywords:
+                return JsonResponse({'error': 'Agrega al menos una keyword'}, status=400)
+            brand_dna.keywords = keywords[:8]
+        elif field == 'primary_colors':
+            colors = [c.strip() for c in (value or '').split(',') if c.strip()]
+            if not colors or not all(_HEX_COLOR_RE.match(c) for c in colors):
+                return JsonResponse({'error': 'Usa colores en formato hex, ej: #E94560'}, status=400)
+            brand_dna.primary_colors = colors[:5]
+        else:  # description, audience
+            if not value:
+                return JsonResponse({'error': 'El campo no puede quedar vacío'}, status=400)
+            setattr(brand_dna, field, value)
+        brand_dna.save(update_fields=[field])
+        POST_ACTIONS.labels(action='brand_dna_edited').inc()
+        return JsonResponse({'status': 'ok', 'field': field, 'value': getattr(brand_dna, field)})
+
+    if action == 'reanalyze':
+        if field not in _BRAND_DNA_REANALYZABLE_FIELDS:
+            return JsonResponse({'error': 'Este campo no se puede reanalizar, edítalo directamente.'}, status=400)
+        try:
+            new_value = _reanalyze_brand_field(brand_dna, job, field, value or '')
+        except ValueError as e:
+            return JsonResponse({'error': str(e)}, status=400)
+        setattr(brand_dna, field, new_value)
+        brand_dna.save(update_fields=[field])
+        POST_ACTIONS.labels(action='brand_dna_reanalyzed').inc()
+        return JsonResponse({'status': 'ok', 'field': field, 'value': new_value})
+
+    return JsonResponse({'error': 'Acción desconocida'}, status=400)
+
+
+def _reanalyze_brand_field(brand_dna, job, field: str, feedback: str):
+    if field == 'primary_colors':
+        if not job.business_url:
+            raise ValueError('Sin sitio web no se puede reanalizar el color — edítalo directamente.')
+        from core.brand_dna.extractors.web_scraper import WebScraper
+        try:
+            _, colors = WebScraper().fetch_context(job.business_url)
+        except Exception as e:
+            raise ValueError(f'No se pudo re-escanear el sitio web: {e}')
+        if not colors:
+            raise ValueError('No se detectaron colores en el sitio web.')
+        return colors[:5]
+
+    field_labels = {
+        'description': 'descripción del negocio',
+        'audience': 'audiencia objetivo',
+        'keywords': 'palabras clave',
+    }
+    current_value = brand_dna.keywords if field == 'keywords' else getattr(brand_dna, field)
+    prompt = (
+        f"Eres un experto en branding. El usuario quiere corregir el campo "
+        f"'{field_labels[field]}' del análisis de marca de '{brand_dna.business_name}'.\n\n"
+        f"Valor actual: {current_value}\n"
+        f"Qué no refleja su marca (feedback del usuario): {feedback or 'sin detalle, genera una alternativa distinta'}\n\n"
+        f"Contexto adicional — tono: {brand_dna.tone}, descripción: {brand_dna.description}\n\n"
+    )
+    if field == 'keywords':
+        prompt += 'Responde ÚNICAMENTE con un array JSON de 5 palabras clave, sin markdown. Ej: ["a","b","c","d","e"]'
+    else:
+        prompt += f"Responde ÚNICAMENTE con el nuevo texto para '{field_labels[field]}', sin comillas ni explicaciones."
+
+    client = genai.Client(
+        vertexai=True,
+        project=settings.GOOGLE_CLOUD_PROJECT,
+        location=settings.GOOGLE_CLOUD_LOCATION,
+    )
+    with track_external_api('gemini', operation='brand_dna_reanalyze'):
+        resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+    record_tokens(resp, operation='brand_dna_reanalyze', response_preview=resp.text[:200] if resp.text else '')
+    raw = resp.text.strip()
+    raw = re.sub(r'^```(?:json)?\n?', '', raw)
+    raw = re.sub(r'\n?```$', '', raw)
+    raw = raw.strip().strip('"').strip("'")
+    if field == 'keywords':
+        return json.loads(raw)
+    return raw
+
+
+@login_required
+@require_POST
+def regenerate_calendar_api(request, job_id):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    from core.content_pipeline.generators.image_generator import ImageGenerator
+    from core.content_pipeline.models import ContentPost
+
+    job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
+    brand_dna = getattr(job, 'brand_dna', None)
+    calendar = getattr(brand_dna, 'calendar', None) if brand_dna else None
+    if not calendar:
+        return JsonResponse({'error': 'No hay calendario para regenerar'}, status=404)
+
+    pending_posts = list(calendar.posts.exclude(status=ContentPost.STATUS_SENT).order_by('day_number'))
+    if not pending_posts:
+        return JsonResponse({'error': 'No hay posts pendientes por regenerar — todos ya fueron enviados.'}, status=400)
+
+    try:
+        posts_data = TextGenerator().generate(brand_dna)
+    except Exception as e:
+        logger.error(f"Error regenerando texto para job {job_id}: {e}")
+        return JsonResponse({'error': 'No se pudo regenerar el contenido. Intenta de nuevo.'}, status=500)
+
+    posts_by_day = {p.day_number: p for p in pending_posts}
+    regenerated_days = []
+    for i, post_data in enumerate(posts_data, start=1):
+        post = posts_by_day.get(i)
+        if not post:
+            continue
+        post.caption = post_data['caption']
+        post.hashtags = post_data.get('hashtags', [])
+        post.user_status = ContentPost.USER_STATUS_PENDING
+        post.save(update_fields=['caption', 'hashtags', 'user_status'])
+        regenerated_days.append(i)
+
+    day1 = posts_by_day.get(1)
+    if day1 and day1.image_url:
+        try:
+            image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+            product_image_bytes = None
+            if job.product_image_path and upload_exists(job.product_image_path):
+                product_image_bytes = read_upload(job.product_image_path)
+            new_image_url = image_gen.generate(
+                caption=day1.caption,
+                colors=brand_dna.primary_colors,
+                tone=brand_dna.tone,
+                filename=f"{job_id}-day1-regen-{int(_time.time())}",
+                brand_name=brand_dna.business_name,
+                keywords=brand_dna.keywords,
+                description=brand_dna.description,
+                audience=brand_dna.audience,
+                product_image_bytes=product_image_bytes,
+                max_qc_retries=0,
+            )
+            if new_image_url:
+                day1.image_url = new_image_url
+                day1.save(update_fields=['image_url'])
+        except Exception as e:
+            logger.error(f"Error regenerando imagen dia 1 para job {job_id}: {e}")
+
+    POST_ACTIONS.labels(action='brand_dna_regenerated_calendar').inc()
+    logger.info(f"Calendario regenerado tras cambios en Brand DNA | job={job_id} | user={request.user.email}")
+    return JsonResponse({'status': 'ok', 'regenerated_days': regenerated_days})

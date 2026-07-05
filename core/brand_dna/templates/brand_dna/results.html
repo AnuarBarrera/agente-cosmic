@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/svg+xml" href="{% url 'favicon' %}">
-  <title>Analizando tu marca — Agente Cosmic</title>
+  <title>{% if job.status == 'done' %}Este es el análisis de tu marca{% else %}Analizando tu marca{% endif %} — Agente Cosmic</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #f0f0f0; min-height: 100vh; padding-top: 64px; }
@@ -111,24 +111,85 @@
     .progress-bar { background: linear-gradient(90deg, #e94560, #ff6b8a); border-radius: 8px; height: 6px; transition: width 0.6s ease; }
     .progress-text { text-align: right; font-size: 0.8rem; color: #555; }
 
-    /* ── RESULTS ── */
-    .results-section { display: none; }
+    /* ── LEAVE NOTICE ── */
+    .leave-notice {
+      background: #0d2218; border: 1px solid #2d6a4f; border-radius: 10px;
+      padding: 18px 20px; color: #7ec8a4; font-size: 0.9rem; line-height: 1.6;
+      margin-top: 24px; text-align: left;
+    }
+    .leave-notice strong { color: #a8e6c8; }
+    .leave-notice-actions { margin-top: 14px; }
+
+    /* ── NEXT STEPS ── */
+    .next-steps {
+      background: #1a1a2e; border-radius: 12px; padding: 24px 28px; margin-bottom: 24px;
+    }
+    .next-steps-title { color: #e94560; font-size: 1.05rem; font-weight: 600; margin-bottom: 16px; }
+    .next-steps-list { list-style: none; counter-reset: step; }
+    .next-steps-list li {
+      counter-increment: step;
+      display: flex; gap: 14px; align-items: flex-start;
+      padding: 10px 0; color: #ccc; font-size: 0.92rem; line-height: 1.5;
+      border-bottom: 1px solid #2a2a4a;
+    }
+    .next-steps-list li:last-child { border-bottom: none; }
+    .next-steps-list li::before {
+      content: counter(step);
+      flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%;
+      background: #e94560; color: #fff; font-size: 0.8rem; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .next-steps-list strong { color: #f0f0f0; }
+
+    /* ── DNA CARD (editable) ── */
     .dna-card { background: #1a1a2e; border-radius: 12px; padding: 28px; margin-bottom: 24px; }
     .dna-card h2 { color: #e94560; margin-bottom: 16px; font-size: 1.2rem; }
-    .dna-row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-    .dna-label { color: #666; min-width: 110px; font-size: 0.85rem; padding-top: 2px; }
-    .color-swatch { display: inline-block; width: 20px; height: 20px; border-radius: 4px; margin-right: 6px; vertical-align: middle; }
-    .calendar-title { color: #e94560; font-size: 1.2rem; margin-bottom: 16px; }
-    .calendar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
-    .post-card { background: #1a1a2e; border-radius: 10px; overflow: hidden; }
-    .post-card img { width: 100%; aspect-ratio: 1; object-fit: cover; }
-    .post-body { padding: 14px; }
-    .post-day { font-size: 0.78rem; color: #e94560; margin-bottom: 6px; font-weight: 600; }
-    .post-caption { font-size: 0.88rem; color: #ccc; line-height: 1.5; }
-    .email-note {
-      background: #0d2218; border: 1px solid #2d6a4f; border-radius: 10px;
-      padding: 16px 20px; color: #7ec8a4; font-size: 0.88rem; line-height: 1.6;
+    .dna-field { padding: 14px 0; border-bottom: 1px solid #2a2a4a; }
+    .dna-field:last-child { border-bottom: none; }
+    .dna-label { color: #888; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+    .dna-value { font-size: 0.95rem; line-height: 1.5; color: #f0f0f0; outline: none; }
+    .dna-value[contenteditable="true"] { background: #0d0d1a; border-radius: 6px; padding: 8px; border: 1px solid #e94560; }
+    .dna-select { background: #0d0d1a; color: #f0f0f0; border: 1px solid #333; border-radius: 6px; padding: 8px 10px; font-size: 0.95rem; }
+    .color-swatch { display: inline-block; width: 18px; height: 18px; border-radius: 4px; margin-right: 6px; vertical-align: middle; border: 1px solid #333; }
+    .dna-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn-action {
+      padding: 6px 12px; border-radius: 6px; font-size: 0.78rem; font-weight: 600;
+      border: 1px solid #333; background: transparent; color: #ccc; cursor: pointer;
     }
+    .btn-action:hover { background: #2a2a4a; }
+    .btn-save { display: none; background: #e94560; color: #fff; border-color: #e94560; }
+    .btn-approve { border-color: #2d6a4f; color: #4caf7d; }
+    .btn-approve:hover { background: #0d2218; }
+    .dna-approved-status { display: none; margin-top: 10px; color: #4caf7d; font-size: 0.85rem; font-weight: 600; }
+    .field-feedback-area { display: none; margin-top: 10px; }
+    .field-feedback-area.show { display: block; }
+    .field-feedback-area textarea {
+      width: 100%; min-height: 60px; background: #0d0d1a; color: #f0f0f0;
+      border: 1px solid #333; border-radius: 6px; padding: 8px; font-family: inherit; font-size: 0.85rem;
+      margin-bottom: 8px; resize: vertical;
+    }
+    .btn-send-regen { padding: 8px 16px; border-radius: 6px; border: none; background: #4a9eff; color: #fff; font-weight: 600; font-size: 0.82rem; cursor: pointer; }
+
+    /* ── REGEN BANNER ── */
+    .regen-banner {
+      display: none; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+      background: #2a1f0d; border: 1px solid #6a4d2d; border-radius: 10px;
+      padding: 16px 20px; color: #e6c87e; font-size: 0.88rem; margin-bottom: 24px;
+    }
+    .regen-banner button {
+      padding: 10px 18px; border-radius: 8px; border: none; background: #e94560; color: #fff;
+      font-weight: 600; cursor: pointer; white-space: nowrap;
+    }
+    .regen-banner button:disabled { opacity: 0.6; cursor: default; }
+
+    /* ── TOAST ── */
+    .toast {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: #1a3a2a; color: #4caf7d; padding: 12px 24px; border-radius: 8px;
+      font-size: 0.88rem; font-weight: 600; opacity: 0; pointer-events: none;
+      transition: opacity 0.25s, transform 0.25s; z-index: 200;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
     /* ── ERROR ── */
     .error-card { background: #2e1a1a; border: 1px solid #e94560; border-radius: 12px; padding: 28px; }
@@ -162,9 +223,124 @@
 </nav>
 
 <div class="container">
-  <div class="page-title">Analizando tu marca</div>
-  <div class="page-sub">{% if job.business_url %}{{ job.business_url }}{% else %}Analisis manual{% endif %}</div>
+  <div class="page-title">{% if job.status == 'done' %}Este es el análisis de tu marca{% else %}Analizando tu marca{% endif %}</div>
+  <div class="page-sub">{% if brand_dna %}{{ brand_dna.business_name }}{% elif job.business_url %}{{ job.business_url }}{% else %}Analisis manual{% endif %}</div>
 
+  {% if job.status == 'done' and brand_dna %}
+  <!-- ── NEXT STEPS ── -->
+  <div class="next-steps">
+    <div class="next-steps-title">Así funciona de aquí en adelante</div>
+    <ol class="next-steps-list">
+      <li><span><strong>Tu ADN de marca ya está.</strong> Si algo no refleja tu marca, edítalo abajo.</span></li>
+      <li><span><strong>Tu calendario de 7 días ya está completo.</strong> No necesitas esperar — ya puedes revisarlo y aprobarlo abajo.</span></li>
+      <li><span><strong>Cada día te mandamos un recordatorio</strong> por correo para que no se te pase publicar.</span></li>
+    </ol>
+  </div>
+
+  <!-- ── DNA CARD (editable) ── -->
+  <div class="dna-card">
+    <h2>ADN de Marca</h2>
+
+    <div class="dna-field">
+      <div class="dna-label">Negocio</div>
+      <div class="dna-value">{{ brand_dna.business_name|upper }}</div>
+    </div>
+
+    <div class="dna-field">
+      <div class="dna-label">Descripción</div>
+      <div class="dna-value" id="value-description">{{ brand_dna.description }}</div>
+      <div class="dna-actions" id="actions-description">
+        <button class="btn-action" onclick="startFieldEdit('description')">✏ Editar</button>
+        <button class="btn-action" onclick="toggleFieldRegen('description')">↺ Reanalizar</button>
+        <button class="btn-action btn-approve" onclick="approveField('description')">✓ Aprobado</button>
+        <button class="btn-action btn-save" id="save-description" onclick="saveFieldEdit('description')">Guardar</button>
+      </div>
+      <div class="field-feedback-area" id="regen-description">
+        <textarea id="note-description" placeholder="¿Qué no refleja tu marca?"></textarea>
+        <button class="btn-send-regen" onclick="requestFieldRegen('description')">Reanalizar con IA ✨</button>
+      </div>
+      <div class="dna-approved-status" id="approved-description">✓ Aprobado</div>
+    </div>
+
+    <div class="dna-field">
+      <div class="dna-label">Audiencia</div>
+      <div class="dna-value" id="value-audience">{{ brand_dna.audience }}</div>
+      <div class="dna-actions" id="actions-audience">
+        <button class="btn-action" onclick="startFieldEdit('audience')">✏ Editar</button>
+        <button class="btn-action" onclick="toggleFieldRegen('audience')">↺ Reanalizar</button>
+        <button class="btn-action btn-approve" onclick="approveField('audience')">✓ Aprobado</button>
+        <button class="btn-action btn-save" id="save-audience" onclick="saveFieldEdit('audience')">Guardar</button>
+      </div>
+      <div class="field-feedback-area" id="regen-audience">
+        <textarea id="note-audience" placeholder="¿Qué no refleja tu marca?"></textarea>
+        <button class="btn-send-regen" onclick="requestFieldRegen('audience')">Reanalizar con IA ✨</button>
+      </div>
+      <div class="dna-approved-status" id="approved-audience">✓ Aprobado</div>
+    </div>
+
+    <div class="dna-field">
+      <div class="dna-label">Tono</div>
+      <select class="dna-select" id="value-tone" onchange="saveToneChange()">
+        {% for t in tone_choices %}
+        <option value="{{ t }}" {% if brand_dna.tone == t %}selected{% endif %}>{{ t|capfirst }}</option>
+        {% endfor %}
+      </select>
+      <div class="dna-actions" id="actions-tone">
+        <button class="btn-action btn-approve" onclick="approveField('tone')">✓ Aprobado</button>
+      </div>
+      <div class="dna-approved-status" id="approved-tone">✓ Aprobado</div>
+    </div>
+
+    <div class="dna-field">
+      <div class="dna-label">Keywords</div>
+      <div class="dna-value" id="value-keywords">{{ brand_dna.keywords|join:", " }}</div>
+      <div class="dna-actions" id="actions-keywords">
+        <button class="btn-action" onclick="startFieldEdit('keywords')">✏ Editar</button>
+        <button class="btn-action" onclick="toggleFieldRegen('keywords')">↺ Reanalizar</button>
+        <button class="btn-action btn-approve" onclick="approveField('keywords')">✓ Aprobado</button>
+        <button class="btn-action btn-save" id="save-keywords" onclick="saveFieldEdit('keywords')">Guardar</button>
+      </div>
+      <div class="field-feedback-area" id="regen-keywords">
+        <textarea id="note-keywords" placeholder="¿Qué no refleja tu marca?"></textarea>
+        <button class="btn-send-regen" onclick="requestFieldRegen('keywords')">Reanalizar con IA ✨</button>
+      </div>
+      <div class="dna-approved-status" id="approved-keywords">✓ Aprobado</div>
+    </div>
+
+    <div class="dna-field">
+      <div class="dna-label">Colores</div>
+      <div style="margin-bottom:8px;">
+        {% for c in brand_dna.primary_colors %}<span class="color-swatch" style="background:{{ c }};" title="{{ c }}"></span>{% endfor %}
+      </div>
+      <div class="dna-value" id="value-primary_colors">{{ brand_dna.primary_colors|join:", " }}</div>
+      <div class="dna-actions" id="actions-primary_colors">
+        <button class="btn-action" onclick="startFieldEdit('primary_colors')">✏ Editar</button>
+        {% if brand_dna.business_url %}<button class="btn-action" onclick="toggleFieldRegen('primary_colors')">↺ Reanalizar</button>{% endif %}
+        <button class="btn-action btn-approve" onclick="approveField('primary_colors')">✓ Aprobado</button>
+        <button class="btn-action btn-save" id="save-primary_colors" onclick="saveFieldEdit('primary_colors')">Guardar</button>
+      </div>
+      {% if brand_dna.business_url %}
+      <div class="field-feedback-area" id="regen-primary_colors">
+        <textarea id="note-primary_colors" placeholder="Se re-escanean los colores de tu sitio web"></textarea>
+        <button class="btn-send-regen" onclick="requestFieldRegen('primary_colors')">Reanalizar con IA ✨</button>
+      </div>
+      {% endif %}
+      <div class="dna-approved-status" id="approved-primary_colors">✓ Aprobado</div>
+    </div>
+  </div>
+
+  <div class="regen-banner" id="regenBanner">
+    <span>Hiciste cambios a tu ADN de marca.</span>
+    <button id="regenBtn" onclick="regenerateCalendar()">Regenerar mis posts con estos cambios</button>
+  </div>
+
+  <div style="text-align:center;margin-top:24px;">
+    <a id="calendarLink" href="{% url 'calendar_review' job.id %}" class="nav-btn nav-btn-primary" style="display:inline-block;padding:14px 32px;font-size:1rem;text-decoration:none;background:#e94560;color:#fff;border-radius:8px;font-weight:600;">
+      Revisar y aprobar mi calendario →
+    </a>
+  </div>
+
+  {% else %}
   <!-- ── LOADING ── -->
   <div class="loading-card" id="progressCard">
     <div class="logo-scene">
@@ -200,30 +376,18 @@
     <ul class="stage-list" id="stageList">
       <li class="stage-item" id="stage-web"><span class="stage-icon">○</span> {% if job.business_url %}Analizando sitio web{% else %}Analizando descripcion del negocio{% endif %}</li>
       <li class="stage-item" id="stage-logo"><span class="stage-icon">○</span> Analizando logo</li>
-      <li class="stage-item" id="stage-posts"><span class="stage-icon">○</span> Analizando posts anteriores</li>
+      <li class="stage-item" id="stage-posts"><span class="stage-icon">○</span> Construyendo tu ADN de marca</li>
       <li class="stage-item" id="stage-content"><span class="stage-icon">○</span> Generando contenido</li>
     </ul>
 
     <div class="progress-bar-bg"><div class="progress-bar" id="progressBar" style="width:5%"></div></div>
     <div class="progress-text" id="progressText">5%</div>
-  </div>
 
-  <!-- ── RESULTS ── -->
-  <div class="results-section" id="resultsSection">
-    <div class="dna-card">
-      <h2>ADN de Marca</h2>
-      <div id="dnaContent"></div>
-    </div>
-    <div class="calendar-title">Tu Calendario de Contenido</div>
-    <div class="calendar-grid" id="calendarGrid"></div>
-    <div class="email-note">
-      📬 Te enviamos un correo de notificación — tu calendario completo está aquí en la plataforma.<br>
-      Cada día recibirás el post correspondiente por correo en el horario programado.
-    </div>
-    <div style="text-align:center;margin-top:24px;">
-      <a id="calendarLink" href="{% url 'calendar_review' job.id %}" class="nav-btn nav-btn-primary" style="display:inline-block;padding:14px 32px;font-size:1rem;text-decoration:none;background:#e94560;color:#fff;border-radius:8px;font-weight:600;">
-        Revisar y aprobar mi calendario →
-      </a>
+    <div class="leave-notice">
+      ☕ <strong>Esto toma unos minutos.</strong> No hace falta que esperes aquí — en cuanto tu calendario esté listo, te avisamos por correo. Puedes cerrar esta pestaña con confianza.
+      <div class="leave-notice-actions">
+        <a href="{% url 'dashboard' %}" class="nav-btn nav-btn-ghost" style="display:inline-block;">Ir al Dashboard</a>
+      </div>
     </div>
   </div>
 
@@ -233,13 +397,139 @@
     <p id="errorMessage" style="margin-top:12px; color:#aaa;"></p>
     <a href="{% url 'landing' %}" class="nav-btn nav-btn-primary" style="display:inline-block;margin-top:20px;">Intentar de nuevo</a>
   </div>
+  {% endif %}
 </div>
 
 <!-- ── BACK TO TOP ── -->
 <button id="backToTop" title="Volver arriba">↑</button>
+<div class="toast" id="toast"></div>
 
 <script>
-  // ── Mensajes rotativos del gatito ──
+  const CSRF = '{{ csrf_token }}';
+  const JOB_ID = '{{ job.id }}';
+
+  function showToast(msg, color, duration) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.background = color === '#e74c3c' ? '#3a1a1a' : '#1a3a2a';
+    t.style.color = color === '#e74c3c' ? '#e74c3c' : '#4caf7d';
+    t.classList.add('show');
+    setTimeout(function() { t.classList.remove('show'); }, duration || 2500);
+  }
+
+  {% if job.status == 'done' and brand_dna %}
+  // ── Edición de ADN de marca ──
+  async function fieldAction(field, payload) {
+    const res = await fetch('/api/brand-dna/' + JOB_ID + '/field/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify(Object.assign({ field: field }, payload)),
+    });
+    return res.json();
+  }
+
+  function markDnaChanged() {
+    document.getElementById('regenBanner').style.display = 'flex';
+  }
+
+  function approveField(field) {
+    document.getElementById('actions-' + field).style.display = 'none';
+    const regenArea = document.getElementById('regen-' + field);
+    if (regenArea) regenArea.style.display = 'none';
+    const select = document.getElementById('value-' + field);
+    if (select && select.tagName === 'SELECT') select.disabled = true;
+    document.getElementById('approved-' + field).style.display = 'block';
+  }
+
+  function displayValue(v) {
+    return Array.isArray(v) ? v.join(', ') : v;
+  }
+
+  function startFieldEdit(field) {
+    const el = document.getElementById('value-' + field);
+    el.dataset.original = el.innerText.trim();
+    el.contentEditable = 'true';
+    el.focus();
+    document.getElementById('save-' + field).style.display = 'inline-block';
+  }
+
+  async function saveFieldEdit(field) {
+    const el = document.getElementById('value-' + field);
+    const newValue = el.innerText.trim();
+    el.contentEditable = 'false';
+    document.getElementById('save-' + field).style.display = 'none';
+    const data = await fieldAction(field, { action: 'edit', value: newValue });
+    if (data.status === 'ok') {
+      el.innerText = displayValue(data.value);
+      markDnaChanged();
+      showToast('Campo actualizado ✓');
+    } else {
+      el.innerText = el.dataset.original;
+      showToast(data.error || 'Error', '#e74c3c');
+    }
+  }
+
+  function toggleFieldRegen(field) {
+    document.getElementById('regen-' + field).classList.toggle('show');
+  }
+
+  async function requestFieldRegen(field) {
+    const note = document.getElementById('note-' + field);
+    const feedback = note.value.trim();
+    if (field !== 'primary_colors' && !feedback) {
+      showToast('Describe qué no refleja tu marca', '#e74c3c');
+      return;
+    }
+    const data = await fieldAction(field, { action: 'reanalyze', value: feedback });
+    if (data.status === 'ok') {
+      const el = document.getElementById('value-' + field);
+      el.innerText = displayValue(data.value);
+      note.value = '';
+      document.getElementById('regen-' + field).classList.remove('show');
+      markDnaChanged();
+      showToast('Reanalizado ✨');
+    } else {
+      showToast(data.error || 'Error', '#e74c3c');
+    }
+  }
+
+  async function saveToneChange() {
+    const sel = document.getElementById('value-tone');
+    const data = await fieldAction('tone', { action: 'edit', value: sel.value });
+    if (data.status === 'ok') {
+      markDnaChanged();
+      showToast('Tono actualizado ✓');
+    } else {
+      showToast(data.error || 'Error', '#e74c3c');
+    }
+  }
+
+  async function regenerateCalendar() {
+    const btn = document.getElementById('regenBtn');
+    btn.disabled = true;
+    btn.textContent = 'Regenerando...';
+    try {
+      const res = await fetch('/api/calendar/' + JOB_ID + '/regenerate/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF },
+      });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        showToast('Posts regenerados ✓');
+        document.getElementById('regenBanner').style.display = 'none';
+      } else {
+        showToast(data.error || 'Error regenerando', '#e74c3c');
+        btn.disabled = false;
+        btn.textContent = 'Regenerar mis posts con estos cambios';
+      }
+    } catch (e) {
+      showToast('Error de red', '#e74c3c');
+      btn.disabled = false;
+      btn.textContent = 'Regenerar mis posts con estos cambios';
+    }
+  }
+  {% else %}
+  // ── Mensajes rotativos mientras se analiza ──
   const loadingMsgs = [
     {% if job.business_url %}['🔍 Leyendo tu sitio web...', 'Escaneando contenido, colores e identidad visual'],{% else %}['🔍 Analizando tu negocio...', 'Gemini esta estructurando tu perfil de marca'],{% endif %}
     ['🎨 Detectando la paleta de marca...', 'Extrayendo colores y elementos del logo'],
@@ -278,32 +568,8 @@
     });
   }
 
-  // ── Render results ──
-  function renderDna(dna) {
-    const colors = (dna.primary_colors || []).map(function(c) {
-      return '<span class="color-swatch" style="background:' + c + '" title="' + c + '"></span>' + c;
-    }).join(' ');
-    document.getElementById('dnaContent').innerHTML =
-      '<div class="dna-row"><span class="dna-label">Negocio</span><span>' + (dna.business_name||'') + '</span></div>' +
-      '<div class="dna-row"><span class="dna-label">Descripción</span><span>' + (dna.description||'') + '</span></div>' +
-      '<div class="dna-row"><span class="dna-label">Audiencia</span><span>' + (dna.audience||'') + '</span></div>' +
-      '<div class="dna-row"><span class="dna-label">Tono</span><span>' + (dna.tone||'') + '</span></div>' +
-      '<div class="dna-row"><span class="dna-label">Keywords</span><span>' + (dna.keywords||[]).join(', ') + '</span></div>' +
-      '<div class="dna-row"><span class="dna-label">Colores</span><span>' + (colors||'No disponibles') + '</span></div>';
-  }
-
-  function renderCalendar(posts) {
-    document.getElementById('calendarGrid').innerHTML = posts.map(function(p) {
-      return '<div class="post-card">' +
-        (p.image_url ? '<img src="' + p.image_url + '" alt="Día ' + p.day_number + '" loading="lazy" onerror="this.style.display=\'none\'">' : '') +
-        '<div class="post-body"><div class="post-day">Día ' + p.day_number + ' · ' + p.suggested_time + '</div>' +
-        '<div class="post-caption">' + p.caption + '</div></div></div>';
-    }).join('');
-  }
-
-  // ── Polling ──
-  const jobId = '{{ job.id }}';
-  const statusUrl = '/api/brand-dna/status/' + jobId + '/';
+  // ── Polling — al terminar, recarga para renderizar el ADN editable del lado del servidor ──
+  const statusUrl = '/api/brand-dna/status/' + JOB_ID + '/';
   let pollInterval;
 
   async function poll() {
@@ -317,11 +583,7 @@
 
       if (data.status === 'done') {
         clearInterval(pollInterval);
-        document.getElementById('progressCard').style.display = 'none';
-        const rs = document.getElementById('resultsSection');
-        rs.style.display = 'block';
-        if (data.brand_dna) renderDna(data.brand_dna);
-        if (data.calendar) renderCalendar(data.calendar);
+        window.location.reload();
       } else if (data.status === 'failed') {
         clearInterval(pollInterval);
         document.getElementById('progressCard').style.display = 'none';
@@ -333,6 +595,7 @@
 
   pollInterval = setInterval(poll, 3000);
   poll();
+  {% endif %}
 
   // ── Back to top ──
   const btn = document.getElementById('backToTop');

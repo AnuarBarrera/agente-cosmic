@@ -66,3 +66,96 @@ def test_generate_post_has_required_keys(brand_dna):
     assert 'hashtags' in post
     assert 'suggested_time' in post
     assert isinstance(post['hashtags'], list)
+
+
+@pytest.fixture
+def sensitive_brand_dna():
+    job = AnalysisJob.objects.create(email='t@t.com', business_url='https://pediatra.com')
+    return BrandDNA.objects.create(
+        job=job, business_name='Pediatra Juan Gonzalez', business_url='https://pediatra.com',
+        description='Atención pediátrica para niños de 0 a 12 años',
+        keywords=['pediatria', 'salud infantil'],
+        audience='Padres y tutores de niños', tone='profesional', primary_colors=['#1a1a2e'],
+    )
+
+
+def test_is_sensitive_niche_detects_health_and_children(sensitive_brand_dna):
+    from core.content_pipeline.generators.text_generator import _is_sensitive_niche
+    assert _is_sensitive_niche(sensitive_brand_dna) is True
+
+
+def test_is_sensitive_niche_false_for_normal_business(brand_dna):
+    from core.content_pipeline.generators.text_generator import _is_sensitive_niche
+    assert _is_sensitive_niche(brand_dna) is False
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_skips_safety_qc_for_normal_business(brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc, \
+         patch.object(TextGenerator, '_validate_caption_safety') as mock_qc:
+        mock_vc.return_value = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
+        gen = TextGenerator()
+        gen.generate(brand_dna)
+
+    mock_qc.assert_not_called()
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_runs_safety_qc_for_sensitive_niche(sensitive_brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc, \
+         patch.object(TextGenerator, '_validate_caption_safety', return_value=True) as mock_qc, \
+         patch.object(TextGenerator, '_regenerate_safe_caption') as mock_fix:
+        mock_vc.return_value = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
+        gen = TextGenerator()
+        result = gen.generate(sensitive_brand_dna)
+
+    assert mock_qc.call_count == 7
+    mock_fix.assert_not_called()
+    assert len(result) == 7
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_regenerates_caption_that_fails_safety_qc(sensitive_brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc, \
+         patch.object(TextGenerator, '_validate_caption_safety', side_effect=[False, True] + [True] * 6) as mock_qc, \
+         patch.object(TextGenerator, '_regenerate_safe_caption', return_value='Version corregida sin promesas') as mock_fix:
+        mock_vc.return_value = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
+        gen = TextGenerator()
+        result = gen.generate(sensitive_brand_dna)
+
+    mock_fix.assert_called_once()
+    assert result[0]['caption'] == 'Version corregida sin promesas'
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_gives_up_after_max_retries_and_keeps_last_caption(sensitive_brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc, \
+         patch.object(TextGenerator, '_validate_caption_safety', return_value=False) as mock_qc, \
+         patch.object(TextGenerator, '_regenerate_safe_caption', return_value='Sigue sin pasar QC') as mock_fix:
+        mock_vc.return_value = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
+        gen = TextGenerator()
+        result = gen.generate(sensitive_brand_dna, max_qc_retries=2)
+
+    # 3 intentos (0,1,2) por cada uno de los 7 captions = 21 llamadas a QC
+    assert mock_qc.call_count == 21
+    assert result[0]['caption'] == 'Sigue sin pasar QC'

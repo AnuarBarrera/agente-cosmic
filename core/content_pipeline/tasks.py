@@ -75,24 +75,24 @@ def content_generation_task(job_id: str) -> None:
         # Cargar imágenes de producto (hasta 7, una por día)
         product_images_bytes = _load_product_images(calendar.active_product_images)
 
+        # Generamos las 7 imágenes por adelantado — el usuario no espera en vivo
+        # (flujo async: se le avisa por correo/dashboard cuando todo está listo),
+        # así que el calendario completo queda disponible desde el primer momento.
+        total = len(posts_data)
         for i, post_data in enumerate(posts_data, start=1):
             scheduled = scheduled_dates[i - 1]
-
             day_product = _product_image_for_day(i, product_images_bytes)
-            if i == 1:
-                image_url = image_gen.generate(
-                    caption=post_data['caption'],
-                    colors=brand_dna.primary_colors,
-                    tone=brand_dna.tone,
-                    filename=f"{job_id}-day{i}",
-                    brand_name=brand_dna.business_name,
-                    keywords=brand_dna.keywords,
-                    description=brand_dna.description,
-                    audience=brand_dna.audience,
-                    product_image_bytes=day_product,
-                )
-            else:
-                image_url = ''
+            image_url = image_gen.generate(
+                caption=post_data['caption'],
+                colors=brand_dna.primary_colors,
+                tone=brand_dna.tone,
+                filename=f"{job_id}-day{i}",
+                brand_name=brand_dna.business_name,
+                keywords=brand_dna.keywords,
+                description=brand_dna.description,
+                audience=brand_dna.audience,
+                product_image_bytes=day_product,
+            )
 
             ContentPost.objects.create(
                 calendar=calendar,
@@ -103,11 +103,10 @@ def content_generation_task(job_id: str) -> None:
                 hashtags=post_data.get('hashtags', []),
                 scheduled_at=scheduled,
             )
-
-        job.update_progress(AnalysisJob.STAGE_CONTENT, 95)
+            job.update_progress(AnalysisJob.STAGE_CONTENT, 87 + int(8 * i / total))
 
         try:
-            EmailSender().send_initial(job=job, brand_dna=brand_dna, calendar=calendar)
+            EmailSender().send_initial(job=job, brand_dna=brand_dna)
             schedule_daily_emails(calendar)
         except Exception as email_err:
             logger.error(f"Email falló para job {job_id} (no fatal): {email_err}")
@@ -130,7 +129,8 @@ def send_daily_email_task(post_id: str) -> None:
     if post.calendar.brand_dna.job.deleted_at is not None:
         logger.info(f"Post {post_id} omitido — calendario eliminado por el usuario")
         return
-    # Genera la imagen justo antes de enviar (solo si no fue generada antes)
+    # Fallback defensivo: las imágenes ya se generan todas en content_generation_task,
+    # esto solo cubre el caso raro de que una generación individual haya fallado.
     if not post.image_url:
         brand_dna = post.calendar.brand_dna
         job_id = str(brand_dna.job.id)
@@ -160,8 +160,10 @@ def send_daily_email_task(post_id: str) -> None:
         WeeklyFeedback.objects.get_or_create(calendar=post.calendar, week_number=week_number)
 
 
-def generate_next_week(calendar: ContentCalendar, week_number: int) -> None:
+def generate_next_week(calendar_id: str, week_number: int) -> None:
+    calendar = ContentCalendar.objects.get(id=calendar_id)
     brand_dna = calendar.brand_dna
+    job_id = str(brand_dna.job.id)
     text_gen = TextGenerator()
     posts_data = text_gen.generate(brand_dna)
 
@@ -170,14 +172,28 @@ def generate_next_week(calendar: ContentCalendar, week_number: int) -> None:
     scheduled_dates = smart_schedule_dates(brand_dna, base_date=mexico_today, count=len(posts_data))
 
     base_day = (week_number - 1) * 7
+    image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+    product_images_bytes = _load_product_images(calendar.active_product_images)
 
     for i, post_data in enumerate(posts_data, start=1):
         scheduled = scheduled_dates[i - 1]
+        day_product = _product_image_for_day(i, product_images_bytes)
+        image_url = image_gen.generate(
+            caption=post_data['caption'],
+            colors=brand_dna.primary_colors,
+            tone=brand_dna.tone,
+            filename=f"{job_id}-day{base_day + i}",
+            brand_name=brand_dna.business_name,
+            keywords=brand_dna.keywords,
+            description=brand_dna.description,
+            audience=brand_dna.audience,
+            product_image_bytes=day_product,
+        )
         ContentPost.objects.create(
             calendar=calendar,
             day_number=base_day + i,
             caption=post_data['caption'],
-            image_url='',
+            image_url=image_url,
             suggested_time=scheduled.astimezone(MEXICO_TZ).time(),
             hashtags=post_data.get('hashtags', []),
             scheduled_at=scheduled,

@@ -61,6 +61,31 @@ def test_content_generation_creates_calendar(job_with_dna):
     GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
     DEFAULT_FROM_EMAIL='noreply@test.com',
 )
+def test_content_generation_generates_image_for_every_day(job_with_dna):
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+
+        from core.content_pipeline.tasks import content_generation_task
+        content_generation_task(str(job_with_dna.id))
+
+    assert MockImage.return_value.generate.call_count == 7
+    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna)
+    assert all(p.image_url == 'https://storage.googleapis.com/test/img.jpg' for p in posts)
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    DEFAULT_FROM_EMAIL='noreply@test.com',
+)
 def test_content_generation_marks_job_done(job_with_dna):
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
@@ -184,16 +209,27 @@ def test_send_daily_email_task_weekly_feedback_idempotent(calendar_with_dna):
     assert WeeklyFeedback.objects.filter(calendar=calendar_with_dna, week_number=2).count() == 1
 
 
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+)
 def test_generate_next_week_creates_posts_for_week_2(job_with_dna):
     calendar = ContentCalendar.objects.create(brand_dna=job_with_dna.brand_dna, active_product_images=[])
 
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
          patch('core.content_pipeline.tasks.schedule_daily_emails') as mock_schedule:
         MockText.return_value.generate.return_value = _MOCK_POSTS
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
 
         from core.content_pipeline.tasks import generate_next_week
-        generate_next_week(calendar, week_number=2)
+        generate_next_week(str(calendar.id), week_number=2)
 
     days = sorted(p.day_number for p in calendar.posts.all())
     assert days == list(range(8, 15))
+    assert all(p.image_url for p in calendar.posts.all())
     mock_schedule.assert_called_once_with(calendar)

@@ -150,7 +150,8 @@ class TestRenderHtmlTemplate:
         content = {'headline': 'Web profesional', 'subtitle': 'Tu negocio en línea', 'cta': 'Ver más', 'tag': 'DISEÑO WEB'}
         mock_pw, _ = self._make_mock_playwright(fake_shot)
 
-        with patch('core.content_pipeline.generators.image_generator.sync_playwright', return_value=mock_pw):
+        with patch('core.content_pipeline.generators.image_generator.sync_playwright', return_value=mock_pw), \
+             patch.object(ImageGenerator, '_choose_template_for_image', return_value='instagram_post.html'):
             result = gen._render_html_template(fake_bg, content, ['#e94560'])
 
         assert result == fake_shot
@@ -164,7 +165,8 @@ class TestRenderHtmlTemplate:
         mock_pw, mock_page = self._make_mock_playwright(fake_shot)
 
         colors = ['#ff5500']
-        with patch('core.content_pipeline.generators.image_generator.sync_playwright', return_value=mock_pw):
+        with patch('core.content_pipeline.generators.image_generator.sync_playwright', return_value=mock_pw), \
+             patch.object(ImageGenerator, '_choose_template_for_image', return_value='instagram_post.html'):
             gen._render_html_template(fake_bg, content, colors)
 
         html_arg = mock_page.set_content.call_args[0][0]
@@ -179,7 +181,8 @@ class TestRenderHtmlTemplate:
         content = {'headline': 'Título', 'subtitle': 'Subtítulo', 'cta': 'Empieza', 'tag': 'TEST'}
         mock_pw, mock_page = self._make_mock_playwright(fake_shot)
 
-        with patch('core.content_pipeline.generators.image_generator.sync_playwright', return_value=mock_pw):
+        with patch('core.content_pipeline.generators.image_generator.sync_playwright', return_value=mock_pw), \
+             patch.object(ImageGenerator, '_choose_template_for_image', return_value='instagram_post.html'):
             gen._render_html_template(fake_bg, content, [])
 
         html_arg = mock_page.set_content.call_args[0][0]
@@ -273,6 +276,81 @@ class TestValidateBackground:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             result = gen._validate_background(b'fake-png')
         assert result is True  # don't block pipeline on QC error
+
+
+class TestChooseTemplateForImage:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_maps_bottom_zone_to_lower_third_template(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"safe_zone": "bottom"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._choose_template_for_image(b'fake-png')
+        assert result == 'instagram_post.html'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_maps_top_zone_to_upper_third_template(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"safe_zone": "top"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._choose_template_for_image(b'fake-png')
+        assert result == 'instagram_post_top.html'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_maps_center_zone_to_centered_template(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"safe_zone": "center"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._choose_template_for_image(b'fake-png')
+        assert result == 'instagram_post_center.html'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_falls_back_to_random_on_api_error(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            result = gen._choose_template_for_image(b'fake-png')
+        assert result in gen._TEMPLATES
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_falls_back_to_random_on_invalid_zone(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"safe_zone": "diagonal"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._choose_template_for_image(b'fake-png')
+        assert result in gen._TEMPLATES
 
 
 class TestGeneratePostContentWithProduct:

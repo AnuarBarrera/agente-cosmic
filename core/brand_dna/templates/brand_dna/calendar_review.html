@@ -75,6 +75,10 @@
     .btn-regen:hover { background: #4a4a2a; }
     .btn-save { background: #e94560; color: #fff; display: none; }
     .btn-save:hover { background: #c73652; }
+    .publish-row { margin-top: 10px; }
+    .btn-published { background: #1a2a3a; color: #4a9eff; width: 100%; }
+    .btn-published:hover { background: #2a3a4a; }
+    .published-status { margin-top: 10px; color: #4caf7d; font-size: 0.78rem; font-weight: 600; }
     .post-card.approved .btn-approve,
     .post-card.approved .btn-edit,
     .post-card.approved .btn-regen { display: none; }
@@ -120,9 +124,9 @@
 </nav>
 
 <div class="container">
-  <h1>Revisa tu calendario de contenido</h1>
+  <h1>Este es tu calendario de contenido</h1>
   <p class="subtitle">
-    {{ brand_dna.business_name }} · Aprueba, edita o pide cambios en cada post antes de que se envíe.
+    Aprueba, edita o pide cambios en cada post antes de que se envíe. ¿Quieres ver el análisis de tu marca? Da click <a href="{% url 'results' job.id %}" style="color:#e94560;font-weight:600;">Aquí</a>.
   </p>
 
   <div class="legend">
@@ -214,7 +218,7 @@
       </div>
       <div class="post-body">
         <div class="post-day">Día {{ post.day_number }}</div>
-        <div class="post-schedule">
+        <div class="post-schedule" data-scheduled="{{ post.scheduled_at|date:'c' }}">
           📅 {{ post.scheduled_at|date:"D d M" }} · 📧 {{ post.scheduled_at|date:"H:i" }}h
         </div>
         <div class="post-caption" id="caption-{{ post.id }}">{{ post.caption }}</div>
@@ -229,13 +233,19 @@
         </div>
         <div class="actions">
           <button class="btn-action btn-approve" onclick="approvePost('{{ post.id }}')">✓ Aprobar</button>
-          <button class="btn-action btn-edit" onclick="startEdit('{{ post.id }}')">✏ Editar</button>
-          <button class="btn-action btn-regen" onclick="toggleRegen('{{ post.id }}')">↺ Cambio</button>
+          <button class="btn-action btn-edit" onclick="startEdit('{{ post.id }}')">✏ Edita la descripción</button>
+          <button class="btn-action btn-regen" onclick="toggleRegen('{{ post.id }}')">↺ Regenera la imagen</button>
           <button class="btn-action btn-save" id="save-{{ post.id }}" onclick="saveEdit('{{ post.id }}')">Guardar</button>
         </div>
         <div class="feedback-area" id="regen-{{ post.id }}">
           <textarea id="note-{{ post.id }}" placeholder="Describe el cambio que quieres..."></textarea>
           <button class="btn-send-regen" onclick="requestRegen('{{ post.id }}')">Regenerar con IA ✨</button>
+        </div>
+        <div class="publish-row" id="publish-row-{{ post.id }}" style="{% if post.published_at %}display:none;{% endif %}">
+          <button class="btn-action btn-published" onclick="markPublished('{{ post.id }}')">📤 Ya publiqué esto</button>
+        </div>
+        <div class="published-status" id="published-status-{{ post.id }}" style="{% if not post.published_at %}display:none;{% endif %}">
+          ✓ Publicado {% if post.published_at %}{{ post.published_at|date:"D d M, H:i" }}{% endif %}
         </div>
       </div>
     </div>
@@ -248,6 +258,15 @@
 
 <script>
   const CSRF = '{{ csrf_token }}';
+
+  // Convierte los horarios (servidos en UTC) a la hora local del navegador del usuario.
+  document.querySelectorAll('.post-schedule[data-scheduled]').forEach(function(el) {
+    const d = new Date(el.dataset.scheduled);
+    if (isNaN(d.getTime())) return;
+    const dateStr = d.toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short' });
+    const timeStr = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+    el.innerHTML = '📅 ' + dateStr + ' · 📧 ' + timeStr + 'h';
+  });
 
   function showToast(msg, color, duration) {
     const t = document.getElementById('toast');
@@ -280,6 +299,18 @@
     if (data.status === 'ok') {
       setCardStatus(postId, 'approved', '✓ Aprobado');
       showToast('Post aprobado ✓');
+    }
+  }
+
+  async function markPublished(postId) {
+    const data = await postAction(postId, { action: 'mark_published' });
+    if (data.status === 'ok') {
+      document.getElementById('publish-row-' + postId).style.display = 'none';
+      const statusEl = document.getElementById('published-status-' + postId);
+      statusEl.style.display = 'block';
+      const date = new Date(data.published_at);
+      statusEl.textContent = '✓ Publicado ' + date.toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short' }) + ', ' + date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+      showToast('¡Marcado como publicado! 🎉');
     }
   }
 

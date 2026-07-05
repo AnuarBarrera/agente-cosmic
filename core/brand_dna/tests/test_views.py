@@ -45,6 +45,8 @@ def test_analyze_submit_creates_job(user):
     c.force_login(user)
     with patch('core.brand_dna.views.django_rq'):
         response = c.post('/analizar/', {
+            'business_name': 'Tu Web MX',
+            'business_description': 'Agencia digital que hace sitios web.',
             'business_url': 'https://tuwebmx.com',
         })
     assert response.status_code == 302
@@ -56,6 +58,7 @@ def test_analyze_submit_without_url_with_description(user):
     c.force_login(user)
     with patch('core.brand_dna.views.django_rq'):
         response = c.post('/analizar/', {
+            'business_name': 'Tamales Doña Lupita',
             'business_description': 'Vendo tamales oaxaqueños en el mercado',
         })
     assert response.status_code == 302
@@ -64,7 +67,7 @@ def test_analyze_submit_without_url_with_description(user):
     assert 'tamales' in job.business_description
 
 
-def test_analyze_submit_without_url_or_description_shows_error(user):
+def test_analyze_submit_without_name_or_description_shows_error(user):
     c = Client()
     c.force_login(user)
     response = c.post('/analizar/', {})
@@ -76,6 +79,8 @@ def test_analyze_submit_enqueues_task(user):
     c.force_login(user)
     with patch('core.brand_dna.views.django_rq') as mock_rq:
         c.post('/analizar/', {
+            'business_name': 'Tu Web MX',
+            'business_description': 'Agencia digital que hace sitios web.',
             'business_url': 'https://tuwebmx.com',
         })
     mock_rq.enqueue.assert_called_once()
@@ -174,6 +179,39 @@ def job_with_calendar(user):
     return job
 
 
+def test_mark_published_sets_timestamp(client, user, job_with_calendar):
+    post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
+    client.force_login(user)
+    response = client.post(
+        f'/api/post/{post.id}/action/',
+        data=json.dumps({'action': 'mark_published'}),
+        content_type='application/json',
+    )
+    assert response.status_code == 200
+    post.refresh_from_db()
+    assert post.published_at is not None
+
+
+def test_mark_published_is_idempotent(client, user, job_with_calendar):
+    post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
+    client.force_login(user)
+    client.post(
+        f'/api/post/{post.id}/action/',
+        data=json.dumps({'action': 'mark_published'}),
+        content_type='application/json',
+    )
+    post.refresh_from_db()
+    first_timestamp = post.published_at
+
+    client.post(
+        f'/api/post/{post.id}/action/',
+        data=json.dumps({'action': 'mark_published'}),
+        content_type='application/json',
+    )
+    post.refresh_from_db()
+    assert post.published_at == first_timestamp
+
+
 def test_calendar_review_exposes_pending_feedback(client, user, job_with_calendar):
     client.force_login(user)
     response = client.get(f'/calendar/{job_with_calendar.id}/')
@@ -220,7 +258,7 @@ def test_calendar_feedback_api_no_decision_does_not_generate(client, user, job_w
 def test_calendar_feedback_api_yes_triggers_generate_next_week(client, user, job_with_calendar):
     calendar = job_with_calendar.brand_dna.calendar
     client.force_login(user)
-    with patch('core.content_pipeline.tasks.generate_next_week') as mock_gen, \
+    with patch('core.brand_dna.views.django_rq') as mock_rq, \
          patch('core.brand_dna.views._update_active_product_images') as mock_update:
         response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
             'rating': '5',
@@ -235,7 +273,10 @@ def test_calendar_feedback_api_yes_triggers_generate_next_week(client, user, job
     feedback = calendar.feedback_entries.get(week_number=1)
     assert feedback.continue_decision == WeeklyFeedback.CONTINUE_YES
     mock_update.assert_called_once()
-    mock_gen.assert_called_once()
+    mock_rq.enqueue.assert_called_once()
+    enqueue_args = mock_rq.enqueue.call_args[0]
+    assert enqueue_args[1] == str(calendar.id)
+    assert enqueue_args[2] == 2
 
 
 def test_calendar_feedback_api_requires_ownership(client, django_user_model, job_with_calendar, free_plan):

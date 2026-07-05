@@ -474,12 +474,23 @@ def dashboard_view(request):
     from datetime import timedelta
     from django.utils import timezone
     from core.brand_dna.rate_limits import get_user_plan
-    jobs = (
+    jobs = list(
         AnalysisJob.objects
         .filter(user=request.user, deleted_at__isnull=True)
         .select_related('brand_dna')
         .order_by('-created_at')[:20]
     )
+    has_processing = any(j.status in ('pending', 'processing') for j in jobs)
+    for job in jobs:
+        brand_dna = getattr(job, 'brand_dna', None)
+        if brand_dna:
+            job.display_name = brand_dna.business_name
+        elif job.business_description:
+            job.display_name = job.business_description.split('\n')[0][:60]
+        elif job.business_url:
+            job.display_name = job.business_url
+        else:
+            job.display_name = 'Análisis pendiente'
     used_total = AnalysisJob.objects.filter(user=request.user).count()
     plan = get_user_plan(request.user)
     return render(request, 'brand_dna/dashboard.html', {
@@ -487,6 +498,7 @@ def dashboard_view(request):
         'user': request.user,
         'used_total': used_total,
         'max_calendars': plan.max_calendars_per_week,
+        'has_processing': has_processing,
     })
 
 

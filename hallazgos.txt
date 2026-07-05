@@ -1439,3 +1439,411 @@ Acción tomada:
 Pendiente (opcional):
   Decidir si se re-envían manualmente los posts vencidos de las cuentas de
   prueba o se dejan como están (son test data, no producción real).
+
+=================================================================
+CAMBIOS APLICADOS — 2026-07-05
+=================================================================
+Sprint de 48h antes del batch de testers del lunes 9am. Los siguientes
+hallazgos tienen cambios de código implementados y verificados (152 tests
+passing; 3 fallos preexistentes sin relación: GCS product images /
+image_generator brand_context):
+
+H1  — RESUELTO: business_name vacío en BrandDNA. Fix en tasks.py:
+      ya no basta con que la key exista, se valida string vacío. Reforzado
+      después para usar literalmente el nombre que el usuario escribió en
+      el formulario (literal_business_name), sin pasar por reinterpretación
+      de Gemini — corrige también el caso de nombre "garbled" visto en un
+      correo real ("Anuar Barrera Tu socio tecnológico").
+
+H34 — RESUELTO: el path "sin sitio web" ahora es el único flujo, no una
+      alternativa simétrica. Eliminadas las pestañas "Tengo sitio
+      web"/"No tengo sitio web" de landing.html. Un solo formulario:
+      Nombre (requerido) + Descripción (requerida) + URL (opcional, solo
+      enriquece el análisis). Archivo: brand_dna/templates/brand_dna/landing.html
+
+H26 — PARCIAL: extractor unificado en tasks.py — ManualBrandExtractor
+      corre siempre con la descripción como fuente de verdad; si hay URL,
+      WebScraper.fetch_context() aporta texto+colores como contexto
+      adicional al prompt de Gemini, no como fuente exclusiva. Si el
+      scrape falla, el análisis continúa solo con la descripción (no
+      aborta). PENDIENTE: la pantalla de confirmación aún no permite
+      EDITAR el Brand DNA si el análisis se equivocó — ese es el punto
+      central de H26 (Victor V1) que sigue sin resolver.
+
+H37 — PARCIAL: cuando hay URL, se usan colores hex reales extraídos del
+      CSS del sitio en vez de la interpretación de Gemini de una
+      descripción en palabras (manual_extractor.py, scraped_colors).
+      PENDIENTE: color picker visual en el formulario para el caso sin
+      URL (la mayoría de los testers, según H34/H28).
+
+H14 — RESUELTO: las preguntas guía ("¿Qué vendes? ¿A quién? ¿Qué te hace
+      diferente?") ya no dependen de un placeholder que desaparece al
+      escribir — ahora son texto persistente (<small>) debajo del textarea.
+
+H10 — RESUELTO: results.html implementa el flujo exacto que pedía el
+      hallazgo — bloque "Así funciona de aquí en adelante" con los 3
+      pasos (ADN listo / correo diario / primer post listo). Se
+      simplificó además para no duplicar el calendario completo (eso
+      vive solo en calendar_review.html).
+
+H12 — RESUELTO (el punto de "evaluar si es necesario junto con URL de
+      Facebook"): se eliminó el campo de URL de Facebook completo —
+      formulario, views.py, tasks.py, y el método _scrape_profile en
+      posts_analyzer.py (nunca funcionaba contra Facebook/Instagram real:
+      requests+BeautifulSoup no puede leer SPAs con anti-bot). El campo
+      de "posts anteriores" (capturas) se mantiene — sigue siendo la
+      única fuente real de estilo cuando no hay sitio web.
+
+H13 — PARCIAL: formulario reducido a un solo flujo lineal (antes: tabs +
+      campos condicionales). Sigue pendiente: progress bar, tooltips,
+      video walkthrough.
+
+H16 — PARCIAL: se agregó mensaje explícito en el Dashboard ("tu análisis
+      se está generando, te avisamos por correo") con banner que
+      desaparece solo cuando termina (vía el mismo polling que actualiza
+      las tarjetas). No se investigó la causa raíz del delay reportado
+      con Tienda de Plata.
+
+Cambio de UX no listado como hallazgo individual, motivado por el
+  conjunto de H10/H13/H16 — patrón "async, no esperes":
+  - El formulario ya no redirige a una pantalla de spinner. Redirige
+    directo al Dashboard, que hace polling y actualiza el estado del job
+    en vivo sin recargar la página.
+  - Emails (inicial y diario) con tono transaccional explícito
+    ("📬 Notificación automática" / "📬 Aviso diario automático"), asunto
+    con prefijo ✅.
+  - Email inicial ya no incluye vista previa del Día 1 ni afirma "7 posts
+    con imágenes personalizadas" (falso en ese momento — solo la imagen
+    del Día 1 existe cuando se envía el correo). Ahora es puro aviso +
+    CTA a la plataforma.
+
+Fix menor no listado en hallazgos.txt: placeholder de contraseña en
+  registro decía "mínimo 8 caracteres"; la validación real exige 12.
+
+Dashboard: botón "Ver resultados" renombrado a "Análisis de marca" (más
+  preciso sobre qué contiene esa vista — evitaba confusión con el botón
+  "Revisar calendario").
+
+=================================================================
+NOTA — H2 gana urgencia tras los cambios de 2026-07-05
+=================================================================
+Al quitar la vista previa del Día 1 del email inicial (parte del cambio
+  de arriba), el Día 1 dejó de tener CUALQUIER presencia en correo —
+  antes al menos aparecía embebido en el email de bienvenida. Hoy el
+  usuario solo ve el contenido del Día 1 si entra activamente a "Revisar
+  calendario". El botón y el flujo ya lo llevan ahí sin fricción, pero
+  esto hace más urgente decidir H2 (¿Día 1 debería tener su propio email
+  diario? Opciones A/B/C ya documentadas arriba) antes del siguiente
+  batch de testers.
+
+=================================================================
+CAMBIOS APLICADOS — 2026-07-05 (segunda tanda)
+=================================================================
+H12 — RESUELTO POR COMPLETO: se eliminó toda la funcionalidad de "posts
+      anteriores" (subir capturas + pegar texto de posts). Decisión del
+      producto: no aportaba valor real al análisis. Eliminado de punta a
+      punta — landing.html, views.py, tasks.py, y la clase PostsAnalyzer
+      completa (extractors/posts_analyzer.py) junto con su test, por
+      quedar inalcanzable (su único input posible ya no existe). Los
+      campos posting_style/avg_caption_length/common_hashtags en
+      BrandDNA quedan en sus defaults del modelo (antes venían del
+      fallback de PostsAnalyzer, que es idéntico). Se relabeled el paso
+      de progreso correspondiente en results.html ("Construyendo tu ADN
+      de marca" en vez de "Analizando posts anteriores", que ya no
+      describía nada real).
+
+H26 — AVANCE ADICIONAL (parte "discernir sitios detallados"): se ajustó
+      el prompt de manual_extractor.py para instruir a Gemini a tratar
+      el contenido scrapeado del sitio como la fuente MÁS COMPLETA
+      cuando es detallado (menciona productos, servicios, valores,
+      historia, audiencia con especificidad) — antes se presentaba solo
+      como "contenido adicional", en un tono secundario. Si el sitio es
+      escaso o no se relaciona con la descripción, Gemini lo ignora y usa
+      solo la descripción del usuario. PENDIENTE: la parte de H26 sobre
+      poder EDITAR el Brand DNA si el análisis se equivocó — ver bloque
+      de diseño abajo, combinado con H37.
+
+H36 Capa 1 — RESUELTO, saltando directo a solución técnica (Capa 2): en
+      vez de la pregunta verbal en onboarding, se agregó una regla de
+      seguridad directamente en los prompts de generación de copy —
+      text_generator.py (prompt de los 7 posts) e image_generator.py
+      (system_instruction de headline/subtitle/cta/tag). Instrucción:
+      si el negocio/keywords/audiencia sugieren nicho sensible (niños,
+      salud, medicina, finanzas, crédito, temas legales), usar tono
+      neutro-positivo, evitar promesas absolutas y evitar lenguaje
+      retador con audiencias vulnerables. Esto cubre la Capa 2 completa
+      del hallazgo original, no solo la Capa 1.
+
+H16 — ACLARADO, no es un bug del proyecto: el delay que reportó Tienda
+      de Plata fue que no encontró el correo (bandeja de
+      promociones/spam), no un problema real de la cola RQ o el worker.
+      No requiere acción de código. Se mantiene H33 (SPF/DKIM/DMARC)
+      como la acción relevante para reducir este tipo de confusión futura.
+
+=================================================================
+DISEÑO PENDIENTE DE CONFIRMAR — H26 (parte editable) + H37 combinados
+=================================================================
+El usuario propone que en vez de un color picker (H37) o solo una
+  pantalla de confirmación de lectura (H26/H10), cada campo del Brand
+  DNA tenga su propia opción de Editar / Reanalizar / Aceptar, sin
+  necesidad de regenerar todo el análisis desde cero. Razonamiento: el
+  Brand DNA es el input más importante para la calidad del contenido
+  final, y hoy no hay forma de corregirlo si algo sale mal.
+Pendiente de diseñar antes de implementar: dónde vive esta pantalla en
+  el flujo (¿bloquea la generación del calendario hasta que se acepte,
+  o el calendario se genera igual y esto permite corregir + regenerar
+  después?), y qué significa técnicamente "reanalizar" un campo
+  individual (¿nueva llamada a Gemini con el mismo contexto + una
+  instrucción de corrección, o requiere que el usuario dé una pista de
+  qué está mal?).
+
+=================================================================
+CAMBIOS APLICADOS — 2026-07-05 (tercera tanda) — Brand DNA editable
+=================================================================
+H26 — RESUELTO (ambas partes):
+  a) Prompt de manual_extractor.py ajustado para que Gemini trate el
+     contenido scrapeado del sitio como fuente MÁS COMPLETA cuando es
+     detallado, en vez de "contenido adicional" secundario.
+  b) Pantalla de confirmación editable implementada en results.html —
+     ver detalle en H37 abajo, es la misma feature.
+
+H37 — RESUELTO, con diseño distinto al propuesto originalmente (color
+  picker descartado a favor de edición directa, decisión del usuario):
+  Cada campo del Brand DNA (descripción, audiencia, tono, keywords,
+  colores — nombre excluido porque ya no lo genera Gemini, es literal
+  del formulario) tiene su propia fila con:
+    - Editar: guarda el valor directo (mismo patrón que edición de
+      captions en calendar_review.html)
+    - Reanalizar: llamada a Gemini con feedback del usuario para ese
+      campo especifico (colores: re-escanea el CSS del sitio si hay URL)
+    - Aprobado: oculta Editar/Reanalizar para ese campo (incluye Tono)
+  Decisión de flujo (opción B, no bloqueante, confirmada por el
+  usuario): el calendario se sigue generando automático como siempre.
+  Si el usuario edita el Brand DNA después, aparece un banner
+  "Regenerar mis posts con estos cambios" — solo se dispara si el
+  usuario lo pide explícitamente, nunca automático por cada campo
+  guardado. La regeneración respeta posts ya enviados (no los toca).
+  Endpoints nuevos: POST /api/brand-dna/<job_id>/field/,
+  POST /api/calendar/<job_id>/regenerate/. 16 tests nuevos.
+
+Reordenamiento de flujo entre pantallas (parte del mismo cambio):
+  - Email inicial → calendar_review (el calendario, no el análisis)
+  - calendar_review.html tiene un link inline "¿Quieres ver el análisis
+    de tu marca? Da click Aquí" en vez de un botón de nav aparte
+  - results.html: los 3 pasos de "así funciona" arriba, ADN editable en
+    medio, botón al calendario abajo
+
+Copy y UI, ronda de pulido (no son hallazgos individuales, feedback
+  directo del usuario tras probar en deploy.anuarbarrera.dev):
+  - calendar_review.html: "Revisa tu calendario..." → "Este es tu
+    calendario de contenido"; botones "Editar"/"Cambio" →
+    "Edita la descripción"/"Regenera la imagen"
+  - results.html: "Tu ADN de Marca" → "Este es el análisis de tu
+    marca"; subtítulo muestra el nombre de marca en vez de la URL;
+    nombre de negocio en MAYÚSCULAS en el resultado
+  - Dashboard: cada tarjeta muestra el nombre de marca en vez de la URL
+    (con fallback al nombre del formulario si aún no hay análisis
+    completo); botón "+ Nuevo análisis" solo visible si el usuario ya
+    tiene algún análisis previo (incluso eliminado) — usuarios nuevos
+    solo ven "Analizar mi marca" del estado vacío
+  - Dashboard: layout de tarjetas reescrito mobile-first (el layout
+    horizontal anterior truncaba el nombre a una sola letra en pantallas
+    angostas — bug real visto en producción, corregido)
+
+=================================================================
+CAMBIOS APLICADOS — 2026-07-05 (cuarta tanda) — H36 reforzado + auditor
+=================================================================
+Motivado por un caso real: un tester pediatra generó captions con
+  "asegurando un desarrollo óptimo" / "asegurando un inicio de vida
+  saludable" — exactamente el tipo de afirmación médica no verificable
+  que H36 buscaba evitar. La mitigación por prompt (implementada el
+  2026-07-05 primera tanda) redujo pero no eliminó el riesgo.
+
+H36 — REFORZADO con capa adicional (auditor de contenido, mismo patrón
+  que ya existía para QC de imágenes en image_generator.py):
+  - Prompt de text_generator.py: lista explícita de palabras prohibidas
+    ("garantizado", "asegurar", "aseguramos", "asegurando", etc.), no
+    solo "evita promesas absolutas" en general.
+  - Detector de nicho sensible (_is_sensitive_niche): heurística por
+    keywords normalizando acentos (niños, salud, finanzas, legal...),
+    sin costo de API — el auditor solo corre cuando aplica.
+  - Auditor: segundo Gemini evalúa cada caption con JSON estricto
+    (has_absolute_promise, has_unverifiable_claim, ok); si falla,
+    regenera y vuelve a auditar (hasta 2 reintentos).
+  Validado en vivo contra el caso real del pediatra: el auditor detectó
+  y corrigió automáticamente el mismo tipo de frase que motivó el
+  hallazgo original ("...desarrollo óptimo..." → has_unverifiable_claim:
+  true → regenerado → aprobado). 8 tests nuevos. El calendario original
+  del pediatra en producción NO se tocó (todos los posts seguían
+  pending, decisión del usuario de no regenerarlos retroactivamente).
+
+=================================================================
+CAMBIOS APLICADOS — 2026-07-05 (quinta tanda) — P0/P1/deuda técnica
+=================================================================
+H33 — RESUELTO por el usuario (fuera de código): CNAME y TXT de Mailgun
+  y del servidor de correo de Google para anuarbarrera.dev ya agregados.
+
+H15 — RESUELTO por el usuario vía Django Admin: límite subido a 10 para
+  el plan Tester. No requirió código.
+
+H23 F2/F3 — Confirmado como proceso operativo (guión de llamada), no de
+  código. Queda en manos del usuario.
+
+H13 (parcial) — Video walkthrough diferido indefinidamente (no producible
+  por código). Progress bar/tooltips evaluados y DESCARTADOS por decisión
+  del usuario: el onboarding ya se percibe intuitivo tras la simplificación
+  a un solo flujo (sesión anterior) y el valor no está claro para UI
+  interna vs. landing page. No implementado.
+
+H2 + H3 — RESUELTOS, con un cambio de arquitectura más grande de lo que
+  el hallazgo original pedía (decisión de negocio del usuario, no solo
+  "elegir opción A/B/C"): dado que ya existe el patrón "ve por un café"
+  (usuario no espera en vivo), ya no tiene sentido escalonar la
+  generación de imágenes a lo largo de la semana — se generan las 7
+  imágenes por adelantado en el análisis inicial (antes: solo Día 1).
+  El calendario completo está disponible desde el momento en que termina
+  el análisis, sin esperar 7 días. El correo diario deja de ser el medio
+  de entrega del contenido — pasa a ser un recordatorio puro ("Hoy es tu
+  Día N — ve a publicarlo") con link a la plataforma, aplicado a los 7
+  días incluyendo el Día 1 (cierra el gap de H2). El clamp de scheduling
+  ante fechas pasadas subió de 1 a 5 minutos (cierra H3 — Día 1 ya no
+  puede programarse en el pasado, y no compite con el correo de
+  bienvenida). `generate_next_week` pasó de ejecución síncrona dentro del
+  request HTTP a encolado async vía RQ (necesario porque ahora también
+  genera 7 imágenes, antes no generaba ninguna). Detalle completo y la
+  idea de producto relacionada (segmentación ICP vs Agencia, ver
+  memoria del asistente) documentada aparte — no implementada aún, es
+  roadmap. Archivos: content_pipeline/tasks.py, scheduler.py,
+  email_daily.html, email_sender.py, brand_dna/views.py.
+
+H9 — RESUELTO: agregado ejemplo visual real (post de Tu Web MX, el
+  propio negocio del fundador — no se expuso contenido de ningún tester)
+  en el hero de landing.html, antes del formulario.
+
+H4 — RESUELTO: línea "Vamos a crear tu plan de contenido de siete días
+  basado en tu marca." agregada justo antes del botón "Analizar mi marca".
+
+H5 — RESUELTO: `max_daily_interactions`/`max_monthly_interactions`
+  excluidos del formulario de admin de Plan (siguen existiendo en el
+  modelo y en el código legacy de tenant_management, fuera de alcance
+  eliminarlos hoy — la acción pedida era solo ocultarlos del admin).
+
+H6 — RESUELTO: `created_by` en InvitationCode ahora es `null=True,
+  blank=True`, con migración aplicada.
+
+H18 — RESUELTO: prompt de Art Director e instrucción de fallback en
+  image_generator.py ahora piden explícitamente que los colores de marca
+  sean visualmente prominentes en el fondo (props, muros, telas, acentos)
+  en vez de fondos neutros genéricos que podrían ser de cualquier marca.
+
+H32 — RESUELTO: `prompt='select_account'` en el flujo de Google OAuth ya
+  existía (de una sesión de seguridad anterior). Lo que faltaba —
+  priorizar visualmente "Continuar con Google" sobre el formulario
+  manual— se aplicó en login.html y register.html: el botón de Google
+  ahora aparece primero, arriba del divisor "o con tu correo".
+
+H24-G2 — RESUELTO (infraestructura mínima): nuevo campo
+  `ContentPost.published_at` + botón "📤 Ya publiqué esto" en cada post
+  de calendar_review.html + endpoint `mark_published` en post_action_api.
+  Permite calcular "time to first publish" con delta entre scheduled_at
+  y published_at. Es la base técnica que la idea de nudging tipo
+  Duolingo (ver memoria) necesitará más adelante.
+
+Tests: 237 passed tras toda la tanda (mismos 3 fallos preexistentes sin
+  relación). 2 migraciones nuevas aplicadas (InvitationCode.created_by,
+  ContentPost.published_at).
+
+=================================================================
+PENDIENTE — resumen para continuar
+=================================================================
+P0: TODO resuelto o correctamente cerrado como operativo/config
+  (H9 ✅, H24-G1 operativo del usuario, H33 ✅ del usuario).
+P1: TODO resuelto o cerrado (H2 ✅, H4 ✅, H15 ✅ del usuario, H18 ✅,
+  H23 F1 de antes + F2/F3 operativo, H24-G2 ✅, H32 ✅).
+  H13 evaluado y descartado por decisión del usuario.
+P2 y deuda técnica: H5 ✅, H6 ✅ resueltos. Sin tocar: H17, H19, H20,
+  H22, H29 (operativo), H35.
+Bloqueante antes de producción: H7, H36 Capa 3 (legal) — correctamente
+  diferidos. H36 Capas 1-2 (técnico) ya resueltas via prompt + auditor.
+Resueltos en esta sesión (2026-07-05, todas las tandas): H1, H2, H3, H4,
+  H5, H6, H9, H12, H14, H16 (aclarado), H18, H24-G2, H26, H32, H33 (del
+  usuario), H34, H36 (capas 1-2), H37. H15 y H23-F2/F3 resueltos fuera
+  de código por el usuario.
+
+=================================================================
+HALLAZGO 38 — Timeout de RQ mata la generación de imagen a mitad del job
+Categoría: Bug / backend / RQ
+Estado: ✅ RESUELTO — 2026-07-05
+=================================================================
+Surfaceado por: Anuar, test real "la Heladería Pokémon" (job
+  a3045c0f-0918-4b89-82dd-2e2b266b5cdc). Resultado muy bueno en general,
+  tardó 6 minutos, pero el Día 6 quedó sin imagen.
+
+Causa raíz: al implementar H2/H3 (generar las 7 imágenes por adelantado
+  en vez de solo el Día 1), el timeout global de RQ (`DEFAULT_TIMEOUT:
+  360` segundos = 6 min, en `RQ_QUEUES` de settings.py) se quedó corto.
+  El Día 6 encadenó 3 reintentos de QC de fondo (`has_text` rechazado
+  cada vez) + rate limiting, y el job completo llegó al límite de 360s
+  justo durante esa generación. RQ mata el hilo con una excepción en ese
+  punto exacto; `ImageGenerator.generate()` la atrapa con un
+  `except Exception` genérico y devuelve `''` en vez de propagar, así
+  que el resto del pipeline (Día 7, email) siguió normal — el síntoma
+  fue silencioso: sin error visible, solo una imagen faltante.
+
+Fix: `job_timeout=1500` (25 min) explícito en los `django_rq.enqueue()`
+  de `content_generation_task` y `generate_next_week` — el timeout
+  global de 360s se mantiene para el resto de tasks (envíos de correo,
+  regeneración de un solo post) que sí caben en esa ventana.
+
+Nota: el Día 6 de este job de prueba se regeneró manualmente para dejar
+  la demo completa — no se tocó el código de producción para eso, fue
+  una corrección puntual de datos.
+
+Severidad: Media (silencioso, pero el fallback de send_daily_email_task
+  ya regenera la imagen si falta cuando llega su día — el impacto real
+  en testers habría sido bajo, pero rompía la vista previa inmediata que
+  es el punto central del cambio H2/H3).
+
+=================================================================
+HALLAZGO 39 — Plantilla de texto elegida al azar, sin ver la imagen
+Categoría: Calidad visual / generación de imagen
+Estado: ✅ RESUELTO — 2026-07-05
+=================================================================
+Surfaceado por: Anuar, con ejemplo visual (foto de mascota con logo de
+  marca superpuesto por el layout elegido al azar).
+
+Causa: `_render_html_template()` en image_generator.py elegía entre 3
+  plantillas (texto abajo / centro glassmorphism / texto arriba) con
+  `random.choice()`, sin considerar dónde está el sujeto principal de la
+  imagen de fondo ya generada. Podía tocar en suerte una plantilla que
+  pone texto justo donde está el elemento visual más importante.
+
+Fix: nuevo método `_choose_template_for_image()` — Gemini analiza la
+  imagen final (ya recortada al cuadrado) y responde qué tercio
+  (top/bottom/center) tiene menos elementos visuales importantes: esa
+  zona determina la plantilla. Si el análisis falla, cae de vuelta a
+  `random.choice()` (mismo comportamiento de antes, nunca bloquea el
+  pipeline). 5 tests nuevos.
+
+Severidad: Baja (afecta calidad visual puntual, no rompe el flujo)
+
+=================================================================
+HALLAZGO 40 — Horarios mostrados en UTC, no en la hora del usuario
+Categoría: UX / claridad
+Estado: ✅ RESUELTO — 2026-07-05
+=================================================================
+Surfaceado por: Anuar. `TIME_ZONE = 'UTC'` en settings.py — todos los
+  horarios (fecha de creación en dashboard, horario programado de cada
+  post en calendar_review) se renderizaban del lado del servidor en UTC,
+  confuso para el usuario en México (UTC-6).
+
+Fix: en vez de detectar la zona horaria vía IP (más invasivo, requiere
+  lookup de geolocalización), se usa el propio navegador — el timestamp
+  se sirve en un atributo `data-*` en formato ISO 8601, y JS lo
+  reformatea con `toLocaleDateString`/`toLocaleTimeString`, que usan
+  automáticamente la zona horaria del sistema operativo del usuario sin
+  pedir ningún permiso. Aplicado en dashboard.html (fecha de creación) y
+  calendar_review.html (horario programado de cada post). Degrada con
+  gracia sin JS — muestra la hora UTC del servidor como antes.
+
+Severidad: Baja (confuso pero no bloqueaba nada)
