@@ -1754,21 +1754,29 @@ Tests: 237 passed tras toda la tanda (mismos 3 fallos preexistentes sin
   ContentPost.published_at).
 
 =================================================================
-PENDIENTE — resumen para continuar
+PENDIENTE — resumen para continuar (actualizado 2026-07-05, fin de sesión)
 =================================================================
-P0: TODO resuelto o correctamente cerrado como operativo/config
-  (H9 ✅, H24-G1 operativo del usuario, H33 ✅ del usuario).
-P1: TODO resuelto o cerrado (H2 ✅, H4 ✅, H15 ✅ del usuario, H18 ✅,
-  H23 F1 de antes + F2/F3 operativo, H24-G2 ✅, H32 ✅).
-  H13 evaluado y descartado por decisión del usuario.
-P2 y deuda técnica: H5 ✅, H6 ✅ resueltos. Sin tocar: H17, H19, H20,
-  H22, H29 (operativo), H35.
-Bloqueante antes de producción: H7, H36 Capa 3 (legal) — correctamente
-  diferidos. H36 Capas 1-2 (técnico) ya resueltas via prompt + auditor.
-Resueltos en esta sesión (2026-07-05, todas las tandas): H1, H2, H3, H4,
-  H5, H6, H9, H12, H14, H16 (aclarado), H18, H24-G2, H26, H32, H33 (del
-  usuario), H34, H36 (capas 1-2), H37. H15 y H23-F2/F3 resueltos fuera
-  de código por el usuario.
+De 46 hallazgos totales, quedan 8 abiertos — todos P2 o de menor prioridad,
+ninguno bloqueante para seguir con testers dentro del ICP ya validado:
+
+  H17 — subject de correo sin personalizar (nombre del negocio).
+  H19 — selector de tono explícito en onboarding (hoy se infiere solo).
+  H20 — variedad temática rotatoria entre semanas (pilares de contenido).
+  H22 — preview del post estilo Facebook/Instagram antes de aprobar.
+  H29 — referido Alejo (catering/bar) — operativo, gestión de Anuar.
+  H35 — mensaje de consistencia visual como diferenciador — necesita
+    validar el ángulo con Aurora antes de escribir el copy.
+
+Bloqueante antes de producción pública (correctamente diferidos, no acción
+  ahora): H7 (moderación de input contra abuso), H36 Capa 3 (cláusula legal).
+
+Todo lo demás (H1-H16, H18, H21, H23-H28, H30-H34, H36 capas 1-2, H37-H46)
+  está resuelto, cerrado sin código, o es una decisión operativa ya tomada
+  por Anuar fuera de este repo.
+
+Fuera del punch list de hallazgos.txt, pendiente de decisión de producto:
+  segmentación ICP vs Agencia (2 tiers, nudging tipo Duolingo solo para ICP)
+  — ver memoria del asistente, sin diseñar aún.
 
 =================================================================
 HALLAZGO 38 — Timeout de RQ mata la generación de imagen a mitad del job
@@ -1847,3 +1855,150 @@ Fix: en vez de detectar la zona horaria vía IP (más invasivo, requiere
   gracia sin JS — muestra la hora UTC del servidor como antes.
 
 Severidad: Baja (confuso pero no bloqueaba nada)
+
+=================================================================
+HALLAZGO 41 — Reactivación semanal sin feedback visual ni confirmación
+Categoría: UX / arquitectura
+Estado: ✅ RESUELTO — 2026-07-05
+=================================================================
+Surfaceado por: Anuar, tras responder la encuesta de fin de semana y no ver
+  ningún aviso de que la próxima semana se estaba generando.
+
+Causa: el JS de calendar_review.html borraba el banner de la encuesta por
+  completo tras enviarla (`banner.remove()`), sin dejar ningún rastro visible
+  de que `generate_next_week` seguía corriendo en background (ahora tarda
+  minutos, no segundos, desde el pivote a generación upfront). Tampoco existía
+  ningún correo de confirmación al terminar — `generate_next_week` nunca
+  llamaba a `EmailSender`.
+
+Fix: nuevo campo `ContentCalendar.next_week_generating`, activado al enviar la
+  encuesta y desactivado en un `finally` (para no quedar atascado ni siquiera
+  si la generación falla). Banner persistente en calendar_review.html y
+  dashboard.html mientras el flag esté activo. Nuevo método
+  `EmailSender.send_week_ready()` — antes ese correo no existía en absoluto.
+
+Severidad: Alta (rompía la confianza en el flujo de reactivación — el usuario
+  no tenía forma de saber si algo estaba pasando).
+
+=================================================================
+HALLAZGO 42 — Parser JSON del generador de texto falla con nichos sensibles
+Categoría: Bug / backend / Gemini
+Estado: ✅ RESUELTO — 2026-07-05
+=================================================================
+Surfaceado por: Anuar, test real "Pediatra Juan González" — la reactivación
+  semanal no generaba nada, sin ningún error visible en la UI.
+
+Causa raíz: `TextGenerator.generate()` hacía `json.loads(raw)` tras solo
+  quitar los ```` ```json ```` de los bordes. Cuando Gemini agregaba cualquier
+  texto extra después del arreglo (una nota, una aclaración), el parseo
+  completo fallaba con `Extra data`. Correlacionado con nichos sensibles: el
+  prompt le pide a Gemini un manejo especial para negocios de salud/niños/
+  finanzas, lo que aumenta la probabilidad de que agregue una nota aclaratoria
+  rompiendo el formato esperado. Con tuwebmx (agencia digital, no sensible)
+  nunca pasó.
+
+Fix: extraer el arreglo JSON con regex (`re.search(r'\[.*\]', raw,
+  re.DOTALL)`) antes de parsear — mismo patrón que ya usaba el auditor de
+  seguridad de captions (`_validate_caption_safety`), nunca aplicado al
+  generador principal. Test nuevo que reproduce el caso exacto (JSON + nota
+  extra al final).
+
+Severidad: Alta (pérdida silenciosa de una semana completa de contenido, sin
+  ningún error visible al usuario).
+
+=================================================================
+HALLAZGO 43 — Palabra prohibida "asegurar" se coló en el texto de la imagen
+Categoría: Seguridad / riesgo de ban Meta
+Estado: ✅ RESUELTO — 2026-07-05
+=================================================================
+Surfaceado por: Anuar, revisando visualmente un post de pediatría: "Ofrecemos
+  atención pediátrica experta para asegurar el desarrollo óptimo...".
+
+Causa: la lista de palabras prohibidas ('garantizado', 'asegurar', etc.,
+  agregada en H36) solo vivía en el prompt de `TextGenerator` (captions). El
+  método que genera el headline/subtítulo QUE SE COMPONE EN LA IMAGEN
+  (`_generate_post_content` en image_generator.py) es una llamada a Gemini
+  completamente separada, con solo una advertencia genérica ("evita promesas
+  absolutas") sin la lista explícita — la palabra prohibida se coló por esa
+  puerta trasera.
+
+Fix: se agregó la misma lista explícita de palabras prohibidas al
+  `system_instruction` de `_generate_post_content`. Test nuevo que verifica
+  que la instrucción a Gemini incluya esas palabras.
+
+Severidad: Alta (riesgo real de baneo de cuenta publicitaria en Meta — el
+  texto va directo al gráfico del post, más visible que el caption).
+
+=================================================================
+HALLAZGO 44 — Navegador muestra imagen vieja en caché tras regenerar
+Categoría: Bug / UX
+Estado: ✅ RESUELTO — 2026-07-05
+=================================================================
+Surfaceado por: Anuar — reportó que una imagen "no cambió" tras una
+  regeneración exitosa (el fix de H43 parecía no haber funcionado). Se
+  verificó descargando el archivo directo de GCS: el contenido SÍ era nuevo
+  y correcto — el navegador mostraba una copia vieja cacheada de la misma URL.
+
+Causa: cada imagen se sube a GCS con un filename fijo por día
+  (`job-day{N}.png`). Al regenerar (post individual o semana nueva), se
+  sobrescribe el mismo archivo, pero la URL no cambia — sin ningún parámetro
+  de cache-busting, el navegador reutiliza su copia cacheada de esa URL en
+  vez de pedir la versión nueva. Afecta a CUALQUIER regeneración, no solo al
+  caso puntual detectado.
+
+Fix: `_upload_to_storage` ahora agrega `?v={timestamp}` a la URL devuelta.
+  2 tests nuevos (formato + que dos subidas consecutivas den URLs distintas).
+
+Severidad: Media (confunde sobre si un fix realmente se aplicó, pero no
+  afecta el contenido real servido si se fuerza refresh).
+
+=================================================================
+HALLAZGO 45 — Reiniciar rqworker mata en seco jobs activos
+Categoría: Infraestructura / riesgo operativo
+Estado: ✅ MITIGADO — 2026-07-05 (2 comandos nuevos)
+=================================================================
+Surfaceado por: Anuar — pasó 2 veces probando en deploy.anuarbarrera.dev,
+  truncando una generación de semana a medias sin ningún aviso.
+
+Causa: `docker compose up -d --force-recreate --no-deps backend rqworker`
+  no espera a que los jobs en curso terminen — mata el proceso sin graceful
+  shutdown. Los jobs ya agendados sobreviven (persisten en Redis), pero el
+  que está activamente corriendo en ese instante se pierde sin dejar rastro
+  claro más allá de contenido faltante.
+
+Fix: 2 management commands nuevos para el flujo de despliegue:
+  `check_rq_safe_to_deploy` (verifica que no haya jobs corriendo antes de
+  reiniciar, exit code 0/1) y `backfill_missing_images` (rellena imágenes
+  pendientes de calendarios que quedaron a medias por un deploy anterior).
+  Documentado en README.md bajo "Deployment".
+
+Severidad: Media (el impacto real es bajo con el flujo de 3 pasos ya
+  documentado, pero antes era fácil de pasar por alto).
+
+=================================================================
+HALLAZGO 46 — Auditor de imagen no detecta objetos físicamente imposibles
+Categoría: Calidad visual / IA generativa
+Estado: ✅ RESUELTO — 2026-07-05
+=================================================================
+Surfaceado por: Anuar — un estetoscopio generado por Imagen 3 con la punta
+  auricular mal formada (un solo óvalo en vez de las dos puntas que van a los
+  oídos), en un post de pediatría.
+
+Causa: `_validate_background` (el auditor de Gemini que revisa el fondo antes
+  de componer texto) solo verificaba texto embebido, renders 3D abstractos, y
+  contenido en pantallas — nunca la plausibilidad física/anatómica de los
+  objetos, un punto débil conocido de los modelos de difusión con objetos
+  compuestos (herramientas, instrumentos, manos).
+
+Fix: se agregó `has_malformed_object` al mismo JSON que ya devuelve el
+  auditor — sin llamada extra a Gemini, mismo costo. El prompt pide examinar
+  de cerca objetos con partes conectadas y marcar solo casos obvios. Test
+  nuevo que confirma el rechazo cuando el flag viene en true.
+
+Severidad: Baja (afecta calidad visual puntual; el auditor de texto/QC ya
+  existente atrapa la mayoría de los otros problemas de calidad).
+
+Nota: detección de plausibilidad física es un problema más difícil para un
+  modelo de visión que detección de texto — va a atrapar casos obvios, no
+  todos. Revisar logs de "Background QC REJECTED" si el problema persiste
+  para calibrar el prompt.
