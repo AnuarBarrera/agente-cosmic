@@ -86,6 +86,23 @@ def test_analyze_submit_enqueues_task(user):
     mock_rq.enqueue.assert_called_once()
 
 
+def test_analyze_submit_rejects_more_than_7_product_images(user):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    c = Client()
+    c.force_login(user)
+    images = [SimpleUploadedFile(f'p{i}.jpg', b'fake-bytes', content_type='image/jpeg') for i in range(8)]
+    with patch('core.brand_dna.views.django_rq') as mock_rq:
+        response = c.post('/analizar/', {
+            'business_name': 'Tu Web MX',
+            'business_description': 'Agencia digital que hace sitios web.',
+            'product_images': images,
+        })
+    assert response.status_code == 200
+    assert b'm\xc3\xa1ximo es 7' in response.content
+    mock_rq.enqueue.assert_not_called()
+    assert not AnalysisJob.objects.filter(user=user).exists()
+
+
 def test_status_api_returns_progress(user):
     c = Client()
     c.force_login(user)
@@ -234,6 +251,25 @@ def test_calendar_review_shows_feedback_banner_when_pending(client, user, job_wi
     assert b'feedback-banner' in response.content
 
 
+def test_calendar_review_groups_posts_by_week(client, user, job_with_calendar):
+    calendar = job_with_calendar.brand_dna.calendar
+    for i in range(8, 15):
+        ContentPost.objects.create(
+            calendar=calendar, day_number=i, caption=f'Post {i}',
+            image_url='https://example.com/img.jpg', suggested_time='19:00',
+            hashtags=[], scheduled_at=timezone.now() + timedelta(days=i),
+        )
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+
+    week_groups = response.context['week_groups']
+    assert [w['week_number'] for w in week_groups] == [2, 1]
+    assert week_groups[0]['is_current'] is True
+    assert week_groups[1]['is_current'] is False
+    assert len(week_groups[0]['posts']) == 7
+    assert len(week_groups[1]['posts']) == 7
+
+
 def test_calendar_feedback_api_no_decision_does_not_generate(client, user, job_with_calendar):
     calendar = job_with_calendar.brand_dna.calendar
     client.force_login(user)
@@ -277,6 +313,9 @@ def test_calendar_feedback_api_yes_triggers_generate_next_week(client, user, job
     enqueue_args = mock_rq.enqueue.call_args[0]
     assert enqueue_args[1] == str(calendar.id)
     assert enqueue_args[2] == 2
+
+    calendar.refresh_from_db()
+    assert calendar.next_week_generating is True
 
 
 def test_calendar_feedback_api_requires_ownership(client, django_user_model, job_with_calendar, free_plan):
@@ -330,6 +369,28 @@ def test_calendar_feedback_api_invalid_continue_decision_returns_400(client, use
     feedback = calendar.feedback_entries.get(week_number=1)
     assert feedback.continue_decision == WeeklyFeedback.CONTINUE_PENDING
     mock_gen.assert_not_called()
+
+
+def test_calendar_feedback_api_rejects_more_than_7_new_images(client, user, job_with_calendar):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    calendar = job_with_calendar.brand_dna.calendar
+    client.force_login(user)
+    images = [SimpleUploadedFile(f'p{i}.jpg', b'fake-bytes', content_type='image/jpeg') for i in range(8)]
+    with patch('core.brand_dna.views.django_rq') as mock_rq:
+        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
+            'rating': '5',
+            'comment': '',
+            'continue_decision': 'yes',
+            'image_choice': 'new',
+            'product_images': images,
+        })
+    assert response.status_code == 400
+    data = response.json()
+    assert 'máximo es 7' in data['error']
+    mock_rq.enqueue.assert_not_called()
+
+    feedback = calendar.feedback_entries.get(week_number=1)
+    assert feedback.continue_decision == WeeklyFeedback.CONTINUE_PENDING
 
 
 def test_update_active_product_images_reuse_pool_le_7(job_with_calendar):

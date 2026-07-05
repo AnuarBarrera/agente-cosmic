@@ -42,6 +42,14 @@
     .dot-edited { background: #4a9eff; }
     .dot-change { background: #f0c040; }
     .posts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; }
+    .week-group { margin-bottom: 20px; }
+    .week-group summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 14px 18px; background: #16162c; border: 1px solid #2a2a4a; border-radius: 10px; font-weight: 600; font-size: 0.95rem; color: #e0e0e0; }
+    .week-group summary::-webkit-details-marker { display: none; }
+    .week-group summary::before { content: '▸'; color: #888; transition: transform 0.15s; font-size: 0.8rem; }
+    .week-group[open] summary::before { transform: rotate(90deg); }
+    .week-group[open] summary { border-radius: 10px 10px 0 0; border-bottom: none; }
+    .week-group .posts-grid { padding: 20px; background: #12122a; border: 1px solid #2a2a4a; border-top: none; border-radius: 0 0 10px 10px; }
+    .week-current-badge { background: #2d6a4f; color: #a8e6c8; font-size: 0.7rem; font-weight: 700; padding: 3px 10px; border-radius: 20px; }
     .post-card { background: #1a1a2e; border-radius: 14px; overflow: hidden; transition: box-shadow 0.2s; }
     .post-card.approved { box-shadow: 0 0 0 2px #4caf7d; }
     .post-card.edited { box-shadow: 0 0 0 2px #4a9eff; }
@@ -49,7 +57,6 @@
     .post-img { width: 100%; aspect-ratio: 1; object-fit: cover; background: #111; display: flex; align-items: center; justify-content: center; color: #333; font-size: 2rem; }
     .post-img img { width: 100%; height: 100%; object-fit: cover; }
     .post-body { padding: 16px; }
-    .post-day { font-size: 0.78rem; color: #e94560; font-weight: 700; margin-bottom: 4px; }
     .post-schedule { font-size: 0.75rem; color: #888; margin-bottom: 10px; }
     .post-caption { font-size: 0.85rem; color: #ccc; line-height: 1.5; margin-bottom: 12px; }
     .post-caption[contenteditable="true"] {
@@ -148,13 +155,19 @@
     </div>
   </div>
 
+  {% if calendar.next_week_generating %}
+  <div style="background:#0d2218;border:1px solid #2d6a4f;border-radius:10px;padding:16px 20px;margin-bottom:24px;color:#7ec8a4;font-size:0.9rem;line-height:1.6;">
+    ☕ <strong style="color:#a8e6c8;">Tu próxima semana se está generando.</strong> No hace falta que esperes aquí — te avisamos por correo en cuanto esté lista.
+  </div>
+  {% endif %}
+
   {% if pending_feedback %}
   <div id="feedback-banner" style="background:#1a1a2e;border:1px solid #e94560;border-radius:12px;padding:20px;margin-bottom:24px;">
-    <h2 style="font-size:1.1rem;margin-bottom:4px;">¡Tu semana {{ pending_feedback.week_number }} terminó! 🎉</h2>
-    <p style="color:#aaa;font-size:0.85rem;margin-bottom:16px;">Cuéntanos cómo te fue y decide si quieres tu próxima semana de contenido.</p>
+    <h2 style="font-size:1.1rem;margin-bottom:4px;">¡Tu semana terminó! 🎉</h2>
+    <p style="color:#aaa;font-size:0.85rem;margin-bottom:16px;">Cuéntanos cómo te fue y decide si quieres generar tu nuevo contenido.</p>
 
     <div style="margin-bottom:12px;">
-      <div style="font-size:0.85rem;color:#ccc;margin-bottom:6px;">¿Cómo calificarías esta semana?</div>
+      <div style="font-size:0.85rem;color:#ccc;margin-bottom:6px;">¿Cómo calificarías tu contenido?</div>
       <div id="star-rating" style="display:flex;gap:8px;font-size:1.6rem;cursor:pointer;">
         <span class="star" data-value="1">☆</span>
         <span class="star" data-value="2">☆</span>
@@ -169,7 +182,7 @@
     </div>
 
     <div style="display:flex;gap:12px;flex-wrap:wrap;">
-      <button id="feedback-yes-btn" onclick="showImageChoice()" style="flex:1;min-width:200px;padding:12px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Sí, quiero mi próxima semana</button>
+      <button id="feedback-yes-btn" onclick="showImageChoice()" style="flex:1;min-width:200px;padding:12px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Sí, genera mi contenido</button>
       <button onclick="submitFeedback('no', this)" style="flex:1;min-width:150px;padding:12px;background:transparent;color:#aaa;border:1px solid #333;border-radius:8px;font-weight:600;cursor:pointer;">No, por ahora</button>
     </div>
 
@@ -199,13 +212,19 @@
         <p style="font-size:0.75rem;color:#666;margin-top:6px;">Hasta 7 imágenes.</p>
       </div>
 
-      <button onclick="submitFeedback('yes', this)" style="width:100%;margin-top:16px;padding:12px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Generar mi semana →</button>
+      <button onclick="submitFeedback('yes', this)" style="width:100%;margin-top:16px;padding:12px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Generar mi contenido →</button>
     </div>
   </div>
   {% endif %}
 
-  <div class="posts-grid">
-    {% for post in posts %}
+  {% for week in week_groups %}
+  <details class="week-group" {% if week.is_current %}open{% endif %}>
+    <summary data-start="{{ week.start_iso }}" data-end="{{ week.end_iso }}">
+      <span class="week-range">Cargando fechas…</span>
+      {% if week.is_current %}<span class="week-current-badge">Actual</span>{% endif %}
+    </summary>
+    <div class="posts-grid">
+    {% for post in week.posts %}
     <div class="post-card {{ post.user_status }}" id="card-{{ post.id }}">
       <div class="post-img">
         {% if post.image_url %}
@@ -217,7 +236,6 @@
         {% endif %}
       </div>
       <div class="post-body">
-        <div class="post-day">Día {{ post.day_number }}</div>
         <div class="post-schedule" data-scheduled="{{ post.scheduled_at|date:'c' }}">
           📅 {{ post.scheduled_at|date:"D d M" }} · 📧 {{ post.scheduled_at|date:"H:i" }}h
         </div>
@@ -250,7 +268,9 @@
       </div>
     </div>
     {% endfor %}
-  </div>
+    </div>
+  </details>
+  {% endfor %}
 </div>
 
 <div class="toast" id="toast"></div>
@@ -266,6 +286,16 @@
     const dateStr = d.toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short' });
     const timeStr = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
     el.innerHTML = '📅 ' + dateStr + ' · 📧 ' + timeStr + 'h';
+  });
+
+  // Rango de fechas de cada semana en el acordeón, en hora local del navegador.
+  document.querySelectorAll('.week-group summary[data-start]').forEach(function(el) {
+    const start = new Date(el.dataset.start);
+    const end = new Date(el.dataset.end);
+    const rangeEl = el.querySelector('.week-range');
+    if (!rangeEl || isNaN(start.getTime()) || isNaN(end.getTime())) return;
+    const opts = { day: '2-digit', month: 'short' };
+    rangeEl.textContent = '📅 ' + start.toLocaleDateString('es-MX', opts) + ' – ' + end.toLocaleDateString('es-MX', opts);
   });
 
   function showToast(msg, color, duration) {
@@ -482,7 +512,7 @@
     const buttons = banner.querySelectorAll('button');
     buttons.forEach(b => b.disabled = true);
     const originalText = btn.textContent;
-    btn.textContent = decision === 'yes' ? 'Generando tu próxima semana... (puede tardar ~15s)' : 'Enviando...';
+    btn.textContent = decision === 'yes' ? 'Enviando...' : 'Enviando...';
 
     try {
       const res = await fetch('/api/calendar/{{ job.id }}/feedback/', {
@@ -494,10 +524,13 @@
       if (data.status === 'ok') {
         if (data.continue_decision === 'yes') {
           showToast('¡Gracias! Tu próxima semana está en camino 🚀');
+          banner.innerHTML = '<div style="color:#7ec8a4;font-size:0.9rem;line-height:1.6;">☕ <strong style="color:#a8e6c8;">Tu próxima semana se está generando.</strong> No hace falta que esperes aquí — te avisamos por correo en cuanto esté lista.</div>';
+          banner.style.border = '1px solid #2d6a4f';
+          banner.style.background = '#0d2218';
         } else {
           showToast('Gracias por tu feedback');
+          banner.remove();
         }
-        banner.remove();
       } else {
         showToast('Error al enviar feedback', '#e74c3c', 5000);
         buttons.forEach(b => b.disabled = false);

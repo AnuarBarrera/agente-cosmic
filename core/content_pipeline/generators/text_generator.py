@@ -113,7 +113,10 @@ class TextGenerator:
         raw = re.sub(r'^```(?:json)?\n?', '', raw)
         raw = re.sub(r'\n?```$', '', raw)
         raw = raw.strip()
-        posts = json.loads(raw)[:7]
+        match = re.search(r'\[.*\]', raw, re.DOTALL)
+        if not match:
+            raise ValueError(f"No se encontro un array JSON en la respuesta de Gemini: {raw[:200]}")
+        posts = json.loads(match.group())[:7]
 
         if _is_sensitive_niche(brand_dna):
             logger.info(f"Nicho sensible detectado para '{brand_dna.business_name}' — auditando captions")

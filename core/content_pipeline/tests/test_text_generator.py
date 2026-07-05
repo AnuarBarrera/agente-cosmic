@@ -54,6 +54,24 @@ def test_generate_returns_7_posts(brand_dna):
     GOOGLE_CLOUD_LOCATION='us-central1',
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
 )
+def test_generate_tolerates_trailing_text_after_json(brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    response_with_trailing_text = MOCK_VERTEX_RESPONSE + (
+        "\n\nNota: se evito lenguaje de garantia por tratarse de un nicho sensible."
+    )
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(response_with_trailing_text)
+        gen = TextGenerator()
+        result = gen.generate(brand_dna)
+
+    assert len(result) == 7
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
 def test_generate_post_has_required_keys(brand_dna):
     from core.content_pipeline.generators.text_generator import TextGenerator
     with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:

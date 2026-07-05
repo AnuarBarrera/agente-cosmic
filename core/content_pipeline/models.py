@@ -8,6 +8,7 @@ class ContentCalendar(models.Model):
     brand_dna = models.OneToOneField(BrandDNA, on_delete=models.CASCADE, related_name='calendar')
     created_at = models.DateTimeField(auto_now_add=True)
     active_product_images = models.JSONField(default=list, blank=True)
+    next_week_generating = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'content_pipeline_calendar'

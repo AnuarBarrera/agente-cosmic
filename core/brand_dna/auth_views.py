@@ -477,10 +477,11 @@ def dashboard_view(request):
     jobs = list(
         AnalysisJob.objects
         .filter(user=request.user, deleted_at__isnull=True)
-        .select_related('brand_dna')
+        .select_related('brand_dna__calendar')
         .order_by('-created_at')[:20]
     )
     has_processing = any(j.status in ('pending', 'processing') for j in jobs)
+    has_next_week_generating = False
     for job in jobs:
         brand_dna = getattr(job, 'brand_dna', None)
         if brand_dna:
@@ -491,6 +492,10 @@ def dashboard_view(request):
             job.display_name = job.business_url
         else:
             job.display_name = 'Análisis pendiente'
+        calendar = getattr(brand_dna, 'calendar', None) if brand_dna else None
+        job.week_generating = bool(calendar and calendar.next_week_generating)
+        if job.week_generating:
+            has_next_week_generating = True
     used_total = AnalysisJob.objects.filter(user=request.user).count()
     plan = get_user_plan(request.user)
     return render(request, 'brand_dna/dashboard.html', {
@@ -499,6 +504,7 @@ def dashboard_view(request):
         'used_total': used_total,
         'max_calendars': plan.max_calendars_per_week,
         'has_processing': has_processing,
+        'has_next_week_generating': has_next_week_generating,
     })
 
 

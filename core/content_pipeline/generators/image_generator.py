@@ -607,7 +607,9 @@ class ImageGenerator:
                             "Regla de seguridad (siempre aplica): si la marca pertenece a un nicho "
                             "sensible (niños, salud, medicina, finanzas, crédito, temas legales), usa "
                             "tono neutro-positivo, evita promesas absolutas y evita lenguaje retador "
-                            "o de urgencia con audiencias vulnerables."
+                            "o de urgencia con audiencias vulnerables. PROHIBIDO usar las palabras/frases: "
+                            "'garantizado', 'garantizamos', 'asegurar', 'aseguramos', 'asegurando', "
+                            "'resultados 100% seguros', 'nunca falla', 'sin riesgo'."
                         ),
                     ),
                 )
@@ -773,4 +775,6 @@ class ImageGenerator:
             blob = bucket.blob(f'posts/{filename}.png')
             blob.upload_from_string(image_bytes, content_type='image/png')
         GCS_OPERATIONS.labels(operation='upload').inc()
-        return blob.public_url
+        # Cache-busting: el mismo filename se reutiliza en regeneraciones (post individual,
+        # semana siguiente), y sin esto el navegador puede mostrar la imagen vieja en cache.
+        return f'{blob.public_url}?v={int(time.time())}'

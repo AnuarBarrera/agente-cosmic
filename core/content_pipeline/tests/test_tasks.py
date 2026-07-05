@@ -209,6 +209,41 @@ def test_send_daily_email_task_weekly_feedback_idempotent(calendar_with_dna):
     assert WeeklyFeedback.objects.filter(calendar=calendar_with_dna, week_number=2).count() == 1
 
 
+def test_backfill_image_task_generates_missing_image(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 3, image_url='')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.png?v=123'
+        from core.content_pipeline.tasks import backfill_image_task
+        backfill_image_task(str(post.id))
+
+    post.refresh_from_db()
+    assert post.image_url == 'https://storage.googleapis.com/test/img.png?v=123'
+
+
+def test_backfill_image_task_skips_post_with_existing_image(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 3, image_url='https://example.com/already-there.jpg')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
+        from core.content_pipeline.tasks import backfill_image_task
+        backfill_image_task(str(post.id))
+
+    MockImage.assert_not_called()
+    post.refresh_from_db()
+    assert post.image_url == 'https://example.com/already-there.jpg'
+
+
+def test_backfill_image_task_skips_deleted_calendar(calendar_with_dna):
+    from django.utils import timezone as tz
+    job = calendar_with_dna.brand_dna.job
+    job.deleted_at = tz.now()
+    job.save(update_fields=['deleted_at'])
+    post = _make_post(calendar_with_dna, 3, image_url='')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
+        from core.content_pipeline.tasks import backfill_image_task
+        backfill_image_task(str(post.id))
+
+    MockImage.assert_not_called()
+
+
 @override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
     GOOGLE_CLOUD_LOCATION='us-central1',
@@ -218,11 +253,14 @@ def test_send_daily_email_task_weekly_feedback_idempotent(calendar_with_dna):
     GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
 )
 def test_generate_next_week_creates_posts_for_week_2(job_with_dna):
-    calendar = ContentCalendar.objects.create(brand_dna=job_with_dna.brand_dna, active_product_images=[])
+    calendar = ContentCalendar.objects.create(
+        brand_dna=job_with_dna.brand_dna, active_product_images=[], next_week_generating=True,
+    )
 
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.schedule_daily_emails') as mock_schedule:
+         patch('core.content_pipeline.tasks.schedule_daily_emails') as mock_schedule, \
+         patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
         MockText.return_value.generate.return_value = _MOCK_POSTS
         MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
 
@@ -232,4 +270,27 @@ def test_generate_next_week_creates_posts_for_week_2(job_with_dna):
     days = sorted(p.day_number for p in calendar.posts.all())
     assert days == list(range(8, 15))
     assert all(p.image_url for p in calendar.posts.all())
-    mock_schedule.assert_called_once_with(calendar)
+    MockEmail.return_value.send_week_ready.assert_called_once()
+    calendar.refresh_from_db()
+    assert calendar.next_week_generating is False
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_next_week_resets_flag_even_on_failure(job_with_dna):
+    calendar = ContentCalendar.objects.create(
+        brand_dna=job_with_dna.brand_dna, active_product_images=[], next_week_generating=True,
+    )
+
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText:
+        MockText.return_value.generate.side_effect = Exception('Gemini caido')
+
+        from core.content_pipeline.tasks import generate_next_week
+        generate_next_week(str(calendar.id), week_number=2)
+
+    calendar.refresh_from_db()
+    assert calendar.next_week_generating is False
+    assert calendar.posts.count() == 0

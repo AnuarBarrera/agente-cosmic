@@ -77,6 +77,12 @@ def analyze_submit(request):
             'error': 'Ingresa el nombre y la descripción de tu negocio.',
         })
 
+    prod_files = request.FILES.getlist('product_images')
+    if len(prod_files) > 7:
+        return render(request, 'brand_dna/landing.html', {
+            'error': f'Subiste {len(prod_files)} fotos de producto — el máximo es 7. Quita algunas e intenta de nuevo.',
+        })
+
     business_description = f"{business_name}\n{business_description}"
 
     job = AnalysisJob.objects.create(
@@ -97,7 +103,6 @@ def analyze_submit(request):
         job.logo_file_path = logo_path
         job.save(update_fields=['logo_file_path'])
 
-    prod_files = request.FILES.getlist('product_images')[:7]
     if prod_files:
         prod_paths = []
         for idx, prod_file in enumerate(prod_files):
@@ -199,10 +204,29 @@ def calendar_review_view(request, job_id):
     from core.brand_dna.rate_limits import can_create_calendar
     can_create, _ = can_create_calendar(request.user)
 
+    week_groups = []
+    if posts:
+        posts_by_week = {}
+        for p in posts:
+            week_num = ((p.day_number - 1) // 7) + 1
+            posts_by_week.setdefault(week_num, []).append(p)
+        current_week = max(posts_by_week)
+        for week_num in sorted(posts_by_week, reverse=True):
+            week_posts = posts_by_week[week_num]
+            week_groups.append({
+                'week_number': week_num,
+                'posts': week_posts,
+                'is_current': week_num == current_week,
+                'start_iso': min(p.scheduled_at for p in week_posts).isoformat(),
+                'end_iso': max(p.scheduled_at for p in week_posts).isoformat(),
+            })
+
     return render(request, 'brand_dna/calendar_review.html', {
         'job': job,
         'brand_dna': brand_dna,
+        'calendar': calendar,
         'posts': posts,
+        'week_groups': week_groups,
         'max_regenerations': plan.max_post_regenerations,
         'max_edits': plan.max_post_edits,
         'total_regens': total_regens,
@@ -387,6 +411,13 @@ def calendar_feedback_api(request, job_id):
     if continue_decision not in (WeeklyFeedback.CONTINUE_YES, WeeklyFeedback.CONTINUE_NO):
         return JsonResponse({'error': 'Decisión inválida'}, status=400)
 
+    if continue_decision == WeeklyFeedback.CONTINUE_YES and request.POST.get('image_choice') == 'new':
+        prod_files = request.FILES.getlist('product_images')
+        if len(prod_files) > 7:
+            return JsonResponse({
+                'error': f'Subiste {len(prod_files)} fotos de producto — el máximo es 7. Quita algunas e intenta de nuevo.',
+            }, status=400)
+
     feedback.rating = rating
     feedback.comment = request.POST.get('comment', '')
     feedback.continue_decision = continue_decision
@@ -396,6 +427,8 @@ def calendar_feedback_api(request, job_id):
     if feedback.continue_decision == WeeklyFeedback.CONTINUE_YES:
         next_week = feedback.week_number + 1
         _update_active_product_images(calendar, job, request, next_week)
+        calendar.next_week_generating = True
+        calendar.save(update_fields=['next_week_generating'])
         django_rq.enqueue(generate_next_week, str(calendar.id), next_week, job_timeout=1500)
 
     return JsonResponse({'status': 'ok', 'continue_decision': feedback.continue_decision})

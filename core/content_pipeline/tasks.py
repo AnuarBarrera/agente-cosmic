@@ -124,6 +124,43 @@ def content_generation_task(job_id: str) -> None:
         job.mark_failed(str(e))
 
 
+def _generate_missing_image(post: ContentPost) -> None:
+    """Genera y guarda la imagen de un post que quedo sin image_url. No lanza — loggea y sigue."""
+    brand_dna = post.calendar.brand_dna
+    job_id = str(brand_dna.job.id)
+    day_in_week = ((post.day_number - 1) % 7) + 1
+    try:
+        image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+        product_images = _load_product_images(post.calendar.active_product_images)
+        product_image_bytes = _product_image_for_day(day_in_week, product_images)
+        post.image_url = image_gen.generate(
+            caption=post.caption,
+            colors=brand_dna.primary_colors,
+            tone=brand_dna.tone,
+            filename=f"{job_id}-day{post.day_number}",
+            brand_name=brand_dna.business_name,
+            keywords=brand_dna.keywords,
+            description=brand_dna.description,
+            audience=brand_dna.audience,
+            product_image_bytes=product_image_bytes,
+        )
+        post.save(update_fields=['image_url'])
+    except Exception as img_err:
+        logger.warning(f"Imagen día {post.day_number} falló (no fatal): {img_err}")
+
+
+def backfill_image_task(post_id: str) -> None:
+    """Genera la imagen de un post existente que quedo pendiente (arquitectura previa a H2/H3)."""
+    post = ContentPost.objects.select_related('calendar__brand_dna__job').get(id=post_id)
+    if post.calendar.brand_dna.job.deleted_at is not None:
+        logger.info(f"Post {post_id} omitido — calendario eliminado por el usuario")
+        return
+    if post.image_url:
+        logger.info(f"Post {post_id} ya tiene imagen — nada que hacer")
+        return
+    _generate_missing_image(post)
+
+
 def send_daily_email_task(post_id: str) -> None:
     post = ContentPost.objects.select_related('calendar__brand_dna__job').get(id=post_id)
     if post.calendar.brand_dna.job.deleted_at is not None:
@@ -132,27 +169,7 @@ def send_daily_email_task(post_id: str) -> None:
     # Fallback defensivo: las imágenes ya se generan todas en content_generation_task,
     # esto solo cubre el caso raro de que una generación individual haya fallado.
     if not post.image_url:
-        brand_dna = post.calendar.brand_dna
-        job_id = str(brand_dna.job.id)
-        day_in_week = ((post.day_number - 1) % 7) + 1
-        try:
-            image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
-            product_images = _load_product_images(post.calendar.active_product_images)
-            product_image_bytes = _product_image_for_day(day_in_week, product_images)
-            post.image_url = image_gen.generate(
-                caption=post.caption,
-                colors=brand_dna.primary_colors,
-                tone=brand_dna.tone,
-                filename=f"{job_id}-day{post.day_number}",
-                brand_name=brand_dna.business_name,
-                keywords=brand_dna.keywords,
-                description=brand_dna.description,
-                audience=brand_dna.audience,
-                product_image_bytes=product_image_bytes,
-            )
-            post.save(update_fields=['image_url'])
-        except Exception as img_err:
-            logger.warning(f"Imagen día {post.day_number} falló (no fatal): {img_err}")
+        _generate_missing_image(post)
     EmailSender().send_daily(post=post)
 
     if post.day_number % 7 == 0:
@@ -164,39 +181,50 @@ def generate_next_week(calendar_id: str, week_number: int) -> None:
     calendar = ContentCalendar.objects.get(id=calendar_id)
     brand_dna = calendar.brand_dna
     job_id = str(brand_dna.job.id)
-    text_gen = TextGenerator()
-    posts_data = text_gen.generate(brand_dna)
+    try:
+        text_gen = TextGenerator()
+        posts_data = text_gen.generate(brand_dna)
 
-    now = timezone.now()
-    mexico_today = now.astimezone(MEXICO_TZ).date()
-    scheduled_dates = smart_schedule_dates(brand_dna, base_date=mexico_today, count=len(posts_data))
+        now = timezone.now()
+        mexico_today = now.astimezone(MEXICO_TZ).date()
+        scheduled_dates = smart_schedule_dates(brand_dna, base_date=mexico_today, count=len(posts_data))
 
-    base_day = (week_number - 1) * 7
-    image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
-    product_images_bytes = _load_product_images(calendar.active_product_images)
+        base_day = (week_number - 1) * 7
+        image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+        product_images_bytes = _load_product_images(calendar.active_product_images)
 
-    for i, post_data in enumerate(posts_data, start=1):
-        scheduled = scheduled_dates[i - 1]
-        day_product = _product_image_for_day(i, product_images_bytes)
-        image_url = image_gen.generate(
-            caption=post_data['caption'],
-            colors=brand_dna.primary_colors,
-            tone=brand_dna.tone,
-            filename=f"{job_id}-day{base_day + i}",
-            brand_name=brand_dna.business_name,
-            keywords=brand_dna.keywords,
-            description=brand_dna.description,
-            audience=brand_dna.audience,
-            product_image_bytes=day_product,
-        )
-        ContentPost.objects.create(
-            calendar=calendar,
-            day_number=base_day + i,
-            caption=post_data['caption'],
-            image_url=image_url,
-            suggested_time=scheduled.astimezone(MEXICO_TZ).time(),
-            hashtags=post_data.get('hashtags', []),
-            scheduled_at=scheduled,
-        )
+        for i, post_data in enumerate(posts_data, start=1):
+            scheduled = scheduled_dates[i - 1]
+            day_product = _product_image_for_day(i, product_images_bytes)
+            image_url = image_gen.generate(
+                caption=post_data['caption'],
+                colors=brand_dna.primary_colors,
+                tone=brand_dna.tone,
+                filename=f"{job_id}-day{base_day + i}",
+                brand_name=brand_dna.business_name,
+                keywords=brand_dna.keywords,
+                description=brand_dna.description,
+                audience=brand_dna.audience,
+                product_image_bytes=day_product,
+            )
+            ContentPost.objects.create(
+                calendar=calendar,
+                day_number=base_day + i,
+                caption=post_data['caption'],
+                image_url=image_url,
+                suggested_time=scheduled.astimezone(MEXICO_TZ).time(),
+                hashtags=post_data.get('hashtags', []),
+                scheduled_at=scheduled,
+            )
 
-    schedule_daily_emails(calendar)
+        schedule_daily_emails(calendar)
+
+        try:
+            EmailSender().send_week_ready(job=brand_dna.job, brand_dna=brand_dna, week_number=week_number)
+        except Exception as email_err:
+            logger.error(f"Email de semana lista falló para calendar {calendar_id} (no fatal): {email_err}")
+    except Exception as e:
+        logger.error(f"generate_next_week error para calendar {calendar_id}, semana {week_number}: {e}")
+    finally:
+        calendar.next_week_generating = False
+        calendar.save(update_fields=['next_week_generating'])

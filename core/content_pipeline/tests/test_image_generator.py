@@ -99,6 +99,24 @@ class TestGeneratePostContent:
         GOOGLE_CLOUD_LOCATION='us-central1',
         VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
     )
+    def test_system_instruction_forbids_absolute_promise_words(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"headline":"H","subtitle":"S","cta":"C","tag":"T"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            gen._generate_post_content('Atencion pediatrica experta')
+            _, kwargs = mock_vc.return_value.models.generate_content.call_args
+            system_instruction = kwargs['config'].system_instruction
+        for word in ('garantizado', 'asegurar', 'aseguramos'):
+            assert word in system_instruction
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
     def test_parses_valid_gemini_response(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
@@ -786,3 +804,34 @@ class TestValidateFinalImage:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             result = gen._validate_final_image(_png_bytes())
         assert result is True  # no bloquear pipeline si QC falla
+
+
+class TestUploadToStorage:
+    def test_appends_cache_busting_query_param(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_blob = MagicMock()
+        mock_blob.public_url = 'https://storage.googleapis.com/test-bucket/posts/job1-day3.png'
+        mock_bucket = MagicMock()
+        mock_bucket.blob.return_value = mock_blob
+        mock_client = MagicMock()
+        mock_client.bucket.return_value = mock_bucket
+        with patch('core.content_pipeline.generators.image_generator.storage.Client', return_value=mock_client):
+            url = gen._upload_to_storage(b'fake-bytes', 'job1-day3')
+        mock_blob.upload_from_string.assert_called_once_with(b'fake-bytes', content_type='image/png')
+        assert url.startswith('https://storage.googleapis.com/test-bucket/posts/job1-day3.png?v=')
+
+    def test_reupload_produces_different_url(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_blob = MagicMock()
+        mock_blob.public_url = 'https://storage.googleapis.com/test-bucket/posts/job1-day3.png'
+        mock_bucket = MagicMock()
+        mock_bucket.blob.return_value = mock_blob
+        mock_client = MagicMock()
+        mock_client.bucket.return_value = mock_bucket
+        with patch('core.content_pipeline.generators.image_generator.storage.Client', return_value=mock_client), \
+             patch('core.content_pipeline.generators.image_generator.time.time', side_effect=[1000, 2000]):
+            url1 = gen._upload_to_storage(b'fake-bytes-v1', 'job1-day3')
+            url2 = gen._upload_to_storage(b'fake-bytes-v2', 'job1-day3')
+        assert url1 != url2
