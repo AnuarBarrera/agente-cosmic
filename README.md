@@ -15,13 +15,14 @@ Marketing agencies and freelancers spend **4-6 hours per client** manually study
 ## The Solution
 
 1. **Drop a URL** — or describe your business in plain text (no website needed)
-2. Optionally upload a logo, sample posts, and up to 7 product photos
+2. Optionally upload a logo and up to 7 product photos
 3. The agent extracts the brand's personality fingerprint — colors, voice, audience, keywords
 4. A **Gemini Art Director** designs a creative lifestyle scene for each post
 5. **Imagen 3** generates photo-realistic backgrounds; **PIL** composites text, CTAs, and tags
-6. Delivers Day 1 to your inbox. Days 2-7 arrive automatically, one per day
+6. All 7 days are generated upfront — review, approve, or request changes from the dashboard immediately, no waiting between days
+7. Daily reminder emails nudge you when it's time to publish. At the end of each week, a short survey decides whether to generate the next one — the calendar keeps rolling for as long as the user wants
 
-**From URL (or description) to ready-to-publish content in under 3 minutes.**
+**From URL (or description) to a full week of ready-to-publish content, generated upfront.**
 
 ---
 
@@ -52,7 +53,6 @@ Gemini decides which path to take per post. Days 4-7 without a product photo fal
 | Web Analysis | Scrapes URL, extracts CSS hex colors, sends clean text to LLM | Vertex AI - Gemini 2.5 Flash |
 | Manual Analysis | Structures plain-text business description (no URL required) | Vertex AI - Gemini 2.5 Flash |
 | Logo Analysis | Reads logo bytes, detects dominant colors and visual elements | Vertex AI - Gemini 2.5 Flash (multimodal) |
-| Post Analysis | Analyzes sample posts to infer posting style and tone | Vertex AI - Gemini 2.5 Flash (multimodal) |
 | Brand DNA | Merges all signals: name, tone, audience, colors, keywords | PostgreSQL |
 | Caption Generation | Generates 7 distinct captions aligned to brand voice | Vertex AI - Gemini 2.5 Flash |
 | Art Direction | Writes a creative scene prompt per post | Vertex AI - Gemini 2.5 Flash |
@@ -60,7 +60,8 @@ Gemini decides which path to take per post. Days 4-7 without a product photo fal
 | Product Integration | Imagen 3 Edit swaps background, preserves product | Vertex AI - Imagen 3 Edit |
 | Text Composition | PIL composites headline, subtitle, CTA, tag with brand colors | Pillow (local) |
 | Asset Storage | Uploads to GCS via IAM (uniform access, no ACLs) | Google Cloud Storage |
-| Delivery | Day 1 sent immediately. Days 2-7 enqueued in Redis scheduler | Mailgun - Redis/RQ |
+| Delivery | All 7 images generated upfront. Daily reminder emails scheduled in Redis | Mailgun - Redis/RQ |
+| Continuation | End-of-week survey decides whether to generate the next 7 days | Redis/RQ |
 
 ---
 
@@ -97,6 +98,11 @@ Gemini decides which path to take per post. Days 4-7 without a product photo fal
 - **Security hardened**: 4 white-box audits completed. IP spoofing fixed (X-Real-IP via Nginx), PII encryption fail-closed, GCS uniform IAM, cookie domain restricted, defusedxml for SVG parsing.
 - **Per-user rate limits**: Calendar and regeneration limits per plan. Soft-deleted calendars count toward the limit.
 - **Beta user cap**: Registration closes at MAX_REGISTERED_USERS (env var). Race condition protected.
+- **Upfront generation, resumable continuation**: All 7 images are generated in one background job instead of trickling in day by day. Each week's continuation is its own tracked job (`ContentCalendar.next_week_generating`), with a confirmation email on completion so the user never has to babysit the tab.
+- **Robust LLM output parsing**: Caption and image-copy generation extract the JSON payload with a regex pass before parsing, tolerating trailing text a model may add around the array/object — a real failure mode observed in production, more likely on prompts that trigger extra safety caveats (health, finance, legal niches).
+- **Safe deploy checks**: a management command inspects the RQ "started" job registry before a worker restart, so a live generation job never gets silently killed mid-run. A companion command backfills any image left pending by an older deploy. Both are meant to run as an ordered pre/post-deploy check — see [Deployment](#deployment).
+- **Cache-busted asset URLs**: regenerated images reuse the same storage path, so every upload appends a versioned query parameter — otherwise browsers keep serving the previous cached image after a regeneration.
+- **Test suite as a deploy gate**: 290+ pytest tests (unit + integration, external AI/storage calls mocked) run before every deploy; the two commands above are part of the same pre-flight discipline, laying the groundwork for a CI pipeline to enforce this automatically on every push.
 
 ---
 
@@ -105,11 +111,12 @@ Gemini decides which path to take per post. Days 4-7 without a product photo fal
 Live at `https://cosmic.anuarbarrera.dev`
 
 **Golden path (under 3 minutes):**
-1. Enter business URL or switch to "No tengo sitio web" and describe your business
-2. Optionally upload logo + up to 7 product photos
-3. Watch real-time progress as the agent extracts Brand DNA
+1. Describe your business — a URL is optional, not required
+2. Optionally upload a logo + up to 7 product photos
+3. Watch real-time progress as the agent extracts Brand DNA and generates the week
 4. Review your 7-post calendar — approve, edit, or request changes per post
-5. Receive Day 1 immediately; Days 2-7 arrive automatically
+5. Publish at your own pace; daily reminder emails nudge you when it's time
+6. At the end of the week, a short survey decides whether to keep the calendar going
 
 ---
 
@@ -149,6 +156,34 @@ Open `http://localhost:3002`.
 
 ---
 
+## Deployment
+
+Since generation now runs as a single upfront background job per week instead of
+trickling in day by day, an RQ worker can be mid-generation at any moment. Restarting
+`rqworker` kills whatever job is running at that exact instant — scheduled/queued jobs
+survive in Redis, but the one actively executing does not. Updating a running instance
+follows three steps, in order:
+
+```bash
+# 1. Wait until no job is actively running (exit 0 = safe, exit 1 = something's running)
+until docker compose exec -T backend python manage.py check_rq_safe_to_deploy; do
+  sleep 30
+done
+
+# 2. Pull and restart
+git pull
+docker compose up -d --force-recreate --no-deps backend rqworker
+
+# 3. Backfill any image left pending by an older deploy (dry-run first)
+docker compose exec -T backend python manage.py backfill_missing_images --dry-run
+docker compose exec -T backend python manage.py backfill_missing_images
+```
+
+The full pytest suite is expected to pass before step 2 — currently a manual gate,
+with CI (running the same suite automatically on every push) as the natural next step.
+
+---
+
 ## Project Structure
 
 ```
@@ -158,20 +193,23 @@ core/
       web_scraper.py      # CSS color harvest + Gemini text analysis
       manual_extractor.py # ManualBrandExtractor from plain-text description
       logo_analyzer.py    # Gemini multimodal color extraction
-      posts_analyzer.py   # Gemini multimodal style analysis
     auth_views.py         # Registration, Google OAuth, soft delete, reactivation
     rate_limits.py        # Per-user weekly calendar + regeneration limits
   content_pipeline/       # Content generation + delivery
     generators/
       text_generator.py   # Gemini 2.5 Flash caption generation
       image_generator.py  # Art Director + Imagen 3 + PIL compositor
-    tasks.py              # RQ tasks: pipeline + email delivery
+    tasks.py              # RQ tasks: upfront generation, weekly continuation, email delivery
     email_sender.py       # Mailgun + RQ scheduling
+    management/commands/
+      backfill_missing_images.py  # Backfill images left pending by an older deploy
   tenant_management/      # Users, tenants, plans, invitation codes
     management/commands/
       cleanup_deactivated_images.py  # Purge GCS images after 30 days
   shared/                 # Middleware, metrics, audit, validators
     metrics.py            # 20 Prometheus custom metrics
+    management/commands/
+      check_rq_safe_to_deploy.py  # Pre-deploy check: no active RQ jobs before a worker restart
 saas_chatbot/             # Django settings, urls, wsgi
 load_tests/               # Apache Bench stress test scripts
 .cybersec-exceptions.md   # Accepted security exceptions with rationale
