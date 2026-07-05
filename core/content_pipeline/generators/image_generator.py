@@ -456,7 +456,8 @@ class ImageGenerator:
             image_part = types.Part.from_bytes(data=image_bytes, mime_type='image/png')
             prompt = (
                 "Analyze this image strictly. Reply ONLY with this JSON (no markdown):\n"
-                "{\"has_text\": <bool>, \"is_abstract_3d\": <bool>, \"has_screen_content\": <bool>, \"ok\": <bool>}\n\n"
+                "{\"has_text\": <bool>, \"is_abstract_3d\": <bool>, \"has_screen_content\": <bool>, "
+                "\"has_malformed_object\": <bool>, \"ok\": <bool>}\n\n"
                 "has_text: true if ANY readable letters, words, numbers or text appear ANYWHERE in the image — "
                 "including text on signs, labels, books, packaging, walls, or any surface. "
                 "Even partial words or blurry text count. Be very strict.\n"
@@ -464,7 +465,12 @@ class ImageGenerator:
                 "has_screen_content: true if any computer monitor, laptop screen, phone screen, TV, or digital display "
                 "shows visible content — including websites, text, images, graphics, UI elements, or any non-blank content. "
                 "A screen must be completely BLACK or clearly turned off to not count. Be very strict.\n"
-                "ok: true ONLY if has_text=false AND is_abstract_3d=false AND has_screen_content=false."
+                "has_malformed_object: true if any object, tool, instrument, hand, or mechanical item is anatomically or "
+                "physically impossible or distorted — wrong number of parts, parts connected incorrectly, missing pieces "
+                "a real version of the object would have, or a structurally implausible shape. Examine objects with "
+                "multiple connected parts (tools, instruments, hands, machinery) closely. Only flag clear, obvious cases.\n"
+                "ok: true ONLY if has_text=false AND is_abstract_3d=false AND has_screen_content=false "
+                "AND has_malformed_object=false."
             )
             with track_external_api('gemini', operation='image_qc'):
                 resp = client.models.generate_content(
@@ -482,7 +488,7 @@ class ImageGenerator:
                 if ok:
                     logger.info(f"Background QC OK: {data}")
                 else:
-                    flags = [k for k in ('has_text', 'is_abstract_3d', 'has_screen_content') if data.get(k)]
+                    flags = [k for k in ('has_text', 'is_abstract_3d', 'has_screen_content', 'has_malformed_object') if data.get(k)]
                     logger.warning(f"Background QC REJECTED: {', '.join(flags)} | full={data}")
                 return ok
         except Exception as e:
