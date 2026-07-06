@@ -6,6 +6,7 @@ import google.genai as genai
 from django.conf import settings
 from core.brand_dna.models import BrandDNA
 from core.shared.metrics_utils import track_external_api, record_tokens
+from core.shared.rate_limiter import call_with_429_retry
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +105,10 @@ class TextGenerator:
             hashtags=', '.join(brand_dna.common_hashtags or []),
             avg_length=brand_dna.avg_caption_length,
         )
-        with track_external_api('gemini', operation='text_gen'):
-            resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        def _call():
+            with track_external_api('gemini', operation='text_gen'):
+                return client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        resp = call_with_429_retry(_call, settings.VERTEX_TEXT_MODEL)
         record_tokens(resp, operation='text_gen',
                       prompt_preview=prompt[:500],
                       response_preview=resp.text[:500] if resp.text else '')

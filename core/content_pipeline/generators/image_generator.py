@@ -15,6 +15,7 @@ from django.conf import settings
 from playwright.sync_api import sync_playwright
 from core.shared.metrics import GCS_OPERATIONS
 from core.shared.metrics_utils import track_external_api, record_tokens, record_imagen_generation
+from core.shared.rate_limiter import call_with_429_retry
 
 from PIL import Image
 import io
@@ -46,8 +47,6 @@ def _crop_to_square(image_bytes: bytes) -> bytes:
     except Exception as e:
         logger.warning(f"_crop_to_square failed, using original: {e}")
         return image_bytes
-
-_MAX_RETRIES = 3
 
 _SVG_ALLOWED_TAGS = frozenset({
     'svg', 'defs', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon',
@@ -128,9 +127,6 @@ def _pick_button_color(colors: list[str]) -> str:
         return f'#{int(r*0.4):02x}{int(g*0.4):02x}{int(b*0.4):02x}'
     except Exception:
         return _FALLBACK
-
-
-_RETRY_DELAYS = [10, 20, 40]
 
 
 def _vertex_client():
@@ -247,10 +243,11 @@ class ImageGenerator:
         Retorna (image_bytes, success). MASK_MODE_BACKGROUND para que Imagen 3 detecte el fondo automáticamente.
         """
         mime = _detect_mime(product_image_bytes)
-        try:
+
+        def _call_edit_image():
             client = _vertex_client()
             with track_external_api('imagen3', operation='bgswap'):
-                resp = client.models.edit_image(
+                return client.models.edit_image(
                     model=settings.VERTEX_IMAGE_EDIT_MODEL,
                     prompt=environment_prompt,
                     reference_images=[
@@ -271,6 +268,9 @@ class ImageGenerator:
                         aspect_ratio='1:1',
                     ),
                 )
+
+        try:
+            resp = call_with_429_retry(_call_edit_image, settings.VERTEX_IMAGE_EDIT_MODEL)
             if resp.generated_images:
                 record_imagen_generation('bgswap')
                 logger.info("BGSWAP exitoso — producto sobre entorno premium")
@@ -730,18 +730,7 @@ class ImageGenerator:
         return png_bytes
 
     def _generate_with_retry(self, prompt: str) -> bytes:
-        last_error = None
-        for attempt in range(_MAX_RETRIES):
-            try:
-                return self._generate_with_vertex(prompt)
-            except Exception as e:
-                last_error = e
-                if '429' in str(e) and attempt < _MAX_RETRIES - 1:
-                    delay = _RETRY_DELAYS[attempt]
-                    logger.warning(f"Rate limit, reintento {attempt + 1} en {delay}s")
-                    time.sleep(delay)
-                else:
-                    raise
+        return call_with_429_retry(lambda: self._generate_with_vertex(prompt), settings.VERTEX_IMAGE_MODEL)
 
     def _generate_with_vertex(self, prompt: str) -> bytes:
         client = _vertex_client()
