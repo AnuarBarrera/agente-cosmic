@@ -187,7 +187,13 @@ def generate_next_week(calendar_id: str, week_number: int) -> None:
 
         now = timezone.now()
         mexico_today = now.astimezone(MEXICO_TZ).date()
-        scheduled_dates = smart_schedule_dates(brand_dna, base_date=mexico_today, count=len(posts_data))
+        last_post = calendar.posts.order_by('-day_number').first()
+        if last_post:
+            day_after_last = last_post.scheduled_at.astimezone(MEXICO_TZ).date() + timedelta(days=1)
+            base_date = max(mexico_today, day_after_last)
+        else:
+            base_date = mexico_today
+        scheduled_dates = smart_schedule_dates(brand_dna, base_date=base_date, count=len(posts_data))
 
         base_day = (week_number - 1) * 7
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)

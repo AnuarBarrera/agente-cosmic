@@ -2002,3 +2002,66 @@ Nota: detección de plausibilidad física es un problema más difícil para un
   modelo de visión que detección de texto — va a atrapar casos obvios, no
   todos. Revisar logs de "Background QC REJECTED" si el problema persiste
   para calibrar el prompt.
+
+=================================================================
+HALLAZGO 47 — Encuesta de renovación (opt-in) genera fricción; usuarios
+  prefieren continuidad automática con opt-out
+Categoría: Producto / retención
+Estado: 🟡 Pendiente de decisión — requiere definir costo antes de implementar
+=================================================================
+Surfaceado por: Jorge (feedback directo a Anuar) + evidencia de comportamiento
+  real de un tester en logs (2026-07-07/08).
+
+Qué pidió Jorge: que la herramienta siga generando contenido cada semana por
+  default, y sea el usuario quien indique cuándo YA NO quiere que se genere
+  más — en vez del modelo actual (opt-in): cada fin de semana se le pregunta
+  vía encuesta si quiere continuar, y si no responde, el calendario simplemente
+  se queda ahí sin generar la semana siguiente.
+
+Evidencia de que el opt-in actual genera fricción real (no es solo intuición):
+  el tester de "batas de carnicero" recibió su email del día 7 con el link de
+  renovación (confirmado entregado por Mailgun), lo dejó sin responder 2 días,
+  y en vez de usar ese link **volvió a Cosmic y creó un análisis de marca
+  nuevo desde cero** — repitiendo todo el onboarding en vez de continuar su
+  calendario existente. No abandonó la herramienta, pero tampoco encontró/usó
+  el camino de renovación. Ver H41 (ya resuelto) sobre la UX de confirmación
+  de la encuesta — esto es un problema distinto: el modelo opt-in en sí mismo,
+  no la claridad de su feedback visual.
+
+Por qué es lógico (razonamiento de Anuar, confirmado): responder encuestas
+  nos sirve a nosotros (dato de retención/satisfacción), pero para el usuario
+  final es fricción pura. Mientras menos fricción, mejor — encaja con el
+  patrón ya confirmado en H28 (ICP de baja madurez digital: guiado > self-
+  service, cualquier paso extra reduce activación).
+
+Consideración de costo (el punto crítico antes de decidir):
+  Con opt-out, CUALQUIER usuario que no cancele explícitamente sigue generando
+  contenido indefinidamente — a diferencia de opt-in, donde el default es NO
+  generar si no hay respuesta. Esto traslada el costo de IA de "el usuario
+  decide seguir pagando/usando" a "nosotros generamos salvo que el usuario
+  activamente lo pare."
+
+  Costo real medido en producción (llm_audit.jsonl + métricas Redis, hasta
+  2026-07-08): 31 calendarios generados (iniciales + renovaciones) a un costo
+  total de ~$8.27 USD (~$8.20 Imagen 3 + ~$0.07 Gemini texto) → **~$0.27 USD
+  por calendario semanal de 7 posts con imágenes**.
+
+  Si el usuario paga (plan de pago), el costo ya está cubierto — opt-out no
+  agrega riesgo real, solo mejora retención.
+  Si es parte de la capa gratuita, el costo lo absorbe el proyecto por cada
+  semana adicional que un usuario gratuito no cancela — con 20-30 testers
+  gratuitos activos indefinidamente esto es ~$5-8 USD/mes, manejable ahora,
+  pero no escala igual si la capa gratuita crece sin límite de semanas.
+
+Propuesta a evaluar (no implementada, pendiente de decisión de negocio):
+  - Opción A: opt-out solo para usuarios de pago; opt-in (actual) se mantiene
+    para la capa gratuita.
+  - Opción B: opt-out para todos, pero con límite duro de semanas gratuitas
+    (ej. 4 semanas) antes de requerir confirmación o upgrade.
+  - Opción C: opt-out para todos sin límite, aceptando el costo como parte
+    del costo de adquisición/retención del beta.
+
+Severidad: Media (afecta retención real, no es bloqueante de producto)
+Prioridad: P1 — decidir antes de que crezca la base de testers activos,
+  ya que cambiar el default después de tener muchos usuarios acostumbrados
+  al modelo opt-in es más difícil que decidirlo ahora.

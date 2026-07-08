@@ -279,6 +279,42 @@ def test_generate_next_week_creates_posts_for_week_2(job_with_dna):
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
     GOOGLE_CLOUD_LOCATION='us-central1',
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+)
+def test_generate_next_week_does_not_collide_with_last_post_date(job_with_dna):
+    from core.content_pipeline.tasks import MEXICO_TZ
+    calendar = ContentCalendar.objects.create(
+        brand_dna=job_with_dna.brand_dna, active_product_images=[], next_week_generating=True,
+    )
+    now_mexico = timezone.now().astimezone(MEXICO_TZ)
+    # Simula que el dia 7 se programo "hoy" — igual que cuando el usuario responde
+    # la encuesta de fin de semana el mismo dia en que le llego el ultimo post.
+    ContentPost.objects.create(
+        calendar=calendar, day_number=7, caption='Post 7', hashtags=[],
+        scheduled_at=now_mexico, suggested_time=now_mexico.time(),
+    )
+
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'), \
+         patch('core.content_pipeline.tasks.EmailSender'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+
+        from core.content_pipeline.tasks import generate_next_week
+        generate_next_week(str(calendar.id), week_number=2)
+
+    day7 = calendar.posts.get(day_number=7)
+    day8 = calendar.posts.get(day_number=8)
+    assert day8.scheduled_at.astimezone(MEXICO_TZ).date() > day7.scheduled_at.astimezone(MEXICO_TZ).date()
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
 )
 def test_generate_next_week_resets_flag_even_on_failure(job_with_dna):
     calendar = ContentCalendar.objects.create(
