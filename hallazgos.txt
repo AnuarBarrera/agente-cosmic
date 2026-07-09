@@ -2065,3 +2065,126 @@ Severidad: Media (afecta retención real, no es bloqueante de producto)
 Prioridad: P1 — decidir antes de que crezca la base de testers activos,
   ya que cambiar el default después de tener muchos usuarios acostumbrados
   al modelo opt-in es más difícil que decidirlo ahora.
+
+=================================================================
+HALLAZGO 48 — El flujo para generar la siguiente semana se confunde con una
+  encuesta; el usuario termina creando un calendario nuevo en vez de continuar
+Categoría: Producto / UX / retención
+Estado: 🟡 Pendiente de decisión — ya son 2 testers con el mismo síntoma
+=================================================================
+Surfaceado por: Jorge (comportamiento real) + Dulce (confirmación en vivo con
+  Anuar, sesión del 2026-07-08).
+
+Qué pasó con Jorge: quería generar su siguiente semana de contenido, y en
+  vez de continuar sobre el mismo análisis de marca, terminó creando un
+  calendario nuevo desde cero — es el mismo evento ya descrito en H47 (el
+  tester de "batas de carnicero" evitando el link de renovación del día 7 y
+  reiniciando el onboarding en su lugar), documentado aquí como su propio
+  hallazgo de UX porque el problema no es solo el modelo opt-in/opt-out de
+  H47, es que el flujo en sí no comunica "esto continúa tu calendario".
+
+Qué confirmó Dulce en vivo: el punto de entrada a ese flujo (la encuesta de
+  renovación semanal, ver `WeeklyFeedback` / email del día 7) se percibe
+  como un cuestionario que hay que responder antes de poder seguir, no como
+  un botón directo de "quiero más contenido" — y encima la generación real
+  (Gemini + Imagen 3 + auditor, 7 posts) tarda de forma notable después de
+  responder, sin señal de progreso clara. La combinación (encuesta primero,
+  espera larga después) empuja al usuario a abandonar ese camino y resolverlo
+  por su cuenta — empezando de cero, que es más lento para él pero se siente
+  más directo que esperar una respuesta de un formulario.
+
+Fix propuesto (Anuar): rediseñar el flujo para que la acción principal sea
+  un botón claro — "Generar mi siguiente semana" — sin fricción de encuesta
+  de por medio. Si se quiere mantener la encuesta de satisfacción/feedback,
+  que sea secundaria u opcional, y nunca bloquee ni preceda la generación.
+  Esto es compatible con (y refuerza) la opción de opt-out ya planteada en
+  H47 — ambas apuntan a lo mismo: quitar fricción del camino de continuar,
+  no agregarla. Relacionar también con H28 (ICP de baja madurez digital:
+  guiado > self-service, cualquier paso extra baja activación).
+
+Severidad: Media (no bloquea el producto, pero empuja a los usuarios hacia
+  el camino más costoso — analizar de cero en vez de continuar — confirmado
+  en 2 testers reales con el mismo síntoma)
+Prioridad: P1 — mismo criterio que H47: decidir antes de que la base de
+  testers crezca y el modelo actual quede más arraigado. Conviene decidir
+  H47 y H48 juntos — son la misma fricción vista desde dos ángulos (modelo
+  de renovación + diseño del flujo que lo expone).
+
+=================================================================
+HALLAZGO 49 — El correo de notificación diaria se pierde entre el resto de
+  los correos del usuario; funciona para nosotros pero no para él
+Categoría: Producto / comunicación / retención
+Estado: 🟡 Pendiente de decisión
+=================================================================
+Surfaceado por: Anuar, misma sesión en vivo con Dulce el 2026-07-08.
+
+Qué se observó: el correo diario (funcional, se entrega, formato claro —
+  ver ronda de copy del 2026-07-05) técnicamente cumple su función, pero
+  para el usuario se pierde dentro del volumen normal de su bandeja de
+  entrada — el efecto práctico es indistinguible de spam, aunque el correo
+  en sí no lo sea. No es un problema de entregabilidad (eso ya se cubrió en
+  H16/H33 — spam/promociones, SPF/DKIM/DMARC); es que incluso llegando bien
+  y a la bandeja correcta, un correo diario más no compite por la atención
+  del usuario frente a todo lo demás que recibe.
+
+Por qué importa: el correo es hoy el único mecanismo de aviso del pipeline
+  (día a día y renovación semanal). Si el usuario no lo nota, el problema no
+  es solo de UX de ese correo — es que todo el ciclo de retención (avisar →
+  que el usuario entre → que revise/regenere/renueve) depende de un canal
+  que compite mal por atención. Conecta directo con H47 (renovación) y H48
+  (regeneración): en ambos, el patrón real fue "el usuario nunca volvió a
+  usar el camino que el correo ofrecía".
+
+Fix de corto plazo (Anuar, no implementado): mejorar el subject del correo
+  para que destaque más en la bandeja (más específico/urgente que el
+  "📬 Notificación automática" genérico actual — ver ronda de copy del
+  2026-07-05), sin necesitar cambio de canal.
+
+A futuro, a pensar: canal adicional con mayor tasa de atención real
+  (WhatsApp/push en vez de o además de correo), o rediseñar qué tan seguido
+  y con qué urgencia visual se notifica. Sin decidir todavía — mismo criterio
+  que H47/H48, pendiente de conversación de negocio/producto.
+
+Severidad: Media (no es un bug, es una limitación estructural del canal
+  elegido — pero afecta directamente la retención que H47/H48 buscan mejorar)
+Prioridad: P1 — mismo bloque de decisión de retención que H47/H48, conviene
+  pensarlos juntos porque comparten la misma causa raíz (el camino de
+  "seguir usando Cosmic" depende de que el usuario note y actúe sobre un
+  aviso pasivo).
+
+=================================================================
+HALLAZGO 50 — El usuario cree que "aprobar" un post significa que ya se
+  publicó (Aurora)
+Categoría: Producto / UX / expectativa
+Estado: 🟡 Pendiente de decisión
+=================================================================
+Surfaceado por: Anuar, misma sesión en vivo (feedback sobre Aurora,
+  2026-07-08).
+
+Qué pasó: Aurora aprobó su post y esperó una semana a que apareciera en su
+  Facebook — no volvió a la plataforma a descargar/publicar porque no
+  entendió que "aprobar" en Cosmic es solo el paso interno antes de que ELLA
+  lo publique manualmente, no un envío automático a su red social. Esto no
+  es un detalle de copy menor: es una ruptura de expectativa que se traduce
+  en abandono silencioso — desde la perspectiva de Aurora, "la herramienta
+  no funcionó", cuando en realidad su contenido estaba listo y esperándola.
+
+Por qué importa: se relaciona con H23-F1 (la palabra "automatiza" genera
+  expectativa de auto-publicación desde el messaging inicial), pero es un
+  problema distinto y más específico — incluso si se corrige el messaging de
+  entrada, la pantalla de aprobación en sí misma no comunica dónde termina
+  el trabajo de Cosmic y dónde empieza el del usuario. Es la falla del mismo
+  problema pero en el punto exacto donde más cuesta (después del análisis,
+  el calendario y las 7 imágenes ya generadas).
+
+Fix propuesto (Anuar): después de aprobar un post, mostrar una pantalla
+  explícita — "Tu post está listo — descárgalo y publícalo" — con botones
+  claros de "Descargar imagen" y "Copiar texto". Cero ambigüedad sobre el
+  siguiente paso manual.
+
+Severidad: Alta (causa abandono silencioso — el usuario no reporta el
+  problema, simplemente deja de esperar resultados que nunca iban a llegar
+  solos, y probablemente concluye que la herramienta no sirvió)
+Prioridad: P0 — a diferencia de H47/H48/H49 (fricción de retención en
+  flujos secundarios), esto rompe la expectativa del resultado principal del
+  producto para el usuario que sí completó el flujo correctamente.
