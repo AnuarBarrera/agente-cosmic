@@ -860,7 +860,31 @@ E6 — No existe dashboard de actividad para el admin/operador:
   quién lleva X días inactivo es necesario para gestionar el beta.
   Corto plazo: hoja de cálculo manual alimentada con logs de GCP.
 
-Prioridad: P3 (roadmap)
+ACTUALIZACIÓN 2026-07-12 (D3 carrusel + E1 auto-publicación, investigación
+  sin implementar): Anuar exploró `miagent` (el repo del que Cosmic es
+  fork) buscando patrones reutilizables. Hallazgos:
+  - D3 (carrusel): `CarouselTool` de miagent es el patrón a reutilizar —
+    Gemini genera 6 slides con roles fijos (hook/cuerpo/CTA), pero en
+    Cosmic cada fondo se generaría con Imagen 3 en vez de Pexels (6x el
+    costo/tiempo de un post normal). Sin construir.
+  - Tipografía (relacionado, no es un hallazgo separado): los 3 templates
+    de imagen de Cosmic (`instagram_post*.html`) tienen
+    `font-family: Arial` hardcodeado — Cosmic ya usa Playwright+HTML+Gemini
+    (más avanzado que miagent), solo falta portar el patrón
+    `STYLE_PRESETS` de miagent (5 fuentes vía Google Fonts) con
+    `{{font_family}}`/`{{font_import}}` parametrizados. Sin implementar.
+  - E1 (auto-publicación): el patrón de miagent (dispatch a n8n por cuenta
+    fija) no generaliza a multi-tenant — Cosmic necesita OAuth de Meta por
+    cuenta de tester. Esto ya está en marcha: Anuar inició el Meta App
+    Review el 2026-07-12 (requisito bloqueante: política de privacidad
+    pública, ver H36 Capa 3 y sección "CAMBIOS APLICADOS — 2026-07-12").
+    El resto (OAuth por tenant, dispatch a Graph API) sigue sin construir,
+    bloqueado hasta que Meta apruebe la app — puede tardar semanas.
+  - Video: sin explorar acceso a Veo/Lyria todavía, fuera de alcance de
+    esta sesión.
+
+Prioridad: P3 (roadmap), excepto el trámite de Meta App Review (E1) que ya
+  está en curso como prerequisito de infraestructura, no como feature.
 
 =================================================================
 HALLAZGO 26 — Análisis de sitio web puede "alucinar" y contaminar el Brand DNA
@@ -1302,6 +1326,14 @@ Severidad: Alta (impacto catastrófico y específico para el usuario si
 Prioridad: P0 — Capa 1 es inmediata y no requiere código; capas 2 y 3
   antes del siguiente batch de testers con negocios fuera del nicho
   actual, y obligatorias antes de producción pública.
+
+Capa 3 — ACTUALIZACIÓN 2026-07-12: la cláusula de responsabilidad ya existe
+  y es pública — se agregó a `/terminos/` (ver sección "CAMBIOS APLICADOS —
+  2026-07-12" al final del documento), motivado por el requisito de Meta
+  App Review de tener una política de privacidad accesible. PENDIENTE de
+  esa capa: la nota breve en la pantalla de aprobación de posts ("Revisa
+  que el contenido cumpla con las políticas de tu red social antes de
+  publicar") — el texto legal existe, pero no está repetido ahí todavía.
 
 =================================================================
 HALLAZGO 37 — Colores de marca alucinados cuando se describen con palabras (no hex)
@@ -1768,11 +1800,19 @@ ninguno bloqueante para seguir con testers dentro del ICP ya validado:
     validar el ángulo con Aurora antes de escribir el copy.
 
 Bloqueante antes de producción pública (correctamente diferidos, no acción
-  ahora): H7 (moderación de input contra abuso), H36 Capa 3 (cláusula legal).
+  ahora): H7 (moderación de input contra abuso). H36 Capa 3 ya NO bloquea
+  por completo — el texto legal se agregó el 2026-07-12 (ver hallazgo H36
+  y la sección "CAMBIOS APLICADOS — 2026-07-12" al final del documento);
+  solo queda pendiente la nota breve en la pantalla de aprobación de posts.
 
 Todo lo demás (H1-H16, H18, H21, H23-H28, H30-H34, H36 capas 1-2, H37-H46)
   está resuelto, cerrado sin código, o es una decisión operativa ya tomada
   por Anuar fuera de este repo.
+
+NOTA: esta sección quedó desactualizada tras la sesión 2026-07-08 (H47-H50)
+  y la sesión 2026-07-12 (GA4, privacidad/términos, landing pública,
+  capturas de la app). Ver la sección "CAMBIOS APLICADOS — 2026-07-12" al
+  final del documento para el estado más reciente.
 
 Fuera del punch list de hallazgos.txt, pendiente de decisión de producto:
   segmentación ICP vs Agencia (2 tiers, nudging tipo Duolingo solo para ICP)
@@ -2197,3 +2237,61 @@ Severidad: Alta (causa abandono silencioso — el usuario no reporta el
 Prioridad: P0 — a diferencia de H47/H48/H49 (fricción de retención en
   flujos secundarios), esto rompe la expectativa del resultado principal del
   producto para el usuario que sí completó el flujo correctamente.
+
+=================================================================
+CAMBIOS APLICADOS — 2026-07-12 — Prerequisitos de Meta App Review
+=================================================================
+Contexto: Anuar inició el trámite de Meta App Review (necesario para poder
+  publicar directo en Facebook/Instagram desde Cosmic a futuro — ver H25).
+  Meta exige una URL de política de privacidad pública y accesible antes de
+  someter la app a revisión — eso disparó el trabajo de esta sesión.
+
+H50 — RESUELTO (ver hallazgo arriba): modal "Tu post está listo —
+  descárgalo y publícalo" tras aprobar un post, con botones de descarga y
+  copiar texto.
+
+H36 Capa 3 (parcial) — RESUELTO el texto legal (ver hallazgo arriba):
+  cláusula de responsabilidad agregada a `/terminos/`. PENDIENTE la nota
+  breve en la pantalla de aprobación de posts.
+
+Nuevo — GA4: tag de Google Analytics 4 (ID ya provisto por Anuar) agregado
+  vía context processor + partial `_ga4.html`, incluido en todas las
+  páginas públicas y autenticadas. Eventos en CTAs clave: analizar marca,
+  registro, aprobar post, descargar imagen, copiar texto — para medir el
+  funnel de activación (relacionado con H24-G2, time to first publish).
+
+Nuevo — `/privacidad/` y `/terminos/`: páginas públicas (sin login) nuevas.
+  Cubren datos recolectados, terceros (Vertex AI, Mailgun, GA4, Meta),
+  retención de datos (30 días tras soft delete de cuenta), y la cláusula
+  de H36 Capa 3. Enlazadas desde el footer de login/registro.
+
+Nuevo — comando `capture_landing_screenshots`: Playwright offline (no
+  renderiza en vivo) que hace login con una cuenta demo y captura
+  screenshots reales del dashboard y un calendario, para mostrarlos en la
+  landing como prueba visual real de la herramienta (refuerza H9). Requiere
+  `DEMO_ACCOUNT_EMAIL`/`DEMO_ACCOUNT_PASSWORD` en el entorno.
+
+Bug real encontrado y corregido en el camino — landing pública inexistente:
+  `/` (vista `landing`) exigía login desde junio (probablemente intencional
+  para gatear la beta por invitación), así que TODO lo de arriba (GA4,
+  capturas, ejemplo visual de H9) quedaba invisible para cualquier
+  visitante anónimo — exactamente el público que Meta necesita poder ver.
+  Fix: `/` es ahora pública de verdad (hero + CTA registro/login,
+  redirige a `/dashboard/` si ya hay sesión); el formulario de analizar
+  marca se movió a `/nuevo-analisis/` (mismo comportamiento de login
+  requerido que antes). Bug secundario encontrado en el mismo fix: las
+  capturas de pantalla no tenían cache-busting — Cloudflare seguía
+  sirviendo una copia vieja (con nombres de otros testers) tras
+  regenerarlas, aunque el archivo en el servidor ya estaba correcto. Fix:
+  mismo patrón `?v=timestamp` que ya se usa en las imágenes de posts.
+
+Incidente de datos corregido (con confirmación explícita de Anuar): la
+  primera captura del dashboard exponía nombres de negocio de testers
+  reales (la cuenta demo usada tenía 10 análisis, no solo Tu Web MX) — se
+  hizo soft-delete de esos 2 calendarios en la base de datos de desarrollo
+  (mismo mecanismo que `delete_calendar_api`), dejando solo Tu Web MX.
+
+Suite: 103 passed en `core.brand_dna` (mismo único fallo preexistente sin
+  relación, documentado en sesiones previas). Todo commiteado
+  (`b692dee`, `4a68c5e`, `6390eb5`, `7b7fabf`, `f293534`), pendiente de
+  desplegar a producción.
