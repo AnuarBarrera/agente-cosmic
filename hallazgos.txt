@@ -2047,7 +2047,11 @@ Nota: detección de plausibilidad física es un problema más difícil para un
 HALLAZGO 47 — Encuesta de renovación (opt-in) genera fricción; usuarios
   prefieren continuidad automática con opt-out
 Categoría: Producto / retención
-Estado: 🟡 Pendiente de decisión — requiere definir costo antes de implementar
+Estado: 🟡 PARCIAL — 2026-07-12: la fricción de "parece encuesta" se resolvió
+  (ver H48), pero el modelo sigue siendo opt-in (el usuario debe hacer clic
+  en "Generar nueva semana"). La decisión de fondo — cambiar a opt-out real
+  (generar automático salvo cancelación explícita) — sigue sin tomarse,
+  pendiente de la definición de costo que este hallazgo ya documentó.
 =================================================================
 Surfaceado por: Jorge (feedback directo a Anuar) + evidencia de comportamiento
   real de un tester en logs (2026-07-07/08).
@@ -2110,7 +2114,15 @@ Prioridad: P1 — decidir antes de que crezca la base de testers activos,
 HALLAZGO 48 — El flujo para generar la siguiente semana se confunde con una
   encuesta; el usuario termina creando un calendario nuevo en vez de continuar
 Categoría: Producto / UX / retención
-Estado: 🟡 Pendiente de decisión — ya son 2 testers con el mismo síntoma
+Estado: ✅ RESUELTO — 2026-07-12: implementado exactamente el fix propuesto por
+  Anuar. La tarjeta con estrellas de calificación (obligatorias), comentario,
+  y dos botones ("Sí, genera mi contenido"/"No, por ahora") se reemplazó por
+  un único botón grande "Generar nueva semana →" con copy debajo explicando
+  qué sucede. El paso de imágenes de producto (reutilizar/subir nuevas)
+  sigue funcionando exactamente igual, solo que visible directamente en vez
+  de oculto detrás de la calificación. Backend: el rating de `WeeklyFeedback`
+  pasó a ser opcional (antes required, 400 si faltaba). Implementado por
+  Gemini 3.5 Flash (delegating-to-external-agents), auditado por Claude.
 =================================================================
 Surfaceado por: Jorge (comportamiento real) + Dulce (confirmación en vivo con
   Anuar, sesión del 2026-07-08).
@@ -2192,6 +2204,15 @@ Prioridad: P1 — mismo bloque de decisión de retención que H47/H48, conviene
   "seguir usando Cosmic" depende de que el usuario note y actúe sobre un
   aviso pasivo).
 
+ACTUALIZACIÓN 2026-07-12 (complementa, no reemplaza el fix pendiente): se
+  agregó en calendar_review.html una línea recordando que las redes
+  sociales (Facebook, Instagram, LinkedIn, TikTok) permiten programar
+  publicaciones nativamente, además de mencionar el recordatorio diario por
+  correo. Esto no resuelve que el correo se pierda en la bandeja — es un
+  canal adicional DENTRO de la app (el usuario ya tiene que estar ahí para
+  verlo) que le da una alternativa a depender del correo día a día. El fix
+  de subject line y la decisión de canal adicional siguen pendientes.
+
 =================================================================
 HALLAZGO 50 — El usuario cree que "aprobar" un post significa que ya se
   publicó (Aurora)
@@ -2222,14 +2243,22 @@ Fix propuesto (Anuar): después de aprobar un post, mostrar una pantalla
   claros de "Descargar imagen" y "Copiar texto". Cero ambigüedad sobre el
   siguiente paso manual.
 
-Fix implementado: modal en calendar_review.html que aparece justo al
-  aprobar un post — imagen del post, "Tu post está listo 🎉", botones
-  "⬇ Descargar imagen" (abre la imagen en pestaña nueva — el atributo
-  download no fuerza descarga automática en URLs de otro origen como GCS,
-  pero sí permite guardarla) y "📋 Copiar texto" (caption + hashtags al
-  portapapeles), y recordatorio de marcar "Ya publiqué esto" cuando lo
-  hagan. Eventos de GA4 en aprobar/descargar/copiar para medir si el
-  patrón de abandono de Aurora se repite. 3 tests nuevos.
+Fix implementado (versión 1, misma sesión): modal en calendar_review.html
+  que aparecía al aprobar un post, con botones "Descargar imagen"/"Copiar
+  texto" y recordatorio de marcar "Ya publiqué esto".
+
+Fix implementado (versión 2, 2026-07-12, reemplaza a la v1): Anuar decidió
+  ir más lejos — "Aprobar", "Sin revisar" y "Ya publiqué esto" no aportaban
+  valor real y generaban la misma falsa expectativa que este hallazgo
+  describe. Se eliminaron por completo (backend, template y JS) y se
+  reemplazaron por un único botón siempre visible "⬇ Descargar imagen" en
+  cada tarjeta — al usarlo, oculta automáticamente "Editar"/"Regenerar" y
+  muestra "✓ Imagen descargada" (nuevo campo `ContentPost.downloaded_at`,
+  persistente). Cero ambigüedad: no hay ningún paso intermedio ("aprobar")
+  que se pueda confundir con "publicar". El modal de la v1 se eliminó por
+  completo. Implementado por Gemini 3.5 Flash (delegating-to-external-agents),
+  auditado por Claude (diff revisado, tests corridos independientemente,
+  verificación visual en vivo).
 
 Severidad: Alta (causa abandono silencioso — el usuario no reporta el
   problema, simplemente deja de esperar resultados que nunca iban a llegar
@@ -2295,3 +2324,27 @@ Suite: 103 passed en `core.brand_dna` (mismo único fallo preexistente sin
   relación, documentado en sesiones previas). Todo commiteado
   (`b692dee`, `4a68c5e`, `6390eb5`, `7b7fabf`, `f293534`), pendiente de
   desplegar a producción.
+
+=================================================================
+HALLAZGO 51 — Horarios sugeridos por post son genéricos (casi siempre 5pm/10am)
+Categoría: Calidad de contenido / backend
+Estado: 🟡 Pendiente de investigar — no implementado
+=================================================================
+Surfaceado por: Anuar, revisando el símbolo de correo (📧) y horario junto a
+  cada post en calendar_review.html.
+
+Qué pasa: el horario mostrado se calcula por `smart_scheduler.py` con una
+  tabla fija por industria/día de la semana (ver H31, ya resuelto — ese
+  hallazgo era sobre que el horario MOSTRADO no coincidía con el horario
+  REAL de envío; este es distinto, es sobre que el horario real en sí es
+  poco variado). En la práctica, casi todos los posts terminan en 17:00 o
+  10:00 sin importar el negocio — no se siente "basado en tu segmento"
+  aunque técnicamente lo esté.
+
+Acción recomendada: revisar la tabla de `smart_scheduler.py` — probablemente
+  tiene pocos valores distintos por industria/día, o la lógica de selección
+  colapsa hacia los mismos 2 horarios en la mayoría de los casos. No
+  diagnosticado a fondo esta sesión, solo detectado.
+
+Severidad: Baja (no rompe nada, reduce la percepción de personalización)
+Prioridad: P2
