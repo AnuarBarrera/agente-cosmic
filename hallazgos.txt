@@ -2156,7 +2156,7 @@ Prioridad: P1 — mismo bloque de decisión de retención que H47/H48, conviene
 HALLAZGO 50 — El usuario cree que "aprobar" un post significa que ya se
   publicó (Aurora)
 Categoría: Producto / UX / expectativa
-Estado: 🟡 Pendiente de decisión
+Estado: ✅ RESUELTO — 2026-07-12
 =================================================================
 Surfaceado por: Anuar, misma sesión en vivo (feedback sobre Aurora,
   2026-07-08).
@@ -2181,6 +2181,15 @@ Fix propuesto (Anuar): después de aprobar un post, mostrar una pantalla
   explícita — "Tu post está listo — descárgalo y publícalo" — con botones
   claros de "Descargar imagen" y "Copiar texto". Cero ambigüedad sobre el
   siguiente paso manual.
+
+Fix implementado: modal en calendar_review.html que aparece justo al
+  aprobar un post — imagen del post, "Tu post está listo 🎉", botones
+  "⬇ Descargar imagen" (abre la imagen en pestaña nueva — el atributo
+  download no fuerza descarga automática en URLs de otro origen como GCS,
+  pero sí permite guardarla) y "📋 Copiar texto" (caption + hashtags al
+  portapapeles), y recordatorio de marcar "Ya publiqué esto" cuando lo
+  hagan. Eventos de GA4 en aprobar/descargar/copiar para medir si el
+  patrón de abandono de Aurora se repite. 3 tests nuevos.
 
 Severidad: Alta (causa abandono silencioso — el usuario no reporta el
   problema, simplemente deja de esperar resultados que nunca iban a llegar
