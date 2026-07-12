@@ -87,6 +87,14 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f'Screenshots guardados en {_OUTPUT_DIR}'))
 
+        # nginx sirve desde STATIC_ROOT (staticfiles/), NO desde este directorio fuente —
+        # sin collectstatic las capturas nuevas quedan invisibles en la app hasta el
+        # proximo restart del contenedor (que lo corre automaticamente en el entrypoint).
+        # Lo corremos aqui para que un solo comando deje todo listo, sin pasos manuales.
+        from django.core.management import call_command
+        call_command('collectstatic', '--noinput', verbosity=0)
+        self.stdout.write(self.style.SUCCESS('collectstatic corrido — los cambios ya son visibles sin reiniciar el contenedor.'))
+
     def _login(self, page, base_url, email, password):
         page.goto(f'{base_url}/auth/login/', wait_until='load')
         page.fill('#email', email)
