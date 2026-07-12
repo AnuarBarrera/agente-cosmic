@@ -30,6 +30,7 @@
     .footer-link a { color: #e94560; text-decoration: none; }
     .footer-link a:hover { text-decoration: underline; }
   </style>
+{% include 'brand_dna/_ga4.html' %}
 </head>
 <body>
   <div class="logo">Agente Cosmic</div>
@@ -68,7 +69,7 @@
 
     <div class="divider"><span>o con tu correo</span></div>
 
-    <form method="POST">
+    <form method="POST" onsubmit="if (typeof gtag === 'function') gtag('event', 'register_submit', { event_category: 'auth' });">
       {% csrf_token %}
       <div class="form-group">
         <label for="email">Correo electrónico</label>
@@ -110,6 +111,9 @@
 
     <div class="footer-link">
       ¿Ya tienes cuenta? <a href="{% url 'login' %}">Iniciar sesión</a>
+    </div>
+    <div class="footer-link" style="margin-top:16px;">
+      <a href="{% url 'privacy_policy' %}">Privacidad</a> · <a href="{% url 'terms_of_service' %}">Términos</a>
     </div>
     {% endif %}
   </div>

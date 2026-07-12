@@ -20,6 +20,9 @@ docker-compose.override.yml
 /staticfiles/
 *.log
 
+# Screenshots generados por capture_landing_screenshots (regenerables, no versionar)
+/core/brand_dna/static/brand_dna/img/screenshots/
+
 # Python
 __pycache__/
 *.pyc

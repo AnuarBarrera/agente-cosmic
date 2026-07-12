@@ -40,6 +40,15 @@ def test_landing_page_redirects_to_login():
     assert response.status_code == 302
 
 
+def test_landing_page_without_screenshots_hides_gallery(user):
+    c = Client()
+    c.force_login(user)
+    response = c.get('/')
+    assert response.status_code == 200
+    assert response.context['has_app_screenshots'] is False
+    assert b'screenshots/dashboard.png' not in response.content
+
+
 def test_analyze_submit_creates_job(user):
     c = Client()
     c.force_login(user)
@@ -458,3 +467,30 @@ def test_update_active_product_images_new_uploads(job_with_calendar, tmp_path, s
     for path in calendar.active_product_images:
         full = os.path.join(settings.MEDIA_ROOT, path)
         assert os.path.exists(full)
+
+
+def test_privacy_policy_accessible_without_login():
+    c = Client()
+    response = c.get('/privacidad/')
+    assert response.status_code == 200
+
+
+def test_terms_of_service_accessible_without_login():
+    c = Client()
+    response = c.get('/terminos/')
+    assert response.status_code == 200
+
+
+def test_ga4_tag_renders_when_measurement_id_configured(settings):
+    settings.GA4_MEASUREMENT_ID = 'G-TESTID123'
+    c = Client()
+    response = c.get('/privacidad/')
+    assert b'gtag' in response.content
+    assert b'G-TESTID123' in response.content
+
+
+def test_ga4_tag_absent_when_measurement_id_empty(settings):
+    settings.GA4_MEASUREMENT_ID = ''
+    c = Client()
+    response = c.get('/privacidad/')
+    assert b'gtag' not in response.content

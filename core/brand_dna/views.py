@@ -46,12 +46,27 @@ def _validate_image_bytes(data: bytes) -> bool:
 def landing(request):
     if not request.user.is_authenticated:
         return redirect('login')
-    return render(request, 'brand_dna/landing.html')
+    screenshots_dir = os.path.join(
+        settings.BASE_DIR, 'core', 'brand_dna', 'static', 'brand_dna', 'img', 'screenshots',
+    )
+    has_app_screenshots = (
+        os.path.exists(os.path.join(screenshots_dir, 'dashboard.png'))
+        and os.path.exists(os.path.join(screenshots_dir, 'calendar.png'))
+    )
+    return render(request, 'brand_dna/landing.html', {'has_app_screenshots': has_app_screenshots})
 
 
 def favicon(request):
     path = os.path.join(settings.BASE_DIR, 'core', 'brand_dna', 'static', 'brand_dna', 'img', 'logo.svg')
     return FileResponse(open(path, 'rb'), content_type='image/svg+xml')
+
+
+def privacy_policy(request):
+    return render(request, 'brand_dna/legal/privacy.html')
+
+
+def terms_of_service(request):
+    return render(request, 'brand_dna/legal/terms.html')
 
 
 @login_required

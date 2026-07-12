@@ -298,6 +298,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'core.brand_dna.context_processors.ga4',
             ],
         },
     },
@@ -544,6 +545,9 @@ FRONTEND_URL = get_env('FRONTEND_URL', default='http://localhost:3000')
 # Base URL para Agente Cosmic — usada para construir links en emails (encuesta semanal)
 COSMIC_BASE_URL = get_env('COSMIC_BASE_URL', default='https://cosmic.anuarbarrera.dev')
 ADMIN_NOTIFICATION_EMAIL = get_env('ADMIN_NOTIFICATION_EMAIL', default='contacto.neia@gmail.com')
+
+# Google Analytics 4 — vacío en dev/test para no mandar tráfico de prueba a GA
+GA4_MEASUREMENT_ID = get_env('GA4_MEASUREMENT_ID', default='')
 
 # Sentry Configuration for Error Tracking
 SENTRY_DSN = get_env('SENTRY_DSN', default='')

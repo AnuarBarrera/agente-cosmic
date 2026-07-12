@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/svg+xml" href="{% url 'favicon' %}">
+  <title>Términos y Condiciones — Agente Cosmic</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #f0f0f0; line-height: 1.6; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 48px 20px 80px; }
+    .logo { font-size: 1.5rem; font-weight: 700; color: #e94560; margin-bottom: 8px; }
+    h1 { font-size: 1.8rem; margin: 24px 0 8px; }
+    h2 { font-size: 1.2rem; color: #e94560; margin: 32px 0 10px; }
+    p, li { color: #ccc; font-size: 0.95rem; margin-bottom: 10px; }
+    ul { padding-left: 20px; margin-bottom: 10px; }
+    .updated { color: #888; font-size: 0.85rem; margin-bottom: 32px; }
+    .notice { background: #1a1a2e; border: 1px solid #e94560; border-radius: 8px; padding: 16px; margin: 16px 0; }
+    a { color: #e94560; }
+    .back { display: inline-block; margin-top: 40px; color: #aaa; text-decoration: none; font-size: 0.9rem; }
+    .back:hover { color: #e94560; }
+  </style>
+{% include 'brand_dna/_ga4.html' %}
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo">Agente Cosmic</div>
+    <h1>Términos y Condiciones</h1>
+    <div class="updated">Última actualización: 12 de julio de 2026</div>
+
+    <p>
+      Estos términos rigen el uso de Agente Cosmic ("Cosmic"), operado por Tu Web MX.
+      Al crear una cuenta aceptas estos términos.
+    </p>
+
+    <h2>1. Qué hace Cosmic</h2>
+    <p>
+      Cosmic analiza la información que nos das sobre tu negocio y genera contenido
+      de marketing para redes sociales (imágenes y textos) usando modelos de
+      inteligencia artificial de Google Cloud. Durante la fase actual, el acceso es
+      por invitación.
+    </p>
+
+    <h2>2. Responsabilidad sobre el contenido generado</h2>
+    <div class="notice">
+      <strong>El contenido que genera Cosmic es una sugerencia, no una garantía de
+      cumplimiento.</strong> Tú eres responsable de revisar cada publicación antes de
+      compartirla y de verificar que cumple con las políticas de la red social donde
+      la publiques (por ejemplo, las políticas de contenido de Meta/Facebook e
+      Instagram). Esto es especialmente importante si tu negocio opera en un sector
+      regulado o sensible (salud, finanzas, servicios dirigidos a menores de edad).
+    </div>
+    <p>
+      Cosmic aplica reglas automáticas para evitar lenguaje de alto riesgo (promesas
+      absolutas, afirmaciones no verificables) en estos sectores, pero esto reduce el
+      riesgo, no lo elimina. La decisión final de publicar es siempre tuya.
+    </p>
+
+    <h2>3. Uso aceptable</h2>
+    <p>No puedes usar Cosmic para generar o publicar contenido que:</p>
+    <ul>
+      <li>Sea ilegal, engañoso, difamatorio o que infrinja derechos de terceros.</li>
+      <li>Viole las políticas de la plataforma donde lo publiques (Meta, Instagram, u
+        otras).</li>
+      <li>Intente abusar de la plataforma o de los modelos de IA que usamos (por
+        ejemplo, generar contenido prohibido mediante instrucciones diseñadas para
+        evadir los filtros de seguridad).</li>
+    </ul>
+    <p>
+      Podemos suspender cuentas que incumplan esta sección.
+    </p>
+
+    <h2>4. Propiedad del contenido</h2>
+    <p>
+      El contenido que Cosmic genera a partir de la información de tu negocio es
+      tuyo — puedes usarlo, editarlo y publicarlo libremente. No lo revendemos ni lo
+      usamos para entrenar modelos de terceros ajenos a la operación del servicio.
+    </p>
+
+    <h2>5. Publicación en redes sociales conectadas</h2>
+    <p>
+      Si conectas tu cuenta de Facebook o Instagram para publicar directamente desde
+      Cosmic, tú autorizas explícitamente esa conexión y puedes revocarla en
+      cualquier momento. Cosmic solo publica el contenido que tú apruebas
+      previamente — nunca publica nada sin tu aprobación.
+    </p>
+
+    <h2>6. Sin garantías de resultado</h2>
+    <p>
+      Cosmic genera contenido de marketing, no garantiza ventas, alcance ni ningún
+      resultado de negocio específico.
+    </p>
+
+    <h2>7. Limitación de responsabilidad</h2>
+    <p>
+      Cosmic se ofrece "tal cual". En la medida permitida por la ley, no somos
+      responsables por daños indirectos derivados del uso de la plataforma, incluida
+      la suspensión de cuentas de terceros (como Meta) por contenido que publiques.
+    </p>
+
+    <h2>8. Cambios y contacto</h2>
+    <p>
+      Podemos actualizar estos términos; los cambios sustanciales se indicarán en
+      esta página. Dudas: <a href="mailto:contacto.neia@gmail.com">contacto.neia@gmail.com</a>.
+    </p>
+
+    <a href="{% url 'landing' %}" class="back">← Volver a Agente Cosmic</a>
+  </div>
+</body>
+</html>

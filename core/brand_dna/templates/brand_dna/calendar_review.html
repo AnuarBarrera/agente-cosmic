@@ -117,7 +117,27 @@
       box-shadow: 0 4px 16px rgba(233,69,96,0.4); z-index: 99;
     }
     #backToTop.visible { display: flex; }
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      display: none; align-items: center; justify-content: center;
+      z-index: 300; padding: 20px;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal-box { background: #1a1a2e; border-radius: 16px; max-width: 420px; width: 100%; padding: 28px; text-align: center; }
+    .modal-box img { width: 100%; border-radius: 10px; margin-bottom: 16px; aspect-ratio: 1; object-fit: cover; }
+    .modal-box h2 { font-size: 1.2rem; margin-bottom: 6px; }
+    .modal-box p { color: #aaa; font-size: 0.85rem; margin-bottom: 20px; }
+    .modal-actions { display: flex; gap: 10px; margin-bottom: 12px; }
+    .modal-actions a, .modal-actions button {
+      flex: 1; padding: 10px; border-radius: 8px; border: none; font-size: 0.85rem;
+      font-weight: 600; cursor: pointer; text-decoration: none; display: block;
+    }
+    .modal-btn-download { background: #e94560; color: #fff; }
+    .modal-btn-copy { background: #1a2a3a; color: #4a9eff; }
+    .modal-hint { font-size: 0.75rem; color: #666; margin-bottom: 16px; }
+    .modal-close { background: transparent; color: #888; border: 1px solid #333; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 0.8rem; }
   </style>
+{% include 'brand_dna/_ga4.html' %}
 </head>
 <body>
 <nav>
@@ -241,7 +261,7 @@
         </div>
         <div class="post-caption" id="caption-{{ post.id }}">{{ post.caption }}</div>
         {% if post.hashtags %}
-        <div class="post-hashtags">{{ post.hashtags|join:" " }}</div>
+        <div class="post-hashtags" id="hashtags-{{ post.id }}">{{ post.hashtags|join:" " }}</div>
         {% endif %}
         <div class="post-status status-{{ post.user_status }}" id="status-{{ post.id }}">
           {% if post.user_status == 'approved' %}✓ Aprobado
@@ -275,6 +295,21 @@
 
 <div class="toast" id="toast"></div>
 <button id="backToTop" title="Volver arriba">↑</button>
+
+<div class="modal-overlay" id="postReadyModal">
+  <div class="modal-box">
+    <img id="modalImg" src="" alt="Tu post" style="display:none;">
+    <h2>Tu post está listo 🎉</h2>
+    <p>Descárgalo y publícalo tú mismo en tus redes.</p>
+    <div class="modal-actions">
+      <a href="#" id="modalDownload" class="modal-btn-download" download target="_blank" rel="noopener"
+         onclick="if (typeof gtag === 'function') gtag('event', 'post_download_image', { event_category: 'calendar' });">⬇ Descargar imagen</a>
+      <button type="button" class="modal-btn-copy" onclick="copyModalText()">📋 Copiar texto</button>
+    </div>
+    <div class="modal-hint">Cuando lo publiques, marca "📤 Ya publiqué esto" en la tarjeta del post.</div>
+    <button type="button" class="modal-close" onclick="closePostReadyModal()">Cerrar</button>
+  </div>
+</div>
 
 <script>
   const CSRF = '{{ csrf_token }}';
@@ -329,7 +364,53 @@
     if (data.status === 'ok') {
       setCardStatus(postId, 'approved', '✓ Aprobado');
       showToast('Post aprobado ✓');
+      if (typeof gtag === 'function') gtag('event', 'post_approve', { event_category: 'calendar' });
+      showPostReadyModal(postId);
     }
+  }
+
+  let _modalText = '';
+
+  function showPostReadyModal(postId) {
+    const card = document.getElementById('card-' + postId);
+    const img = card.querySelector('.post-img img');
+    const captionEl = document.getElementById('caption-' + postId);
+    const hashtagsEl = document.getElementById('hashtags-' + postId);
+
+    const modalImg = document.getElementById('modalImg');
+    if (img) {
+      modalImg.src = img.src;
+      modalImg.style.display = 'block';
+    } else {
+      modalImg.style.display = 'none';
+    }
+
+    const downloadBtn = document.getElementById('modalDownload');
+    if (img) {
+      downloadBtn.href = img.src;
+      downloadBtn.style.display = 'block';
+    } else {
+      downloadBtn.style.display = 'none';
+    }
+
+    const caption = captionEl ? captionEl.innerText.trim() : '';
+    const hashtags = hashtagsEl ? hashtagsEl.innerText.trim() : '';
+    _modalText = hashtags ? `${caption}\n\n${hashtags}` : caption;
+
+    document.getElementById('postReadyModal').classList.add('show');
+  }
+
+  function closePostReadyModal() {
+    document.getElementById('postReadyModal').classList.remove('show');
+  }
+
+  function copyModalText() {
+    navigator.clipboard.writeText(_modalText).then(function() {
+      showToast('Texto copiado ✓');
+      if (typeof gtag === 'function') gtag('event', 'post_copy_text', { event_category: 'calendar' });
+    }).catch(function() {
+      showToast('No se pudo copiar el texto', '#e74c3c');
+    });
   }
 
   async function markPublished(postId) {

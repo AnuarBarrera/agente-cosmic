@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -14,6 +15,10 @@
     .example-card { max-width: 340px; margin: 0 auto 40px; }
     .example-card img { width: 100%; border-radius: 12px; box-shadow: 0 8px 32px rgba(233,69,96,0.25); display: block; }
     .example-label { font-size: 0.85rem; color: #888; margin-top: 12px; }
+    .app-gallery { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; max-width: 800px; margin: 0 auto 40px; }
+    .app-gallery figure { max-width: 360px; margin: 0; }
+    .app-gallery img { width: 100%; border-radius: 10px; border: 1px solid #2a2a4a; display: block; }
+    .app-gallery figcaption { font-size: 0.8rem; color: #888; margin-top: 8px; }
     .form-card { background: #1a1a2e; max-width: 600px; margin: 0 auto; padding: 40px; border-radius: 16px; }
     .form-group { margin-bottom: 20px; }
     label { display: block; font-size: 0.9rem; color: #aaa; margin-bottom: 6px; }
@@ -53,6 +58,7 @@
       .l-nav-email { display: none; }
     }
   </style>
+{% include 'brand_dna/_ga4.html' %}
 </head>
 <body>
   <nav class="l-nav">
@@ -73,6 +79,18 @@
       <img src="https://storage.googleapis.com/agente-cosmic-assets/posts/28e4fcad-86ba-43e1-acc8-a3880a0f9436-day1.png" alt="Ejemplo de post generado por Agente Cosmic" loading="lazy">
       <div class="example-label">☝️ Así se ve un post real generado por Agente Cosmic</div>
     </div>
+    {% if has_app_screenshots %}
+    <div class="app-gallery">
+      <figure>
+        <img src="{% static 'brand_dna/img/screenshots/dashboard.png' %}" alt="Panel de Agente Cosmic" loading="lazy">
+        <figcaption>Tu panel — todos tus calendarios en un solo lugar</figcaption>
+      </figure>
+      <figure>
+        <img src="{% static 'brand_dna/img/screenshots/calendar.png' %}" alt="Calendario de contenido de Agente Cosmic" loading="lazy">
+        <figcaption>Tu calendario de 7 días, listo para revisar y publicar</figcaption>
+      </figure>
+    </div>
+    {% endif %}
   </div>
 
   {% if error %}
@@ -173,6 +191,7 @@
 
     document.getElementById('analyzeForm').addEventListener('submit', function(e) {
       e.preventDefault();
+      if (typeof gtag === 'function') gtag('event', 'analyze_submit', { event_category: 'onboarding' });
       var form = this;
       var btn = document.getElementById('submitBtn');
       var spinner = document.getElementById('btnSpinner');
