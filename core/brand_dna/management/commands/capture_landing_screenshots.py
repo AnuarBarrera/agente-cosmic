@@ -96,7 +96,15 @@ class Command(BaseCommand):
         if '/auth/login/' in page.url:
             error_box = page.query_selector('.error-box')
             detail = error_box.inner_text().strip() if error_box else '(sin mensaje de error visible en la pagina)'
-            raise CommandError(f'Login fallo: {detail}')
+            raise CommandError(
+                f'Login fallo: {detail}\n'
+                f'  base-url usado: {base_url}\n'
+                '  Si esto corre desde el servidor de desarrollo, --base-url por defecto apunta a '
+                'COSMIC_BASE_URL (produccion, base de datos SEPARADA de este servidor). Las '
+                'credenciales de DEMO_ACCOUNT_EMAIL/PASSWORD deben pertenecer a la MISMA base de '
+                'datos que --base-url. Para probar contra este servidor de dev, pasa explicito: '
+                '--base-url https://deploy.anuarbarrera.dev'
+            )
 
     def _capture(self, page, url, filename):
         page.goto(url, wait_until='load')

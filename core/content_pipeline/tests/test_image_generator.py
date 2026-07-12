@@ -313,6 +313,24 @@ class TestValidateBackground:
             result = gen._validate_background(b'fake-png')
         assert result is False
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_false_when_has_unrealistic_grounding(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = (
+                '{"has_text": false, "is_abstract_3d": false, "has_screen_content": false, '
+                '"has_malformed_object": false, "has_unrealistic_grounding": true, "ok": false}'
+            )
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._validate_background(b'fake-png')
+        assert result is False
+
 
 class TestChooseTemplateForImage:
     @override_settings(

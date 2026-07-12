@@ -457,7 +457,7 @@ class ImageGenerator:
             prompt = (
                 "Analyze this image strictly. Reply ONLY with this JSON (no markdown):\n"
                 "{\"has_text\": <bool>, \"is_abstract_3d\": <bool>, \"has_screen_content\": <bool>, "
-                "\"has_malformed_object\": <bool>, \"ok\": <bool>}\n\n"
+                "\"has_malformed_object\": <bool>, \"has_unrealistic_grounding\": <bool>, \"ok\": <bool>}\n\n"
                 "has_text: true if ANY readable letters, words, numbers or text appear ANYWHERE in the image — "
                 "including text on signs, labels, books, packaging, walls, or any surface. "
                 "Even partial words or blurry text count. Be very strict.\n"
@@ -469,8 +469,14 @@ class ImageGenerator:
                 "physically impossible or distorted — wrong number of parts, parts connected incorrectly, missing pieces "
                 "a real version of the object would have, or a structurally implausible shape. Examine objects with "
                 "multiple connected parts (tools, instruments, hands, machinery) closely. Only flag clear, obvious cases.\n"
+                "has_unrealistic_grounding: true if the main subject (person, animal, or product) appears to float, "
+                "hover, or is otherwise disconnected from the surface/floor/background it should be resting or "
+                "standing on — no visible contact point, no matching contact shadow directly beneath it, wrong "
+                "scale or perspective versus the background, or a dynamic mid-air pose (jumping, running) composited "
+                "onto a background that implies the subject is stationary. This commonly happens when a subject's "
+                "pose doesn't match its new background. Only flag clear, obvious cases where it looks physically wrong.\n"
                 "ok: true ONLY if has_text=false AND is_abstract_3d=false AND has_screen_content=false "
-                "AND has_malformed_object=false."
+                "AND has_malformed_object=false AND has_unrealistic_grounding=false."
             )
             with track_external_api('gemini', operation='image_qc'):
                 resp = client.models.generate_content(
@@ -488,7 +494,7 @@ class ImageGenerator:
                 if ok:
                     logger.info(f"Background QC OK: {data}")
                 else:
-                    flags = [k for k in ('has_text', 'is_abstract_3d', 'has_screen_content', 'has_malformed_object') if data.get(k)]
+                    flags = [k for k in ('has_text', 'is_abstract_3d', 'has_screen_content', 'has_malformed_object', 'has_unrealistic_grounding') if data.get(k)]
                     logger.warning(f"Background QC REJECTED: {', '.join(flags)} | full={data}")
                 return ok
         except Exception as e:
