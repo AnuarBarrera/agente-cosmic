@@ -1,7 +1,7 @@
 import pytest
 import json
 import os
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from django.test import Client
 from django.utils import timezone
 from datetime import timedelta
@@ -253,6 +253,35 @@ def test_mark_published_is_idempotent(client, user, job_with_calendar):
     )
     post.refresh_from_db()
     assert post.published_at == first_timestamp
+
+
+def test_download_post_image_returns_attachment(client, user, job_with_calendar):
+    post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
+    client.force_login(user)
+    fake_response = MagicMock()
+    fake_response.read.return_value = b'fake-image-bytes'
+    fake_response.__enter__.return_value = fake_response
+    with patch('urllib.request.urlopen', return_value=fake_response):
+        response = client.get(f'/api/post/{post.id}/download/')
+    assert response.status_code == 200
+    assert response['Content-Type'] == 'image/png'
+    assert 'attachment' in response['Content-Disposition']
+    assert response.content == b'fake-image-bytes'
+
+
+def test_download_post_image_blocks_other_user(client, django_user_model, job_with_calendar, free_plan):
+    from core.tenant_management.models import TenantModel, Subscription
+    post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
+    other = django_user_model.objects.create_user(
+        username='other@test.com', email='other@test.com', password='pass1234'
+    )
+    t = TenantModel.objects.create(name=other.email, status='active')
+    Subscription.objects.create(tenant=t, plan=free_plan)
+    other.tenant = t
+    other.save(update_fields=['tenant'])
+    client.force_login(other)
+    response = client.get(f'/api/post/{post.id}/download/')
+    assert response.status_code == 404
 
 
 def test_mark_downloaded_sets_timestamp(client, user, job_with_calendar):

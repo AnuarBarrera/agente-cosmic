@@ -72,8 +72,6 @@
     {% endif %}
   </nav>
 
-  {% include 'brand_dna/_marketing_hero.html' with show_gallery=False %}
-
   {% if error %}
   <div style="background:#3a1a1a;border:1px solid #c0392b;color:#e74c3c;padding:16px 20px;border-radius:10px;margin-bottom:20px;max-width:600px;margin-left:auto;margin-right:auto;">
     {{ error }}
@@ -130,13 +128,7 @@
     </form>
   </div>
 
-  <div class="features">
-    <div class="feature"><div class="icon">🔍</div><p>Analisis de marca con IA</p></div>
-    <div class="feature"><div class="icon">🎨</div><p>Extraccion de colores y tono</p></div>
-    <div class="feature"><div class="icon">🖼️</div><p>Imagenes con Imagen 3 + Art Director</p></div>
-    <div class="feature"><div class="icon">📅</div><p>7 dias de contenido generado por Gemini</p></div>
-    <div class="feature"><div class="icon">📬</div><p>Recordatorio diario para que no se te olvide publicar</p></div>
-  </div>
+  {% include 'brand_dna/_marketing_hero.html' with show_gallery=False %}
 
   <script>
     var MAX_SIDE = 1200;

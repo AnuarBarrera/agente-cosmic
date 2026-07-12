@@ -34,6 +34,8 @@
     .container { max-width: 900px; margin: 0 auto; padding: 40px 20px 80px; }
     h1 { font-size: 1.4rem; margin-bottom: 4px; }
     .subtitle { color: #777; font-size: 0.9rem; margin-bottom: 32px; }
+    .subtitle-primary { color: #ddd; font-size: 0.95rem; font-weight: 500; margin-bottom: 10px; line-height: 1.5; }
+    .note-tip { font-size: 0.78rem; color: #999; background: #16162c; border-left: 3px solid #e94560; padding: 10px 14px; border-radius: 6px; margin-bottom: 24px; line-height: 1.5; }
     .legend { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
     .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #888; }
     .dot { width: 10px; height: 10px; border-radius: 50%; }
@@ -123,10 +125,10 @@
 
 <div class="container">
   <h1>Este es tu calendario de contenido</h1>
-  <p class="subtitle">
+  <p class="subtitle-primary">
     Edita la descripción o pide cambios en cada post, y descarga la imagen cuando estés listo para publicar. ¿Quieres ver el análisis de tu marca? Da click <a href="{% url 'results' job.id %}" style="color:#e94560;font-weight:600;">Aquí</a>.
   </p>
-  <p class="subtitle" style="margin-top:-20px;">
+  <p class="note-tip">
     💡 Recuerda que en tu red social de preferencia (Facebook, Instagram, LinkedIn, TikTok) hay una opción para programar tus publicaciones. Además, te llegará un correo cada día para que no se te olvide publicar.
   </p>
 
@@ -295,12 +297,14 @@
   }
 
   async function downloadImage(postId) {
-    const card = document.getElementById('card-' + postId);
-    const img = card.querySelector('.post-img img');
-    if (img) {
-      window.open(img.src, '_blank');
-      if (typeof gtag === 'function') gtag('event', 'post_download_image', { event_category: 'calendar' });
-    }
+    // Descarga vía el backend (mismo origen) en vez de fetch() directo a GCS —
+    // el bucket no manda headers CORS, asi que un fetch cross-origin fallaria en silencio.
+    const a = document.createElement('a');
+    a.href = `/api/post/${postId}/download/`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    if (typeof gtag === 'function') gtag('event', 'post_download_image', { event_category: 'calendar' });
     const data = await postAction(postId, { action: 'mark_downloaded' });
     if (data.status === 'ok') {
       const editBtn = document.getElementById('edit-btn-' + postId);

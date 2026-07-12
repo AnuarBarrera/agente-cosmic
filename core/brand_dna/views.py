@@ -10,7 +10,7 @@ from PIL import Image
 from core.shared.metrics_utils import track_external_api, record_tokens
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse, FileResponse
+from django.http import JsonResponse, FileResponse, HttpResponse, Http404
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 from core.brand_dna.models import AnalysisJob, BrandDNA
@@ -293,6 +293,32 @@ def delete_calendar_api(request, job_id):
         logger.warning(f"delete_calendar: error cancelando RQ jobs: {e}")
 
     return JsonResponse({'status': 'ok'})
+
+
+@login_required
+def download_post_image(request, post_id):
+    """Sirve la imagen del post como descarga forzada (Content-Disposition: attachment).
+    Evita depender de fetch()+blob en el navegador — el bucket de GCS no manda headers
+    CORS, así que un fetch cross-origin directo desde el JS del cliente falla en
+    silencio. Proxeamos la imagen desde el backend (mismo origen, sin CORS)."""
+    import urllib.request
+    from core.content_pipeline.models import ContentPost
+    post = get_object_or_404(
+        ContentPost.objects.select_related('calendar__brand_dna__job'),
+        id=post_id,
+        calendar__brand_dna__job__user=request.user,
+    )
+    if not post.image_url:
+        raise Http404
+    try:
+        with urllib.request.urlopen(post.image_url, timeout=15) as resp:
+            data = resp.read()
+    except Exception as e:
+        logger.warning(f"download_post_image: no se pudo obtener la imagen de {post.image_url}: {e}")
+        raise Http404
+    response = HttpResponse(data, content_type='image/png')
+    response['Content-Disposition'] = f'attachment; filename="post-dia-{post.day_number}.png"'
+    return response
 
 
 @login_required
