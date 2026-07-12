@@ -94,11 +94,27 @@ class Command(BaseCommand):
         page.click('button[type="submit"]')
         page.wait_for_load_state('networkidle')
         if '/auth/login/' in page.url:
-            raise CommandError('Login fallo — revisa las credenciales de la cuenta demo.')
+            error_box = page.query_selector('.error-box')
+            detail = error_box.inner_text().strip() if error_box else '(sin mensaje de error visible en la pagina)'
+            raise CommandError(f'Login fallo: {detail}')
 
     def _capture(self, page, url, filename):
         page.goto(url, wait_until='load')
-        page.wait_for_timeout(500)
+        # Las imagenes de los posts usan loading="lazy" (solo cargan si entran al viewport,
+        # y las secciones colapsadas del acordeon de semanas nunca las disparan). Forzamos
+        # "eager" en todas para que el navegador las pida de inmediato, sin depender de scroll.
+        page.evaluate(
+            "document.querySelectorAll('img[loading=\"lazy\"]').forEach(img => img.loading = 'eager')"
+        )
+        try:
+            page.wait_for_function(
+                'Array.from(document.images).every(img => img.complete && img.naturalWidth > 0)',
+                timeout=20000,
+            )
+        except Exception:
+            self.stdout.write(self.style.WARNING(
+                f'  {filename}: alguna imagen no termino de cargar a tiempo, la captura puede tener huecos'
+            ))
         out_path = os.path.join(_OUTPUT_DIR, filename)
         page.screenshot(path=out_path, full_page=True)
         self.stdout.write(f'  {filename} <- {url}')
