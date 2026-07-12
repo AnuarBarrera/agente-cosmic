@@ -50,8 +50,11 @@ class Command(BaseCommand):
                 'DEMO_ACCOUNT_EMAIL/DEMO_ACCOUNT_PASSWORD en el entorno.'
             )
 
+        # El job debe pertenecer a la MISMA cuenta con la que hacemos login — calendar_review_view
+        # exige job.user == request.user, así que un job de otro usuario daria 404 al capturar.
         job = (
             AnalysisJob.objects.filter(
+                user__email=email,
                 brand_dna__business_name=options['business_name'],
                 status=AnalysisJob.STATUS_DONE,
                 deleted_at__isnull=True,
@@ -61,8 +64,10 @@ class Command(BaseCommand):
         )
         if job is None:
             raise CommandError(
-                f"No hay un AnalysisJob completado para \"{options['business_name']}\". "
-                'Genera uno primero (o pasa --business-name con un negocio existente).'
+                f'No hay un AnalysisJob completado para "{options["business_name"]}" que '
+                f'pertenezca a la cuenta {email}. Ese calendario debe estar bajo la MISMA '
+                'cuenta con la que se hace login (o pasa --business-name con un negocio que '
+                'sí tenga esa cuenta).'
             )
 
         os.makedirs(_OUTPUT_DIR, exist_ok=True)
