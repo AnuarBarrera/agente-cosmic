@@ -76,4 +76,4 @@ def test_session_flushed_on_inactivity(user):
 def test_unauthenticated_request_passes_through():
     c = Client()
     response = c.get('/')
-    assert response.status_code == 302
+    assert response.status_code == 200

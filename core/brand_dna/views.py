@@ -43,17 +43,30 @@ def _validate_image_bytes(data: bytes) -> bool:
         return False
 
 
-def landing(request):
-    if not request.user.is_authenticated:
-        return redirect('login')
+def _screenshots_context() -> dict:
+    """has_app_screenshots + screenshots_version (mtime, para cache-busting en CDN/navegador —
+    la URL de estas imagenes nunca cambia de nombre, asi que sin esto Cloudflare/el navegador
+    pueden seguir sirviendo una copia vieja tras regenerarlas con capture_landing_screenshots)."""
     screenshots_dir = os.path.join(
         settings.BASE_DIR, 'core', 'brand_dna', 'static', 'brand_dna', 'img', 'screenshots',
     )
-    has_app_screenshots = (
-        os.path.exists(os.path.join(screenshots_dir, 'dashboard.png'))
-        and os.path.exists(os.path.join(screenshots_dir, 'calendar.png'))
-    )
-    return render(request, 'brand_dna/landing.html', {'has_app_screenshots': has_app_screenshots})
+    dashboard_path = os.path.join(screenshots_dir, 'dashboard.png')
+    calendar_path = os.path.join(screenshots_dir, 'calendar.png')
+    has_app_screenshots = os.path.exists(dashboard_path) and os.path.exists(calendar_path)
+    version = int(max(os.path.getmtime(dashboard_path), os.path.getmtime(calendar_path))) if has_app_screenshots else 0
+    return {'has_app_screenshots': has_app_screenshots, 'screenshots_version': version}
+
+
+def home(request):
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+    return render(request, 'brand_dna/home.html', _screenshots_context())
+
+
+def new_analysis(request):
+    if not request.user.is_authenticated:
+        return redirect('login')
+    return render(request, 'brand_dna/new_analysis.html', _screenshots_context())
 
 
 def favicon(request):
@@ -72,13 +85,13 @@ def terms_of_service(request):
 @login_required
 def analyze_submit(request):
     if request.method != 'POST':
-        return redirect('landing')
+        return redirect('new_analysis')
 
     from core.brand_dna.rate_limits import can_create_calendar, get_user_plan
     allowed, remaining = can_create_calendar(request.user)
     if not allowed:
         plan = get_user_plan(request.user)
-        return render(request, 'brand_dna/landing.html', {
+        return render(request, 'brand_dna/new_analysis.html', {
             'error': f'Límite alcanzado: ya generaste el máximo de {plan.max_calendars_per_week} calendarios de tu plan. Contacta soporte para ampliar tu acceso.',
         })
 
@@ -88,13 +101,13 @@ def analyze_submit(request):
     business_name = request.POST.get('business_name', '').strip()
 
     if not business_name or not business_description:
-        return render(request, 'brand_dna/landing.html', {
+        return render(request, 'brand_dna/new_analysis.html', {
             'error': 'Ingresa el nombre y la descripción de tu negocio.',
         })
 
     prod_files = request.FILES.getlist('product_images')
     if len(prod_files) > 7:
-        return render(request, 'brand_dna/landing.html', {
+        return render(request, 'brand_dna/new_analysis.html', {
             'error': f'Subiste {len(prod_files)} fotos de producto — el máximo es 7. Quita algunas e intenta de nuevo.',
         })
 
@@ -111,7 +124,7 @@ def analyze_submit(request):
         logo_file = request.FILES['logo']
         logo_bytes = logo_file.read()
         if not _validate_image_bytes(logo_bytes):
-            return render(request, 'brand_dna/landing.html', {'error': 'El logo no es una imagen válida.'})
+            return render(request, 'brand_dna/new_analysis.html', {'error': 'El logo no es una imagen válida.'})
         ext = _safe_extension(logo_file.name)
         logo_path = f'uploads/logo_{job.id}.{ext}'
         save_upload(logo_bytes, logo_path)

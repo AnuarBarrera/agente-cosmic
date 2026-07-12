@@ -72,26 +72,7 @@
     {% endif %}
   </nav>
 
-  <div class="hero">
-    <h1>Agente Cosmic</h1>
-    <p>Cuéntanos de tu negocio — en minutos tienes 7 días de contenido listo para publicar: imágenes profesionales y textos listos para copiar y publicar.</p>
-    <div class="example-card">
-      <img src="https://storage.googleapis.com/agente-cosmic-assets/posts/28e4fcad-86ba-43e1-acc8-a3880a0f9436-day1.png" alt="Ejemplo de post generado por Agente Cosmic" loading="lazy">
-      <div class="example-label">☝️ Así se ve un post real generado por Agente Cosmic</div>
-    </div>
-    {% if has_app_screenshots %}
-    <div class="app-gallery">
-      <figure>
-        <img src="{% static 'brand_dna/img/screenshots/dashboard.png' %}" alt="Panel de Agente Cosmic" loading="lazy">
-        <figcaption>Tu panel — todos tus calendarios en un solo lugar</figcaption>
-      </figure>
-      <figure>
-        <img src="{% static 'brand_dna/img/screenshots/calendar.png' %}" alt="Calendario de contenido de Agente Cosmic" loading="lazy">
-        <figcaption>Tu calendario de 7 días, listo para revisar y publicar</figcaption>
-      </figure>
-    </div>
-    {% endif %}
-  </div>
+  {% include 'brand_dna/_marketing_hero.html' %}
 
   {% if error %}
   <div style="background:#3a1a1a;border:1px solid #c0392b;color:#e74c3c;padding:16px 20px;border-radius:10px;margin-bottom:20px;max-width:600px;margin-left:auto;margin-right:auto;">

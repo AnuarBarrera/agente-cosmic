@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/svg+xml" href="{% url 'favicon' %}">
+  <title>Agente Cosmic — ADN de Marca + Contenido Automático</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #f0f0f0; min-height: 100vh; }
+    .hero { text-align: center; padding: 60px 20px 40px; }
+    .hero h1 { font-size: 2.5rem; color: #e94560; margin-bottom: 12px; }
+    .hero p { font-size: 1.1rem; color: #aaa; max-width: 600px; margin: 0 auto 32px; }
+    .example-card { max-width: 340px; margin: 0 auto 40px; }
+    .example-card img { width: 100%; border-radius: 12px; box-shadow: 0 8px 32px rgba(233,69,96,0.25); display: block; }
+    .example-label { font-size: 0.85rem; color: #888; margin-top: 12px; }
+    .app-gallery { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; max-width: 800px; margin: 0 auto 40px; }
+    .app-gallery figure { max-width: 360px; margin: 0; }
+    .app-gallery img { width: 100%; border-radius: 10px; border: 1px solid #2a2a4a; display: block; }
+    .app-gallery figcaption { font-size: 0.8rem; color: #888; margin-top: 8px; }
+    .features { display: flex; justify-content: center; gap: 32px; padding: 40px 20px; flex-wrap: wrap; }
+    .feature { text-align: center; max-width: 160px; }
+    .feature .icon { font-size: 2rem; margin-bottom: 8px; }
+    .feature p { font-size: 0.85rem; color: #aaa; }
+    .l-nav { background:#1a1a2e; padding:14px 32px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #2a2a4a; }
+    .l-nav-brand { font-size:1.2rem; font-weight:700; color:#e94560; text-decoration:none; }
+    .l-nav-actions { display:flex; gap:16px; align-items:center; font-size:0.9rem; }
+    .l-nav-actions a { text-decoration:none; }
+    .l-nav-actions .link-login { color:#aaa; }
+    .l-nav-actions .link-register { color:#e94560; font-weight:600; }
+    .cta-final { text-align: center; padding: 20px 20px 70px; }
+    .cta-final .btn { display: inline-block; padding: 16px 36px; background: #e94560; color: #fff; border-radius: 8px; font-size: 1.05rem; font-weight: 600; text-decoration: none; }
+    .cta-final .btn:hover { background: #c73652; }
+    .cta-final .secondary { display: block; margin-top: 14px; color: #aaa; font-size: 0.85rem; }
+    .cta-final .secondary a { color: #e94560; text-decoration: none; }
+    footer { text-align: center; padding: 24px 20px 40px; font-size: 0.8rem; color: #666; }
+    footer a { color: #888; text-decoration: none; }
+    footer a:hover { color: #e94560; }
+    @media (max-width: 640px) {
+      .l-nav { padding: 10px 16px; flex-wrap: wrap; gap: 6px; }
+      .l-nav-actions { font-size: 0.82rem; gap: 10px; }
+    }
+  </style>
+{% include 'brand_dna/_ga4.html' %}
+</head>
+<body>
+  <nav class="l-nav">
+    <a href="{% url 'landing' %}" class="l-nav-brand">Agente Cosmic</a>
+    <div class="l-nav-actions">
+      <a href="{% url 'login' %}" class="link-login">Iniciar sesión</a>
+      <a href="{% url 'register' %}" class="link-register">Regístrate gratis</a>
+    </div>
+  </nav>
+
+  {% include 'brand_dna/_marketing_hero.html' %}
+
+  <div class="features">
+    <div class="feature"><div class="icon">🔍</div><p>Analisis de marca con IA</p></div>
+    <div class="feature"><div class="icon">🎨</div><p>Extraccion de colores y tono</p></div>
+    <div class="feature"><div class="icon">🖼️</div><p>Imagenes con Imagen 3 + Art Director</p></div>
+    <div class="feature"><div class="icon">📅</div><p>7 dias de contenido generado por Gemini</p></div>
+    <div class="feature"><div class="icon">📬</div><p>Un post por día directo a tu correo</p></div>
+  </div>
+
+  <div class="cta-final">
+    <a href="{% url 'register' %}" class="btn" onclick="if (typeof gtag === 'function') gtag('event', 'register_cta_click', { event_category: 'onboarding' });">Regístrate gratis</a>
+    <span class="secondary">¿Ya tienes cuenta? <a href="{% url 'login' %}">Inicia sesión</a></span>
+  </div>
+
+  <footer>
+    <a href="{% url 'privacy_policy' %}">Privacidad</a> · <a href="{% url 'terms_of_service' %}">Términos</a>
+  </footer>
+</body>
+</html>

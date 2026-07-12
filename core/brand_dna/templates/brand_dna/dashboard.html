@@ -89,7 +89,7 @@
     {% endif %}
 
     {% if used_total < max_calendars %}
-    {% if used_total > 0 %}<a href="{% url 'landing' %}" class="btn-new">+ Nuevo análisis</a>{% endif %}
+    {% if used_total > 0 %}<a href="{% url 'new_analysis' %}" class="btn-new">+ Nuevo análisis</a>{% endif %}
     <div style="display:inline-flex;align-items:center;gap:8px;padding:8px 16px;background:#1a1a2e;border-radius:8px;margin-bottom:24px;font-size:0.82rem;color:#aaa;margin-left:12px;">
       📅 Calendarios: <strong style="color:#f0f0f0;">{{ used_total }}/{{ max_calendars }}</strong>
     </div>
@@ -152,7 +152,7 @@
     {% else %}
       <div class="empty">
         <p>Aún no tienes análisis. ¡Empieza con la URL de tu negocio!</p>
-        <a href="{% url 'landing' %}" class="btn-new">Analizar mi marca</a>
+        <a href="{% url 'new_analysis' %}" class="btn-new">Analizar mi marca</a>
       </div>
     {% endif %}
   </div>

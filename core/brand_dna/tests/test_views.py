@@ -34,16 +34,33 @@ def user(django_user_model, free_plan):
     return u
 
 
-def test_landing_page_redirects_to_login():
+def test_home_page_shows_marketing_for_anonymous_visitor():
     c = Client()
     response = c.get('/')
-    assert response.status_code == 302
+    assert response.status_code == 200
+    assert b'Reg\xc3\xadstrate gratis' in response.content
 
 
-def test_landing_page_without_screenshots_hides_gallery(user):
+def test_home_page_redirects_authenticated_users_to_dashboard(user):
     c = Client()
     c.force_login(user)
     response = c.get('/')
+    assert response.status_code == 302
+    assert response.url == '/dashboard/'
+
+
+def test_new_analysis_requires_login():
+    c = Client()
+    response = c.get('/nuevo-analisis/')
+    assert response.status_code == 302
+    assert '/auth/login/' in response.url
+
+
+def test_new_analysis_without_screenshots_hides_gallery(user):
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views._screenshots_context', return_value={'has_app_screenshots': False, 'screenshots_version': 0}):
+        response = c.get('/nuevo-analisis/')
     assert response.status_code == 200
     assert response.context['has_app_screenshots'] is False
     assert b'screenshots/dashboard.png' not in response.content

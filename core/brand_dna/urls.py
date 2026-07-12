@@ -2,7 +2,8 @@ from django.urls import path
 from . import views, auth_views
 
 urlpatterns = [
-    path('', views.landing, name='landing'),
+    path('', views.home, name='landing'),
+    path('nuevo-analisis/', views.new_analysis, name='new_analysis'),
     path('favicon.svg', views.favicon, name='favicon'),
     path('privacidad/', views.privacy_policy, name='privacy_policy'),
     path('terminos/', views.terms_of_service, name='terms_of_service'),
