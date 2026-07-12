@@ -2043,6 +2043,16 @@ Nota: detección de plausibilidad física es un problema más difícil para un
   todos. Revisar logs de "Background QC REJECTED" si el problema persiste
   para calibrar el prompt.
 
+ACTUALIZACIÓN 2026-07-12 — extensión del mismo auditor: caso real, una
+  mascota compuesta por BGSWAP en pose de salto (paws en el aire) sobre un
+  fondo de piso reflejante generado como si estuviera parada/quieta — sin
+  sombra de contacto, se veía flotando. Se agregó `has_unrealistic_grounding`
+  al mismo JSON del auditor (mismo patrón que `has_malformed_object`, sin
+  llamada extra a Gemini): detecta cuando el sujeto principal no tiene punto
+  de contacto/sombra consistente con la superficie del fondo, o cuando una
+  pose dinámica (saltando, corriendo) fue compuesta sobre un fondo que
+  implica que está parado. Test nuevo. `image_generator.py::_validate_background`.
+
 =================================================================
 HALLAZGO 47 — Encuesta de renovación (opt-in) genera fricción; usuarios
   prefieren continuidad automática con opt-out
@@ -2348,3 +2358,46 @@ Acción recomendada: revisar la tabla de `smart_scheduler.py` — probablemente
 
 Severidad: Baja (no rompe nada, reduce la percepción de personalización)
 Prioridad: P2
+
+=================================================================
+CAMBIOS APLICADOS — 2026-07-12 (segunda mitad) — pulido pre-deploy
+=================================================================
+Ronda de correcciones tras probar en vivo lo de la primera mitad del día
+(GA4, privacidad/términos, landing pública, flujo de posts simplificado —
+ver secciones anteriores). Todo commiteado, pendiente el mismo deploy a
+producción ya documentado.
+
+- Auditor de imágenes detecta sujetos flotando/sin contacto con el suelo
+  (ver H46 arriba, extensión del mismo auditor).
+- Botón "Descargar imagen" ahora descarga de verdad — el bucket de GCS no
+  manda headers CORS, así que el primer intento (fetch()+blob en el navegador)
+  fallaba en silencio. Fix: endpoint del backend `/api/post/<id>/download/`
+  que proxea la imagen con `Content-Disposition: attachment` (mismo origen,
+  sin CORS). Verificado con descarga real vía Playwright.
+- Copy del estado vacío del dashboard actualizado (ya no pide URL).
+- Jerarquía visual en calendar_review.html: la instrucción principal más
+  prominente, el tip de "programa en Meta" como nota visual aparte.
+- Formulario de nuevo análisis reordenado: formulario primero, ejemplo de
+  post al final (petición explícita de un tester), sin los 5 íconos de
+  features en esa página (se quedan en la landing pública).
+- `capture_landing_screenshots` corre `collectstatic` automáticamente al
+  terminar — sin esto, nginx sigue sirviendo las capturas viejas desde
+  `staticfiles/` (directorio separado del que escribe el comando) hasta el
+  próximo restart del contenedor. Causó confusión real: Anuar corrió el
+  comando pero seguía viendo las imágenes de antes.
+- Capturas de la landing en WEBP en vez de PNG (calidad 82, mismo estándar
+  que la compresión client-side del formulario) — reducción real de ~85%
+  (calendar 1.68MB→248KB, dashboard 44.7KB→19.6KB).
+- Privacidad/términos: "operado por Tu Web MX" → "Anuar Barrera" (el dominio
+  es anuarbarrera.dev, mezclar marcas generaba confusión legal). Correo de
+  contacto: `contacto.neia@gmail.com` (personal) → `contacto@anuarbarrera.dev`.
+
+Nota operativa (no es un hallazgo de producto): producción
+  (`cosmic.anuarbarrera.dev`) NO tiene ningún commit de esta sesión
+  desplegado todavía — verificado en vivo, `/` en prod sigue redirigiendo a
+  login (comportamiento de antes del fix de landing pública). Cualquier
+  prueba debe hacerse contra `deploy.anuarbarrera.dev` (preview de este
+  servidor) hasta que se haga el deploy real.
+
+Suite: 107 passed en `core.brand_dna` (mismo único fallo preexistente sin
+  relación). Todo commiteado y pusheado.
