@@ -12,11 +12,14 @@ _OUTPUT_DIR = os.path.join(
 )
 
 
+_WEBP_QUALITY = 82  # mismo estandar que la compresion client-side (project_image_optimization)
+
+
 class Command(BaseCommand):
     help = (
         'Captura screenshots reales de la app (dashboard + calendario) con una cuenta demo, '
         'via Playwright, para usarlos como prueba visual en la landing. No renderiza en vivo — '
-        'genera PNGs estaticos que se sirven como cualquier otro asset.'
+        'genera WEBPs estaticos (carga rapida) que se sirven como cualquier otro asset.'
     )
 
     def add_arguments(self, parser):
@@ -80,10 +83,16 @@ class Command(BaseCommand):
             page = browser.new_page(viewport={'width': 1280, 'height': 900})
             try:
                 self._login(page, base_url, email, password)
-                self._capture(page, f'{base_url}/dashboard/', 'dashboard.png')
-                self._capture(page, f'{base_url}/calendar/{job.id}/', 'calendar.png')
+                self._capture(page, f'{base_url}/dashboard/', 'dashboard.webp')
+                self._capture(page, f'{base_url}/calendar/{job.id}/', 'calendar.webp')
             finally:
                 browser.close()
+
+        # Limpia PNGs de versiones anteriores del comando para no dejar archivos huerfanos.
+        for stale in ('dashboard.png', 'calendar.png'):
+            stale_path = os.path.join(_OUTPUT_DIR, stale)
+            if os.path.exists(stale_path):
+                os.remove(stale_path)
 
         self.stdout.write(self.style.SUCCESS(f'Screenshots guardados en {_OUTPUT_DIR}'))
 
@@ -131,6 +140,10 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(
                 f'  {filename}: alguna imagen no termino de cargar a tiempo, la captura puede tener huecos'
             ))
+        png_bytes = page.screenshot(full_page=True)
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(png_bytes)).convert('RGB')
         out_path = os.path.join(_OUTPUT_DIR, filename)
-        page.screenshot(path=out_path, full_page=True)
+        img.save(out_path, 'WEBP', quality=_WEBP_QUALITY)
         self.stdout.write(f'  {filename} <- {url}')

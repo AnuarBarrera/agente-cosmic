@@ -63,7 +63,7 @@ def test_new_analysis_without_screenshots_hides_gallery(user):
         response = c.get('/nuevo-analisis/')
     assert response.status_code == 200
     assert response.context['has_app_screenshots'] is False
-    assert b'screenshots/dashboard.png' not in response.content
+    assert b'screenshots/dashboard.webp' not in response.content
 
 
 def test_analyze_submit_creates_job(user):

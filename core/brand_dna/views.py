@@ -50,8 +50,8 @@ def _screenshots_context() -> dict:
     screenshots_dir = os.path.join(
         settings.BASE_DIR, 'core', 'brand_dna', 'static', 'brand_dna', 'img', 'screenshots',
     )
-    dashboard_path = os.path.join(screenshots_dir, 'dashboard.png')
-    calendar_path = os.path.join(screenshots_dir, 'calendar.png')
+    dashboard_path = os.path.join(screenshots_dir, 'dashboard.webp')
+    calendar_path = os.path.join(screenshots_dir, 'calendar.webp')
     has_app_screenshots = os.path.exists(dashboard_path) and os.path.exists(calendar_path)
     version = int(max(os.path.getmtime(dashboard_path), os.path.getmtime(calendar_path))) if has_app_screenshots else 0
     return {'has_app_screenshots': has_app_screenshots, 'screenshots_version': version}
