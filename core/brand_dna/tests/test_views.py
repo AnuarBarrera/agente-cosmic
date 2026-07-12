@@ -255,6 +255,36 @@ def test_mark_published_is_idempotent(client, user, job_with_calendar):
     assert post.published_at == first_timestamp
 
 
+def test_mark_downloaded_sets_timestamp(client, user, job_with_calendar):
+    post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
+    client.force_login(user)
+    response = client.post(
+        f'/api/post/{post.id}/action/',
+        data=json.dumps({'action': 'mark_downloaded'}),
+        content_type='application/json',
+    )
+    assert response.status_code == 200
+    post.refresh_from_db()
+    assert post.downloaded_at is not None
+
+
+def test_calendar_feedback_api_no_rating_is_valid(client, user, job_with_calendar):
+    calendar = job_with_calendar.brand_dna.calendar
+    client.force_login(user)
+    with patch('core.content_pipeline.tasks.generate_next_week') as mock_gen:
+        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
+            'comment': 'Estuvo bien',
+            'continue_decision': 'no',
+        })
+    assert response.status_code == 200
+    data = response.json()
+    assert data['continue_decision'] == 'no'
+
+    feedback = calendar.feedback_entries.get(week_number=1)
+    assert feedback.rating is None
+    assert feedback.comment == 'Estuvo bien'
+
+
 def test_calendar_review_exposes_pending_feedback(client, user, job_with_calendar):
     client.force_login(user)
     response = client.get(f'/calendar/{job_with_calendar.id}/')

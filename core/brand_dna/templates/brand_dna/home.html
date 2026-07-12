@@ -18,6 +18,7 @@
     .app-gallery figure { max-width: 360px; margin: 0; }
     .app-gallery img { width: 100%; border-radius: 10px; border: 1px solid #2a2a4a; display: block; }
     .app-gallery figcaption { font-size: 0.8rem; color: #888; margin-top: 8px; }
+    .gallery-caption-top { font-size: 0.8rem; color: #888; margin-bottom: 8px; display: block; }
     .features { display: flex; justify-content: center; gap: 32px; padding: 40px 20px; flex-wrap: wrap; }
     .feature { text-align: center; max-width: 160px; }
     .feature .icon { font-size: 2rem; margin-bottom: 8px; }
@@ -52,14 +53,14 @@
     </div>
   </nav>
 
-  {% include 'brand_dna/_marketing_hero.html' %}
+  {% include 'brand_dna/_marketing_hero.html' with show_gallery=True %}
 
   <div class="features">
     <div class="feature"><div class="icon">🔍</div><p>Analisis de marca con IA</p></div>
     <div class="feature"><div class="icon">🎨</div><p>Extraccion de colores y tono</p></div>
     <div class="feature"><div class="icon">🖼️</div><p>Imagenes con Imagen 3 + Art Director</p></div>
     <div class="feature"><div class="icon">📅</div><p>7 dias de contenido generado por Gemini</p></div>
-    <div class="feature"><div class="icon">📬</div><p>Un post por día directo a tu correo</p></div>
+    <div class="feature"><div class="icon">📬</div><p>Recordatorio diario para que no se te olvide publicar</p></div>
   </div>
 
   <div class="cta-final">

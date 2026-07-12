@@ -74,25 +74,14 @@
       flex: 1; min-width: 70px; padding: 7px 8px; border: none; border-radius: 8px;
       font-size: 0.78rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s;
     }
-    .btn-approve { background: #1a3a2a; color: #4caf7d; }
-    .btn-approve:hover { background: #2a4a3a; }
+    .btn-download { background: #1a3a2a; color: #4caf7d; }
+    .btn-download:hover { background: #2a4a3a; }
     .btn-edit { background: #1a2a3a; color: #4a9eff; }
     .btn-edit:hover { background: #2a3a4a; }
     .btn-regen { background: #3a3a1a; color: #f0c040; }
     .btn-regen:hover { background: #4a4a2a; }
     .btn-save { background: #e94560; color: #fff; display: none; }
     .btn-save:hover { background: #c73652; }
-    .publish-row { margin-top: 10px; }
-    .btn-published { background: #1a2a3a; color: #4a9eff; width: 100%; }
-    .btn-published:hover { background: #2a3a4a; }
-    .published-status { margin-top: 10px; color: #4caf7d; font-size: 0.78rem; font-weight: 600; }
-    .post-card.approved .btn-approve,
-    .post-card.approved .btn-edit,
-    .post-card.approved .btn-regen { display: none; }
-    .post-card.approved .actions::after {
-      content: '✓ Aprobado — sin cambios pendientes';
-      font-size: 0.78rem; color: #4caf7d; font-weight: 600;
-    }
     .feedback-area { margin-top: 10px; display: none; }
     .feedback-area textarea {
       width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #333;
@@ -117,25 +106,7 @@
       box-shadow: 0 4px 16px rgba(233,69,96,0.4); z-index: 99;
     }
     #backToTop.visible { display: flex; }
-    .modal-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
-      display: none; align-items: center; justify-content: center;
-      z-index: 300; padding: 20px;
-    }
-    .modal-overlay.show { display: flex; }
-    .modal-box { background: #1a1a2e; border-radius: 16px; max-width: 420px; width: 100%; padding: 28px; text-align: center; }
-    .modal-box img { width: 100%; border-radius: 10px; margin-bottom: 16px; aspect-ratio: 1; object-fit: cover; }
-    .modal-box h2 { font-size: 1.2rem; margin-bottom: 6px; }
-    .modal-box p { color: #aaa; font-size: 0.85rem; margin-bottom: 20px; }
-    .modal-actions { display: flex; gap: 10px; margin-bottom: 12px; }
-    .modal-actions a, .modal-actions button {
-      flex: 1; padding: 10px; border-radius: 8px; border: none; font-size: 0.85rem;
-      font-weight: 600; cursor: pointer; text-decoration: none; display: block;
-    }
-    .modal-btn-download { background: #e94560; color: #fff; }
-    .modal-btn-copy { background: #1a2a3a; color: #4a9eff; }
-    .modal-hint { font-size: 0.75rem; color: #666; margin-bottom: 16px; }
-    .modal-close { background: transparent; color: #888; border: 1px solid #333; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 0.8rem; }
+
   </style>
 {% include 'brand_dna/_ga4.html' %}
 </head>
@@ -153,12 +124,13 @@
 <div class="container">
   <h1>Este es tu calendario de contenido</h1>
   <p class="subtitle">
-    Aprueba, edita o pide cambios en cada post antes de que se envíe. ¿Quieres ver el análisis de tu marca? Da click <a href="{% url 'results' job.id %}" style="color:#e94560;font-weight:600;">Aquí</a>.
+    Edita la descripción o pide cambios en cada post, y descarga la imagen cuando estés listo para publicar. ¿Quieres ver el análisis de tu marca? Da click <a href="{% url 'results' job.id %}" style="color:#e94560;font-weight:600;">Aquí</a>.
+  </p>
+  <p class="subtitle" style="margin-top:-20px;">
+    💡 Recuerda que en tu red social de preferencia (Facebook, Instagram, LinkedIn, TikTok) hay una opción para programar tus publicaciones. Además, te llegará un correo cada día para que no se te olvide publicar.
   </p>
 
   <div class="legend">
-    <div class="legend-item"><div class="dot dot-pending"></div> Sin revisar</div>
-    <div class="legend-item"><div class="dot dot-approved"></div> Aprobado</div>
     <div class="legend-item"><div class="dot dot-edited"></div> Editado</div>
     <div class="legend-item"><div class="dot dot-change"></div> Cambio solicitado</div>
   </div>
@@ -184,30 +156,10 @@
   {% if pending_feedback %}
   <div id="feedback-banner" style="background:#1a1a2e;border:1px solid #e94560;border-radius:12px;padding:20px;margin-bottom:24px;">
     <h2 style="font-size:1.1rem;margin-bottom:4px;">¡Tu semana terminó! 🎉</h2>
-    <p style="color:#aaa;font-size:0.85rem;margin-bottom:16px;">Cuéntanos cómo te fue y decide si quieres generar tu nuevo contenido.</p>
-
-    <div style="margin-bottom:12px;">
-      <div style="font-size:0.85rem;color:#ccc;margin-bottom:6px;">¿Cómo calificarías tu contenido?</div>
-      <div id="star-rating" style="display:flex;gap:8px;font-size:1.6rem;cursor:pointer;">
-        <span class="star" data-value="1">☆</span>
-        <span class="star" data-value="2">☆</span>
-        <span class="star" data-value="3">☆</span>
-        <span class="star" data-value="4">☆</span>
-        <span class="star" data-value="5">☆</span>
-      </div>
-    </div>
+    <p style="color:#aaa;font-size:0.85rem;margin-bottom:16px;">Genera tu contenido nuevo para la próxima semana. Tardamos unos minutos — te avisamos por correo cuando esté listo.</p>
 
     <div style="margin-bottom:16px;">
-      <textarea id="feedback-comment" placeholder="Comentarios (opcional)" style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:#0d0d1a;color:#f0f0f0;font-size:0.85rem;resize:vertical;min-height:60px;"></textarea>
-    </div>
-
-    <div style="display:flex;gap:12px;flex-wrap:wrap;">
-      <button id="feedback-yes-btn" onclick="showImageChoice()" style="flex:1;min-width:200px;padding:12px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Sí, genera mi contenido</button>
-      <button onclick="submitFeedback('no', this)" style="flex:1;min-width:150px;padding:12px;background:transparent;color:#aaa;border:1px solid #333;border-radius:8px;font-weight:600;cursor:pointer;">No, por ahora</button>
-    </div>
-
-    <div id="image-choice-section" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid #2a2a4a;">
-      <div style="font-size:0.85rem;color:#ccc;margin-bottom:10px;">Imágenes de producto para tu próxima semana</div>
+      <div style="font-size:0.85rem;color:#ccc;margin-bottom:10px;">Imágenes de producto para tu próxima semana <span style="color:#666;font-weight:400;">(opcional)</span></div>
 
       <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;margin-bottom:8px;cursor:pointer;">
         <input type="radio" name="image_choice" value="reuse" checked onchange="toggleImageMode()"> Reutilizar mis imágenes
@@ -231,9 +183,9 @@
         <input type="file" id="product-images-input" multiple accept="image/jpeg,image/png" style="font-size:0.82rem;color:#ccc;">
         <p style="font-size:0.75rem;color:#666;margin-top:6px;">Hasta 7 imágenes.</p>
       </div>
-
-      <button onclick="submitFeedback('yes', this)" style="width:100%;margin-top:16px;padding:12px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Generar mi contenido →</button>
     </div>
+
+    <button onclick="submitFeedback('yes', this)" style="width:100%;padding:14px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:1rem;cursor:pointer;">Generar nueva semana →</button>
   </div>
   {% endif %}
 
@@ -263,27 +215,23 @@
         {% if post.hashtags %}
         <div class="post-hashtags" id="hashtags-{{ post.id }}">{{ post.hashtags|join:" " }}</div>
         {% endif %}
+        {% if post.user_status == 'edited' or post.user_status == 'change_requested' %}
         <div class="post-status status-{{ post.user_status }}" id="status-{{ post.id }}">
-          {% if post.user_status == 'approved' %}✓ Aprobado
-          {% elif post.user_status == 'edited' %}✏ Editado
-          {% elif post.user_status == 'change_requested' %}↺ Cambio solicitado
-          {% else %}○ Sin revisar{% endif %}
+          {% if post.user_status == 'edited' %}✏ Editado{% else %}↺ Cambio solicitado{% endif %}
         </div>
+        {% endif %}
         <div class="actions">
-          <button class="btn-action btn-approve" onclick="approvePost('{{ post.id }}')">✓ Aprobar</button>
-          <button class="btn-action btn-edit" onclick="startEdit('{{ post.id }}')">✏ Edita la descripción</button>
-          <button class="btn-action btn-regen" onclick="toggleRegen('{{ post.id }}')">↺ Regenera la imagen</button>
+          <button class="btn-action btn-download" onclick="downloadImage('{{ post.id }}')">⬇ Descargar imagen</button>
+          <button class="btn-action btn-edit" id="edit-btn-{{ post.id }}" onclick="startEdit('{{ post.id }}')" style="{% if post.downloaded_at %}display:none;{% endif %}">✏ Edita la descripción</button>
+          <button class="btn-action btn-regen" id="regen-btn-{{ post.id }}" onclick="toggleRegen('{{ post.id }}')" style="{% if post.downloaded_at %}display:none;{% endif %}">↺ Regenera la imagen</button>
           <button class="btn-action btn-save" id="save-{{ post.id }}" onclick="saveEdit('{{ post.id }}')">Guardar</button>
         </div>
         <div class="feedback-area" id="regen-{{ post.id }}">
           <textarea id="note-{{ post.id }}" placeholder="Describe el cambio que quieres..."></textarea>
           <button class="btn-send-regen" onclick="requestRegen('{{ post.id }}')">Regenerar con IA ✨</button>
         </div>
-        <div class="publish-row" id="publish-row-{{ post.id }}" style="{% if post.published_at %}display:none;{% endif %}">
-          <button class="btn-action btn-published" onclick="markPublished('{{ post.id }}')">📤 Ya publiqué esto</button>
-        </div>
-        <div class="published-status" id="published-status-{{ post.id }}" style="{% if not post.published_at %}display:none;{% endif %}">
-          ✓ Publicado {% if post.published_at %}{{ post.published_at|date:"D d M, H:i" }}{% endif %}
+        <div class="downloaded-note" id="downloaded-note-{{ post.id }}" style="{% if not post.downloaded_at %}display:none;{% endif %}margin-top:10px;color:#4caf7d;font-size:0.78rem;font-weight:600;">
+          ✓ Imagen descargada
         </div>
       </div>
     </div>
@@ -296,20 +244,7 @@
 <div class="toast" id="toast"></div>
 <button id="backToTop" title="Volver arriba">↑</button>
 
-<div class="modal-overlay" id="postReadyModal">
-  <div class="modal-box">
-    <img id="modalImg" src="" alt="Tu post" style="display:none;">
-    <h2>Tu post está listo 🎉</h2>
-    <p>Descárgalo y publícalo tú mismo en tus redes.</p>
-    <div class="modal-actions">
-      <a href="#" id="modalDownload" class="modal-btn-download" download target="_blank" rel="noopener"
-         onclick="if (typeof gtag === 'function') gtag('event', 'post_download_image', { event_category: 'calendar' });">⬇ Descargar imagen</a>
-      <button type="button" class="modal-btn-copy" onclick="copyModalText()">📋 Copiar texto</button>
-    </div>
-    <div class="modal-hint">Cuando lo publiques, marca "📤 Ya publiqué esto" en la tarjeta del post.</div>
-    <button type="button" class="modal-close" onclick="closePostReadyModal()">Cerrar</button>
-  </div>
-</div>
+
 
 <script>
   const CSRF = '{{ csrf_token }}';
@@ -359,69 +294,21 @@
     statusEl.textContent = label;
   }
 
-  async function approvePost(postId) {
-    const data = await postAction(postId, { action: 'approve' });
-    if (data.status === 'ok') {
-      setCardStatus(postId, 'approved', '✓ Aprobado');
-      showToast('Post aprobado ✓');
-      if (typeof gtag === 'function') gtag('event', 'post_approve', { event_category: 'calendar' });
-      showPostReadyModal(postId);
-    }
-  }
-
-  let _modalText = '';
-
-  function showPostReadyModal(postId) {
+  async function downloadImage(postId) {
     const card = document.getElementById('card-' + postId);
     const img = card.querySelector('.post-img img');
-    const captionEl = document.getElementById('caption-' + postId);
-    const hashtagsEl = document.getElementById('hashtags-' + postId);
-
-    const modalImg = document.getElementById('modalImg');
     if (img) {
-      modalImg.src = img.src;
-      modalImg.style.display = 'block';
-    } else {
-      modalImg.style.display = 'none';
+      window.open(img.src, '_blank');
+      if (typeof gtag === 'function') gtag('event', 'post_download_image', { event_category: 'calendar' });
     }
-
-    const downloadBtn = document.getElementById('modalDownload');
-    if (img) {
-      downloadBtn.href = img.src;
-      downloadBtn.style.display = 'block';
-    } else {
-      downloadBtn.style.display = 'none';
-    }
-
-    const caption = captionEl ? captionEl.innerText.trim() : '';
-    const hashtags = hashtagsEl ? hashtagsEl.innerText.trim() : '';
-    _modalText = hashtags ? `${caption}\n\n${hashtags}` : caption;
-
-    document.getElementById('postReadyModal').classList.add('show');
-  }
-
-  function closePostReadyModal() {
-    document.getElementById('postReadyModal').classList.remove('show');
-  }
-
-  function copyModalText() {
-    navigator.clipboard.writeText(_modalText).then(function() {
-      showToast('Texto copiado ✓');
-      if (typeof gtag === 'function') gtag('event', 'post_copy_text', { event_category: 'calendar' });
-    }).catch(function() {
-      showToast('No se pudo copiar el texto', '#e74c3c');
-    });
-  }
-
-  async function markPublished(postId) {
-    const data = await postAction(postId, { action: 'mark_published' });
+    const data = await postAction(postId, { action: 'mark_downloaded' });
     if (data.status === 'ok') {
-      document.getElementById('publish-row-' + postId).style.display = 'none';
-      const statusEl = document.getElementById('published-status-' + postId);
-      statusEl.style.display = 'block';
-      const date = new Date(data.published_at);
-      statusEl.textContent = '✓ Publicado ' + date.toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short' }) + ', ' + date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
-      showToast('¡Marcado como publicado! 🎉');
+      const editBtn = document.getElementById('edit-btn-' + postId);
+      const regenBtn = document.getElementById('regen-btn-' + postId);
+      if (editBtn) editBtn.style.display = 'none';
+      if (regenBtn) regenBtn.style.display = 'none';
+      document.getElementById('downloaded-note-' + postId).style.display = 'block';
+      showToast('Imagen descargada ✓');
     }
   }
 
@@ -526,22 +413,7 @@
     }
   }
 
-  let selectedRating = 0;
 
-  document.querySelectorAll('#star-rating .star').forEach(star => {
-    star.addEventListener('click', () => {
-      selectedRating = parseInt(star.dataset.value);
-      document.querySelectorAll('#star-rating .star').forEach(s => {
-        s.textContent = parseInt(s.dataset.value) <= selectedRating ? '★' : '☆';
-      });
-    });
-  });
-
-  function showImageChoice() {
-    if (!selectedRating) { showToast('Selecciona una calificación primero', '#f0c040'); return; }
-    document.getElementById('image-choice-section').style.display = 'block';
-    document.getElementById('feedback-yes-btn').style.display = 'none';
-  }
 
   function toggleImageMode() {
     const mode = document.querySelector('input[name="image_choice"]:checked').value;
@@ -567,25 +439,19 @@
   });
 
   async function submitFeedback(decision, btn) {
-    if (!selectedRating) { showToast('Selecciona una calificación primero', '#f0c040'); return; }
-
     const formData = new FormData();
-    formData.append('rating', selectedRating);
-    formData.append('comment', document.getElementById('feedback-comment').value);
     formData.append('continue_decision', decision);
 
-    if (decision === 'yes') {
-      const mode = document.querySelector('input[name="image_choice"]:checked').value;
-      formData.append('image_choice', mode);
-      if (mode === 'reuse') {
-        document.querySelectorAll('.gallery-checkbox:checked').forEach(cb => {
-          formData.append('selected_images', cb.value);
-        });
-      } else if (mode === 'new') {
-        const files = document.getElementById('product-images-input').files;
-        for (let i = 0; i < Math.min(files.length, 7); i++) {
-          formData.append('product_images', files[i]);
-        }
+    const mode = document.querySelector('input[name="image_choice"]:checked').value;
+    formData.append('image_choice', mode);
+    if (mode === 'reuse') {
+      document.querySelectorAll('.gallery-checkbox:checked').forEach(cb => {
+        formData.append('selected_images', cb.value);
+      });
+    } else if (mode === 'new') {
+      const files = document.getElementById('product-images-input').files;
+      for (let i = 0; i < Math.min(files.length, 7); i++) {
+        formData.append('product_images', files[i]);
       }
     }
 
@@ -593,7 +459,7 @@
     const buttons = banner.querySelectorAll('button');
     buttons.forEach(b => b.disabled = true);
     const originalText = btn.textContent;
-    btn.textContent = decision === 'yes' ? 'Enviando...' : 'Enviando...';
+    btn.textContent = 'Generando...';
 
     try {
       const res = await fetch('/api/calendar/{{ job.id }}/feedback/', {
@@ -603,15 +469,10 @@
       });
       const data = await res.json();
       if (data.status === 'ok') {
-        if (data.continue_decision === 'yes') {
-          showToast('¡Gracias! Tu próxima semana está en camino 🚀');
-          banner.innerHTML = '<div style="color:#7ec8a4;font-size:0.9rem;line-height:1.6;">☕ <strong style="color:#a8e6c8;">Tu próxima semana se está generando.</strong> No hace falta que esperes aquí — te avisamos por correo en cuanto esté lista.</div>';
-          banner.style.border = '1px solid #2d6a4f';
-          banner.style.background = '#0d2218';
-        } else {
-          showToast('Gracias por tu feedback');
-          banner.remove();
-        }
+        showToast('¡Gracias! Tu próxima semana está en camino 🚀');
+        banner.innerHTML = '<div style="color:#7ec8a4;font-size:0.9rem;line-height:1.6;">☕ <strong style="color:#a8e6c8;">Tu próxima semana se está generando.</strong> No hace falta que esperes aquí — te avisamos por correo en cuanto esté lista.</div>';
+        banner.style.border = '1px solid #2d6a4f';
+        banner.style.background = '#0d2218';
       } else {
         showToast('Error al enviar feedback', '#e74c3c', 5000);
         buttons.forEach(b => b.disabled = false);

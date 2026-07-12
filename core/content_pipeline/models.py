@@ -38,6 +38,7 @@ class ContentPost(models.Model):
     scheduled_at = models.DateTimeField()
     sent_at = models.DateTimeField(null=True, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
+    downloaded_at = models.DateTimeField(null=True, blank=True)
 
     USER_STATUS_PENDING = 'pending'
     USER_STATUS_APPROVED = 'approved'

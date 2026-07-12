@@ -6,15 +6,15 @@
     <img src="https://storage.googleapis.com/agente-cosmic-assets/posts/28e4fcad-86ba-43e1-acc8-a3880a0f9436-day1.png" alt="Ejemplo de post generado por Agente Cosmic" loading="lazy">
     <div class="example-label">☝️ Así se ve un post real generado por Agente Cosmic</div>
   </div>
-  {% if has_app_screenshots %}
+  {% if show_gallery and has_app_screenshots %}
   <div class="app-gallery">
     <figure>
+      <figcaption class="gallery-caption-top">Tu panel — todos tus calendarios en un solo lugar</figcaption>
       <img src="{% static 'brand_dna/img/screenshots/dashboard.png' %}?v={{ screenshots_version }}" alt="Panel de Agente Cosmic" loading="lazy">
-      <figcaption>Tu panel — todos tus calendarios en un solo lugar</figcaption>
     </figure>
     <figure>
+      <figcaption class="gallery-caption-top">Tu calendario de 7 días, listo para revisar y publicar</figcaption>
       <img src="{% static 'brand_dna/img/screenshots/calendar.png' %}?v={{ screenshots_version }}" alt="Calendario de contenido de Agente Cosmic" loading="lazy">
-      <figcaption>Tu calendario de 7 días, listo para revisar y publicar</figcaption>
     </figure>
   </div>
   {% endif %}

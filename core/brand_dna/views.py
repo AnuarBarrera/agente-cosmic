@@ -338,6 +338,14 @@ def post_action_api(request, post_id):
             )
         return JsonResponse({'status': 'ok', 'published_at': post.published_at.isoformat()})
 
+    if action == 'mark_downloaded':
+        from django.utils import timezone
+        if not post.downloaded_at:
+            post.downloaded_at = timezone.now()
+            post.save(update_fields=['downloaded_at'])
+            POST_ACTIONS.labels(action='downloaded').inc()
+        return JsonResponse({'status': 'ok', 'downloaded_at': post.downloaded_at.isoformat()})
+
     if action == 'edit':
         if not value:
             return JsonResponse({'error': 'Caption vacío'}, status=400)
@@ -428,12 +436,15 @@ def calendar_feedback_api(request, job_id):
         WeeklyFeedback, calendar=calendar, continue_decision=WeeklyFeedback.CONTINUE_PENDING
     )
 
-    try:
-        rating = int(request.POST.get('rating'))
-    except (TypeError, ValueError):
-        rating = None
-    if rating is None or not (1 <= rating <= 5):
-        return JsonResponse({'error': 'Rating inválido'}, status=400)
+    rating_raw = request.POST.get('rating', '').strip()
+    rating = None
+    if rating_raw:
+        try:
+            rating = int(rating_raw)
+        except ValueError:
+            return JsonResponse({'error': 'Rating inválido'}, status=400)
+        if not (1 <= rating <= 5):
+            return JsonResponse({'error': 'Rating inválido'}, status=400)
 
     continue_decision = request.POST.get('continue_decision')
     if continue_decision not in (WeeklyFeedback.CONTINUE_YES, WeeklyFeedback.CONTINUE_NO):
