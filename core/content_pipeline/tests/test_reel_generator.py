@@ -1,17 +1,9 @@
-import io
 from unittest.mock import patch, MagicMock
 from django.test import override_settings
-from PIL import Image
-
-
-def _png_bytes(color=(30, 30, 60), size=(64, 64)) -> bytes:
-    buf = io.BytesIO()
-    Image.new('RGB', size, color).save(buf, format='PNG')
-    return buf.getvalue()
-
 
 from core.content_pipeline.generators.reel_generator import (
-    _escape_drawtext, _wrap_subtitle_text,
+    _escape_drawtext, _wrap_text, _hex_to_ffmpeg_color, _measure_text_width,
+    _build_hook_filter_parts, _build_cta_filter_parts,
 )
 
 
@@ -29,91 +21,82 @@ class TestEscapeDrawtext:
         assert _escape_drawtext('a\\b') == 'a\\\\b'
 
 
-class TestWrapSubtitleText:
+class TestWrapText:
     def test_returns_unchanged_when_short(self):
-        assert _wrap_subtitle_text('Hola mundo') == 'Hola mundo'
+        assert _wrap_text('Hola mundo') == 'Hola mundo'
 
     def test_wraps_long_text_into_two_lines(self):
         text = 'Tu negocio en linea en menos de 48 horas'
-        result = _wrap_subtitle_text(text, max_chars=20)
+        result = _wrap_text(text, max_chars=20)
         assert result == 'Tu negocio en linea\nen menos de 48 horas'
 
 
-class TestRenderTextOverlay:
-    def _make_mock_playwright(self, screenshot_bytes: bytes, overflow_values=None):
-        # page.evaluate() se llama 3 veces por intento: 'document.fonts.ready'
-        # y el reflow forzado ('document.body.offsetHeight') — ambos con valor
-        # ignorado — y la medicion scrollWidth-clientWidth (el que importa).
-        overflow_values = overflow_values or [0, 0]
-        evaluate_side_effect = []
-        for val in overflow_values:
-            evaluate_side_effect.append(None)  # document.fonts.ready
-            evaluate_side_effect.append(None)  # document.body.offsetHeight (reflow forzado)
-            evaluate_side_effect.append(val)   # scrollWidth - clientWidth
-        mock_page = MagicMock()
-        mock_page.screenshot.return_value = screenshot_bytes
-        mock_page.evaluate.side_effect = evaluate_side_effect
-        mock_browser = MagicMock()
-        mock_browser.new_page.return_value = mock_page
-        mock_pw_instance = MagicMock()
-        mock_pw_instance.chromium.launch.return_value = mock_browser
-        mock_pw_context = MagicMock()
-        mock_pw_context.__enter__.return_value = mock_pw_instance
-        mock_pw_context.__exit__.return_value = False
-        return mock_pw_context, mock_page
+class TestHexToFfmpegColor:
+    def test_converts_hash_prefix_to_0x(self):
+        assert _hex_to_ffmpeg_color('#002951') == '0x002951'
 
-    def test_returns_screenshot_bytes_for_hook_style(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        fake_png = _png_bytes()
-        mock_pw_context, mock_page = self._make_mock_playwright(fake_png)
-        with patch('core.content_pipeline.generators.reel_generator.sync_playwright', return_value=mock_pw_context):
-            result = gen._render_text_overlay('Descubre algo nuevo', 'nuevo', 'hook', ['#e94560'])
-        assert result == fake_png
-        mock_page.screenshot.assert_called_once_with(omit_background=True)
+    def test_handles_missing_hash(self):
+        assert _hex_to_ffmpeg_color('002951') == '0x002951'
 
-    def test_returns_screenshot_bytes_for_cta_style(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        fake_png = _png_bytes()
-        mock_pw_context, mock_page = self._make_mock_playwright(fake_png)
-        with patch('core.content_pipeline.generators.reel_generator.sync_playwright', return_value=mock_pw_context):
-            result = gen._render_text_overlay('', '', 'cta', ['#e94560'], cta_text='Compra ahora')
-        assert result == fake_png
 
-    def test_highlight_word_is_wrapped_in_span(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        fake_png = _png_bytes()
-        mock_pw_context, mock_page = self._make_mock_playwright(fake_png)
-        with patch('core.content_pipeline.generators.reel_generator.sync_playwright', return_value=mock_pw_context):
-            gen._render_text_overlay('Descubre algo nuevo', 'nuevo', 'hook', ['#e94560'])
-        html_sent = mock_page.set_content.call_args.args[0]
-        assert '<span class="highlight">nuevo</span>' in html_sent
+class TestMeasureTextWidth:
+    def test_empty_string_is_zero(self):
+        assert _measure_text_width('', 64) == 0
 
-    def test_retries_once_when_overlay_overflows_the_frame(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        fake_png = _png_bytes()
-        mock_pw_context, mock_page = self._make_mock_playwright(
-            fake_png, overflow_values=[40, 0],
+    def test_longer_text_is_wider(self):
+        short = _measure_text_width('Hola', 64)
+        long_ = _measure_text_width('Hola mundo entero', 64)
+        assert short > 0
+        assert long_ > short
+
+
+class TestBuildHookFilterParts:
+    def test_plain_line_when_highlight_not_found(self):
+        parts, last_label = _build_hook_filter_parts(
+            'Texto sin resaltado', 'inexistente', '#002951', '0:v',
         )
-        with patch('core.content_pipeline.generators.reel_generator.sync_playwright', return_value=mock_pw_context):
-            result = gen._render_text_overlay('Descubre algo nuevo', 'nuevo', 'hook', ['#e94560'])
-        assert result == fake_png
-        assert mock_page.screenshot.call_count == 2
+        assert len(parts) == 1
+        assert parts[0].startswith('[0:v]drawtext=')
+        assert "text='Texto sin resaltado'" in parts[0]
+        assert 'box=1' not in parts[0]
+        assert "enable='between(t,0,3)'" in parts[0]
+        assert last_label == 'hook0'
 
-    def test_returns_last_screenshot_when_both_attempts_overflow(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        fake_png = _png_bytes()
-        mock_pw_context, mock_page = self._make_mock_playwright(
-            fake_png, overflow_values=[40, 40],
+    def test_splits_line_around_highlight_word(self):
+        # 'nuevo' esta al final de la frase (20 caracteres, no se envuelve) ->
+        # queda un segmento 'before' + el resaltado, sin segmento 'after'.
+        parts, last_label = _build_hook_filter_parts(
+            'Descubre algo nuevo', 'nuevo', '#002951', '0:v',
         )
-        with patch('core.content_pipeline.generators.reel_generator.sync_playwright', return_value=mock_pw_context):
-            result = gen._render_text_overlay('Descubre algo nuevo', 'nuevo', 'hook', ['#e94560'])
-        assert result == fake_png
-        assert mock_page.screenshot.call_count == 2
+        assert any("text='Descubre algo '" in p for p in parts)
+        highlight_parts = [p for p in parts if "text='nuevo'" in p]
+        assert len(highlight_parts) == 1
+        assert 'box=1' in highlight_parts[0]
+        assert 'boxcolor=0x002951@1.0' in highlight_parts[0]
+        assert last_label == 'hook0b'
+
+    def test_wraps_long_hook_into_multiple_lines(self):
+        long_hook = 'Una frase mucho mas larga que el limite de caracteres permitido'
+        parts, last_label = _build_hook_filter_parts(long_hook, 'inexistente', '#002951', '0:v')
+        assert len(parts) >= 2
+
+    def test_all_filters_enabled_only_during_first_three_seconds(self):
+        parts, _ = _build_hook_filter_parts('Descubre algo nuevo', 'nuevo', '#002951', '0:v')
+        assert all("enable='between(t,0,3)'" in p for p in parts)
+
+
+class TestBuildCtaFilterParts:
+    def test_builds_single_filter_with_box_and_enable_window(self):
+        parts, last_label = _build_cta_filter_parts(
+            'Compra ahora', '#002951', 'hook0b', 21.0, 24.0,
+        )
+        assert len(parts) == 1
+        assert parts[0].startswith('[hook0b]drawtext=')
+        assert "text='Compra ahora'" in parts[0]
+        assert 'box=1' in parts[0]
+        assert 'boxcolor=0x002951@1.0' in parts[0]
+        assert "enable='between(t,21.0,24.0)'" in parts[0]
+        assert last_label == 'cta0'
 
 
 class TestGenerateVideoClips:
@@ -252,6 +235,11 @@ class TestGenerateNarration:
         assert result is None
 
 
+_FAKE_SCRIPT_FOR_ASSEMBLE = {
+    'hook_text': 'Descubre algo nuevo', 'highlight_word': 'nuevo', 'tag_cta': 'Compra ahora',
+}
+
+
 class TestAssembleReel:
     def test_calls_ffmpeg_and_returns_output_bytes(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
@@ -269,8 +257,8 @@ class TestAssembleReel:
                 clips=[b'clip1', b'clip2', b'clip3'],
                 music=b'music-bytes',
                 narration=b'narration-bytes',
-                hook_png=b'hook-png-bytes',
-                cta_png=b'cta-png-bytes',
+                script=_FAKE_SCRIPT_FOR_ASSEMBLE,
+                colors=['#1a1a2e'],
             )
         assert result == fake_output
         assert mock_run.call_count == 3
@@ -296,10 +284,35 @@ class TestAssembleReel:
                 clips=[b'clip1', b'clip2', b'clip3'],
                 music=None,
                 narration=None,
-                hook_png=b'hook-png-bytes',
-                cta_png=b'cta-png-bytes',
+                script=_FAKE_SCRIPT_FOR_ASSEMBLE,
+                colors=['#1a1a2e'],
             )
         assert result == fake_output
+
+    def test_hook_and_cta_drawtext_filters_are_always_present(self, tmp_path):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-mp4-bytes'
+
+        def fake_run(cmd, *args, **kwargs):
+            with open(cmd[-1], 'wb') as f:
+                f.write(fake_output)
+            return MagicMock(returncode=0)
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=fake_run) as mock_run:
+            gen._assemble_reel(
+                clips=[b'clip1', b'clip2', b'clip3'],
+                music=None, narration=None,
+                script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
+            )
+        overlay_cmd = mock_run.call_args_list[1].args[0]
+        assert overlay_cmd.count('-i') == 1  # solo concat_path, sin PNGs de hook/cta como input
+        filter_complex_idx = overlay_cmd.index('-filter_complex')
+        filter_complex = overlay_cmd[filter_complex_idx + 1]
+        assert "text='Compra ahora'" in filter_complex
+        assert "text='nuevo'" in filter_complex
+        map_idx = overlay_cmd.index('-map')
+        assert overlay_cmd[map_idx + 1] == '[cta0]'
 
     def test_adds_drawtext_filters_for_subtitles(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
@@ -319,14 +332,13 @@ class TestAssembleReel:
             result = gen._assemble_reel(
                 clips=[b'clip1', b'clip2', b'clip3'],
                 music=None, narration=None,
-                hook_png=b'hook-png-bytes', cta_png=b'cta-png-bytes',
+                script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
                 subtitles=subtitles,
             )
         assert result == fake_output
         overlay_cmd = mock_run.call_args_list[1].args[0]
         filter_complex_idx = overlay_cmd.index('-filter_complex')
         filter_complex = overlay_cmd[filter_complex_idx + 1]
-        assert 'drawtext=fontfile=' in filter_complex
         assert "text='Tu negocio en linea.'" in filter_complex
         assert "text='Contactanos hoy.'" in filter_complex
         assert "enable='between(t,0.0,2.5)'" in filter_complex
@@ -334,7 +346,7 @@ class TestAssembleReel:
         map_idx = overlay_cmd.index('-map')
         assert overlay_cmd[map_idx + 1] == '[sub1]'
 
-    def test_omits_drawtext_filters_when_no_subtitles(self, tmp_path):
+    def test_omits_subtitle_filters_when_no_subtitles(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
         fake_output = b'fake-mp4-bytes'
@@ -348,14 +360,14 @@ class TestAssembleReel:
             gen._assemble_reel(
                 clips=[b'clip1', b'clip2', b'clip3'],
                 music=None, narration=None,
-                hook_png=b'hook-png-bytes', cta_png=b'cta-png-bytes',
+                script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
             )
         overlay_cmd = mock_run.call_args_list[1].args[0]
         filter_complex_idx = overlay_cmd.index('-filter_complex')
         filter_complex = overlay_cmd[filter_complex_idx + 1]
-        assert 'drawtext' not in filter_complex
+        assert 'sub0' not in filter_complex
         map_idx = overlay_cmd.index('-map')
-        assert overlay_cmd[map_idx + 1] == '[v2]'
+        assert overlay_cmd[map_idx + 1] == '[cta0]'
 
 
 class TestExtractPosterFrame:
@@ -390,7 +402,6 @@ class TestGenerate:
              patch.object(gen, '_generate_music', return_value=b'music'), \
              patch.object(gen, '_generate_narration', return_value=b'narration'), \
              patch('core.content_pipeline.generators.reel_generator.SubtitleGenerator') as mock_sub_gen, \
-             patch.object(gen, '_render_text_overlay', return_value=b'overlay-png'), \
              patch.object(gen, '_assemble_reel', return_value=b'final-mp4') as mock_assemble, \
              patch.object(gen, '_extract_poster_frame', return_value=b'poster-png'), \
              patch.object(gen, '_upload_video_to_storage', return_value='https://storage.test/reel.mp4') as mock_up_video, \
@@ -403,7 +414,7 @@ class TestGenerate:
         mock_up_video.assert_called_once_with(b'final-mp4', 'job1-day1')
         mock_up_poster.assert_called_once_with(b'poster-png', 'job1-day1-poster')
         mock_assemble.assert_called_once_with(
-            [b'c1', b'c2', b'c3'], b'music', b'narration', b'overlay-png', b'overlay-png',
+            [b'c1', b'c2', b'c3'], b'music', b'narration', _FAKE_SCRIPT, ['#1a1a2e'],
             [{'text': 'Hola.', 'start': 0.0, 'end': 1.0}],
         )
 
@@ -414,7 +425,6 @@ class TestGenerate:
              patch.object(gen, '_generate_music', return_value=None), \
              patch.object(gen, '_generate_narration', return_value=None), \
              patch('core.content_pipeline.generators.reel_generator.SubtitleGenerator') as mock_sub_gen, \
-             patch.object(gen, '_render_text_overlay', return_value=b'overlay-png'), \
              patch.object(gen, '_assemble_reel', return_value=b'final-mp4') as mock_assemble, \
              patch.object(gen, '_extract_poster_frame', return_value=b'poster-png'), \
              patch.object(gen, '_upload_video_to_storage', return_value='url1'), \
@@ -438,7 +448,6 @@ class TestGenerate:
         with patch.object(gen, '_generate_video_clips', return_value=[b'c1', b'c2', b'c3']), \
              patch.object(gen, '_generate_music', return_value=None), \
              patch.object(gen, '_generate_narration', return_value=None), \
-             patch.object(gen, '_render_text_overlay', return_value=b'overlay-png'), \
              patch.object(gen, '_assemble_reel', side_effect=Exception('ffmpeg error')):
             video_url, poster_url = gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
         assert (video_url, poster_url) == ('', '')

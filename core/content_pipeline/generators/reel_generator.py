@@ -1,8 +1,6 @@
 import base64
-import html as _html
 import logging
 import os
-import re
 import subprocess
 import tempfile
 import time
@@ -10,7 +8,7 @@ import google.genai as genai
 from google.genai import types
 from google.cloud import storage
 from django.conf import settings
-from playwright.sync_api import sync_playwright
+from PIL import ImageFont
 from core.shared.metrics import GCS_OPERATIONS
 from core.shared.metrics_utils import (
     track_external_api, record_tokens, record_veo_generation,
@@ -22,30 +20,37 @@ from core.content_pipeline.generators.subtitle_generator import SubtitleGenerato
 
 logger = logging.getLogger(__name__)
 
-_TEMPLATE_MAP = {
-    'hook': 'reel_hook.html',
-    'cta': 'reel_cta.html',
-}
-
 _VEO_CLIP_DURATION_SECONDS = 8
+_VIDEO_WIDTH = 1080
 
-_SUBTITLE_FONT_PATH = os.path.normpath(os.path.join(
+# Fuente compartida por hook, CTA y subtitulos — todo el texto de los reels se
+# compone con el filtro drawtext de ffmpeg (fontfile= apunta directo al .ttf).
+# Playwright/Chromium se elimino del pipeline de reels: bajo CPU cargado
+# (proceso corriendo varios minutos junto a Veo/Lyria/TTS) el texto se
+# desbordaba en produccion de forma no reproducible en aislado, incluso tras
+# fuente local, fuente base64, position:absolute y reflow forzado — el propio
+# pintado de Chromium usaba metricas de glifo distintas a las que reportaba
+# el DOM (scrollWidth/clientWidth no detectaban el desborde real). drawtext
+# nunca fallo en ninguna prueba real, por eso reemplaza a Playwright entero.
+_DRAWTEXT_FONT_PATH = os.path.normpath(os.path.join(
     os.path.dirname(__file__), '..', 'static', 'content_pipeline', 'fonts', 'Poppins-Bold.ttf',
 ))
 
+_HOOK_FONTSIZE = 64
+_HOOK_MAX_CHARS = 20
+_HOOK_LINE_HEIGHT = 90
+_HOOK_TOP_Y = 220
+_HOOK_END_SECONDS = 3
+_HOOK_BOX_BORDERW = 10
 
-def _load_font_data_uri() -> str:
-    # Se calcula una sola vez por proceso (a nivel modulo) en vez de leer el
-    # archivo del disco en cada render — evita I/O y cualquier lectura file://
-    # lenta bajo CPU cargado (varios minutos de Veo/Lyria/TTS corriendo antes).
-    with open(_SUBTITLE_FONT_PATH, 'rb') as f:
-        encoded = base64.b64encode(f.read()).decode('ascii')
-    return f'data:font/ttf;base64,{encoded}'
+_CTA_FONTSIZE = 54
+_CTA_MAX_CHARS = 24
+_CTA_BOX_BORDERW = 24
 
-
-_SUBTITLE_FONT_DATA_URI = _load_font_data_uri()
 _SUBTITLE_FONTSIZE = 42
 _SUBTITLE_Y = 'h-300'
+
+_font_cache: dict[int, ImageFont.FreeTypeFont] = {}
 
 
 def _escape_drawtext(text: str) -> str:
@@ -56,7 +61,7 @@ def _escape_drawtext(text: str) -> str:
     return text
 
 
-def _wrap_subtitle_text(text: str, max_chars: int = 22) -> str:
+def _wrap_text(text: str, max_chars: int = 22) -> str:
     if len(text) <= max_chars:
         return text
     words = text.split()
@@ -74,6 +79,96 @@ def _wrap_subtitle_text(text: str, max_chars: int = 22) -> str:
     return '\n'.join(lines)
 
 
+def _hex_to_ffmpeg_color(hex_color: str) -> str:
+    return '0x' + hex_color.lstrip('#')
+
+
+def _measure_text_width(text: str, fontsize: int) -> int:
+    if not text:
+        return 0
+    if fontsize not in _font_cache:
+        _font_cache[fontsize] = ImageFont.truetype(_DRAWTEXT_FONT_PATH, fontsize)
+    return int(_font_cache[fontsize].getlength(text))
+
+
+def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color: str,
+                              source_label: str) -> tuple[list[str], str]:
+    box_color = _hex_to_ffmpeg_color(primary_color)
+    lines = _wrap_text(hook_text, max_chars=_HOOK_MAX_CHARS).split('\n')
+    highlight_lower = highlight_word.strip().lower()
+    filter_parts = []
+    last_label = source_label
+    enable = f"between(t,0,{_HOOK_END_SECONDS})"
+
+    for i, line in enumerate(lines):
+        y = _HOOK_TOP_Y + i * _HOOK_LINE_HEIGHT
+        idx = line.lower().find(highlight_lower) if highlight_lower else -1
+
+        if idx == -1:
+            next_label = f'hook{i}'
+            filter_parts.append(
+                f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{_escape_drawtext(line)}':"
+                f"fontsize={_HOOK_FONTSIZE}:fontcolor=white:borderw=3:bordercolor=black:"
+                f"x=(w-text_w)/2:y={y}:enable='{enable}'[{next_label}]"
+            )
+            last_label = next_label
+            continue
+
+        before = line[:idx]
+        highlight = line[idx:idx + len(highlight_word)]
+        after = line[idx + len(highlight_word):]
+        before_w = _measure_text_width(before, _HOOK_FONTSIZE)
+        highlight_w = _measure_text_width(highlight, _HOOK_FONTSIZE)
+        after_w = _measure_text_width(after, _HOOK_FONTSIZE)
+        total_w = before_w + highlight_w + 2 * _HOOK_BOX_BORDERW + after_w
+        cursor = (_VIDEO_WIDTH - total_w) // 2
+
+        if before:
+            next_label = f'hook{i}a'
+            filter_parts.append(
+                f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{_escape_drawtext(before)}':"
+                f"fontsize={_HOOK_FONTSIZE}:fontcolor=white:borderw=3:bordercolor=black:"
+                f"x={cursor}:y={y}:enable='{enable}'[{next_label}]"
+            )
+            last_label = next_label
+        cursor += before_w
+
+        next_label = f'hook{i}b'
+        filter_parts.append(
+            f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{_escape_drawtext(highlight)}':"
+            f"fontsize={_HOOK_FONTSIZE}:fontcolor=0x1a1a2e:box=1:boxcolor={box_color}@1.0:"
+            f"boxborderw={_HOOK_BOX_BORDERW}:x={cursor + _HOOK_BOX_BORDERW}:y={y}:"
+            f"enable='{enable}'[{next_label}]"
+        )
+        last_label = next_label
+        cursor += highlight_w + 2 * _HOOK_BOX_BORDERW
+
+        if after:
+            next_label = f'hook{i}c'
+            filter_parts.append(
+                f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{_escape_drawtext(after)}':"
+                f"fontsize={_HOOK_FONTSIZE}:fontcolor=white:borderw=3:bordercolor=black:"
+                f"x={cursor}:y={y}:enable='{enable}'[{next_label}]"
+            )
+            last_label = next_label
+
+    return filter_parts, last_label
+
+
+def _build_cta_filter_parts(cta_text: str, primary_color: str, source_label: str,
+                             cta_start: float, duration: float) -> tuple[list[str], str]:
+    box_color = _hex_to_ffmpeg_color(primary_color)
+    text = _escape_drawtext(_wrap_text(cta_text, max_chars=_CTA_MAX_CHARS))
+    next_label = 'cta0'
+    filter_part = (
+        f"[{source_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{text}':"
+        f"fontsize={_CTA_FONTSIZE}:fontcolor=0x1a1a2e:box=1:boxcolor={box_color}@1.0:"
+        f"boxborderw={_CTA_BOX_BORDERW}:x=(w-text_w)/2:y=(h-text_h)/2:"
+        f"enable='between(t,{cta_start},{duration})'[{next_label}]"
+    )
+    return [filter_part], next_label
+
+
 def _vertex_client():
     return genai.Client(
         vertexai=True,
@@ -85,72 +180,6 @@ def _vertex_client():
 class ReelGenerator:
     def __init__(self, bucket_name: str):
         self._bucket = bucket_name
-
-    def _render_text_overlay(self, text: str, highlight_word: str, style: str, colors: list[str], cta_text: str = '') -> bytes:
-        template_name = _TEMPLATE_MAP[style]
-        template_path = os.path.normpath(os.path.join(
-            os.path.dirname(__file__), '..', 'templates', 'content_pipeline', template_name,
-        ))
-        with open(template_path) as f:
-            html = f.read()
-        primary = colors[0] if colors else '#e94560'
-        html = html.replace('{{primary_color}}', primary)
-        # Fuente embebida como data URI base64 (en vez de file:// o @import por
-        # red): cero I/O de disco o red durante el render — bajo CPU cargado
-        # (varios minutos de Veo/Lyria/TTS corriendo antes) cualquier lectura
-        # externa puede tardar y Chromium cae a una fuente de reemplazo mas
-        # ancha que Poppins, desbordando el texto aunque el margen este bien
-        # calculado. El data URI ya viene incluido en el HTML mismo.
-        html = html.replace('{{font_path}}', _SUBTITLE_FONT_DATA_URI)
-
-        if style == 'hook':
-            escaped = _html.escape(text)
-            if highlight_word:
-                escaped_word = _html.escape(highlight_word)
-                pattern = re.compile(re.escape(escaped_word), re.IGNORECASE)
-                escaped = pattern.sub(f'<span class="highlight">{escaped_word}</span>', escaped, count=1)
-            html = html.replace('{{hook_html}}', escaped)
-        else:
-            html = html.replace('{{cta_text}}', _html.escape(cta_text))
-
-        selector = '.hook' if style == 'hook' else '.cta'
-        png_bytes = None
-        for attempt in range(2):
-            with sync_playwright() as pw:
-                browser = pw.chromium.launch(
-                    headless=True,
-                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-                )
-                page = browser.new_page(viewport={'width': 1080, 'height': 1920})
-                page.set_content(html, wait_until='load')
-                page.evaluate('document.fonts.ready')
-                # Fuerza un reflow sincrono (leer offsetHeight obliga al motor de
-                # layout a resolverse) y da 300ms de margen para que Chromium
-                # termine de pintar — bajo CPU cargado (proceso ya corriendo
-                # varios minutos junto a Veo/Lyria/TTS) el screenshot puede
-                # dispararse antes de que el layout/paint se haya asentado.
-                page.evaluate('document.body.offsetHeight')
-                page.wait_for_timeout(300)
-                # Verificacion defensiva: en produccion (proceso ya corriendo varios
-                # minutos junto a Veo/Lyria/TTS) se observo, de forma no reproducible
-                # en aislado, que el texto a veces se renderiza mas ancho que su
-                # contenedor pese a la fuente local. bounding_box() del elemento NO
-                # sirve para detectar esto — el contenedor tiene un width fijo por
-                # CSS y su caja de layout se reporta igual aunque el TEXTO adentro
-                # se desborde. La forma correcta es comparar scrollWidth (ancho real
-                # del contenido) contra clientWidth (ancho visible del contenedor).
-                overflow_px = page.evaluate(
-                    f"() => {{ const el = document.querySelector('{selector}'); "
-                    f"return el.scrollWidth - el.clientWidth; }}"
-                )
-                overflows = overflow_px is not None and overflow_px > 2
-                png_bytes = page.screenshot(omit_background=True)
-                browser.close()
-            if not overflows:
-                return png_bytes
-            logger.warning(f"Overlay '{style}' se salio del cuadro (intento {attempt + 1}), reintentando")
-
-        return png_bytes
 
     # Mismo patron que _SAFE_CONSTRAINTS en image_generator.py: se aplica siempre,
     # sin depender de que el guion (Gemini) lo incluya por su cuenta — Veo alucina
@@ -272,7 +301,7 @@ class ReelGenerator:
             return None
 
     def _assemble_reel(self, clips: list[bytes], music: bytes | None, narration: bytes | None,
-                        hook_png: bytes, cta_png: bytes, subtitles: list[dict] | None = None) -> bytes:
+                        script: dict, colors: list[str], subtitles: list[dict] | None = None) -> bytes:
         with tempfile.TemporaryDirectory() as tmp:
             clip_paths = []
             for i, clip_bytes in enumerate(clips):
@@ -293,34 +322,33 @@ class ReelGenerator:
                 check=True, capture_output=True,
             )
 
-            hook_path = os.path.join(tmp, 'hook.png')
-            with open(hook_path, 'wb') as f:
-                f.write(hook_png)
-            cta_path = os.path.join(tmp, 'cta.png')
-            with open(cta_path, 'wb') as f:
-                f.write(cta_png)
-
-            duration = len(clips) * 8
+            duration = len(clips) * _VEO_CLIP_DURATION_SECONDS
             cta_start = max(0, duration - 3)
-            overlay_path = os.path.join(tmp, 'overlay.mp4')
-            filter_parts = [
-                "[0:v][1:v]overlay=0:0:enable='between(t,0,3)'[v1]",
-                f"[v1][2:v]overlay=0:0:enable='between(t,{cta_start},{duration})'[v2]",
-            ]
-            last_label = 'v2'
+            primary_color = colors[0] if colors else '#e94560'
+
+            filter_parts, last_label = _build_hook_filter_parts(
+                script['hook_text'], script['highlight_word'], primary_color, '0:v',
+            )
+            cta_parts, last_label = _build_cta_filter_parts(
+                script['tag_cta'], primary_color, last_label, cta_start, duration,
+            )
+            filter_parts += cta_parts
+
             for i, sub in enumerate(subtitles or []):
                 next_label = f'sub{i}'
-                text = _escape_drawtext(_wrap_subtitle_text(sub['text']))
+                text = _escape_drawtext(_wrap_text(sub['text']))
                 filter_parts.append(
-                    f"[{last_label}]drawtext=fontfile={_SUBTITLE_FONT_PATH}:text='{text}':"
+                    f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{text}':"
                     f"fontcolor=white:fontsize={_SUBTITLE_FONTSIZE}:borderw=3:bordercolor=black:"
                     f"x=(w-text_w)/2:y={_SUBTITLE_Y}:"
                     f"enable='between(t,{sub['start']},{sub['end']})'[{next_label}]"
                 )
                 last_label = next_label
+
             filter_complex = ';'.join(filter_parts)
+            overlay_path = os.path.join(tmp, 'overlay.mp4')
             subprocess.run(
-                ['ffmpeg', '-y', '-i', concat_path, '-i', hook_path, '-i', cta_path,
+                ['ffmpeg', '-y', '-i', concat_path,
                  '-filter_complex', filter_complex,
                  '-map', f'[{last_label}]', '-t', str(duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
                  overlay_path],
@@ -392,10 +420,8 @@ class ReelGenerator:
             subtitles = []
             if narration is not None:
                 subtitles = SubtitleGenerator().generate(narration, script['narration_script'])
-            hook_png = self._render_text_overlay(script['hook_text'], script['highlight_word'], 'hook', colors)
-            cta_png = self._render_text_overlay('', '', 'cta', colors, cta_text=script['tag_cta'])
 
-            final_video = self._assemble_reel(clips, music, narration, hook_png, cta_png, subtitles)
+            final_video = self._assemble_reel(clips, music, narration, script, colors, subtitles)
             poster = self._extract_poster_frame(final_video)
 
             video_url = self._upload_video_to_storage(final_video, filename_prefix)
@@ -422,6 +448,3 @@ class ReelGenerator:
             blob.upload_from_string(video_bytes, content_type='video/mp4')
         GCS_OPERATIONS.labels(operation='upload').inc()
         return f'{blob.public_url}?v={int(time.time())}'
-
-
-
