@@ -69,6 +69,18 @@ class ReelGenerator:
 
         return png_bytes
 
+    # Mismo patron que _SAFE_CONSTRAINTS en image_generator.py: se aplica siempre,
+    # sin depender de que el guion (Gemini) lo incluya por su cuenta — Veo alucina
+    # texto/UI legible especialmente cuando la escena describe pantallas, laptops,
+    # monitores o interfaces (comun en negocios de tecnologia/web), por eso el
+    # bloqueo va reforzado y al final del prompt, no solo como sugerencia inicial.
+    _VEO_SAFE_CONSTRAINTS = (
+        " Absolutely NO text, NO letters, NO words, NO numbers, NO captions, NO subtitles, "
+        "NO UI elements, NO icons, NO logos, NO readable screen content anywhere in the video. "
+        "If a screen or monitor appears, it must be blank, off, or showing only abstract "
+        "blurred light — never legible text or interface elements."
+    )
+
     def _generate_video_clips(self, scene_prompts: list[str]) -> list[bytes]:
         clips = []
         for prompt in scene_prompts:
@@ -84,6 +96,7 @@ class ReelGenerator:
     def _generate_single_clip(self, prompt: str) -> bytes | None:
         try:
             client = _vertex_client()
+            prompt = prompt + self._VEO_SAFE_CONSTRAINTS
 
             def _call():
                 with track_external_api('veo', operation='video_generate'):

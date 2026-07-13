@@ -75,6 +75,9 @@ class TestGenerateVideoClips:
             mock_vc.return_value.models.generate_videos.return_value = mock_op
             clips = gen._generate_video_clips(['scene 1', 'scene 2', 'scene 3'])
         assert clips == [fake_video, fake_video, fake_video]
+        sent_prompt = mock_vc.return_value.models.generate_videos.call_args_list[0].kwargs['prompt']
+        assert sent_prompt.startswith('scene 1')
+        assert 'Absolutely NO text' in sent_prompt
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
