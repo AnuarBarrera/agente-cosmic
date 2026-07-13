@@ -153,3 +153,64 @@ class TestGenerateNarration:
             result = gen._generate_narration('texto')
         assert result is None
 
+
+class TestAssembleReel:
+    def test_calls_ffmpeg_and_returns_output_bytes(self, tmp_path):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-mp4-bytes'
+
+        def fake_run(cmd, *args, **kwargs):
+            output_path = cmd[-1]
+            with open(output_path, 'wb') as f:
+                f.write(fake_output)
+            return MagicMock(returncode=0)
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=fake_run) as mock_run:
+            result = gen._assemble_reel(
+                clips=[b'clip1', b'clip2', b'clip3'],
+                music=b'music-bytes',
+                narration=b'narration-bytes',
+                hook_png=b'hook-png-bytes',
+                cta_png=b'cta-png-bytes',
+            )
+        assert result == fake_output
+        assert mock_run.call_count == 3
+
+    def test_works_without_music_or_narration(self, tmp_path):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-mp4-bytes'
+
+        def fake_run(cmd, *args, **kwargs):
+            with open(cmd[-1], 'wb') as f:
+                f.write(fake_output)
+            return MagicMock(returncode=0)
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=fake_run):
+            result = gen._assemble_reel(
+                clips=[b'clip1', b'clip2', b'clip3'],
+                music=None,
+                narration=None,
+                hook_png=b'hook-png-bytes',
+                cta_png=b'cta-png-bytes',
+            )
+        assert result == fake_output
+
+
+class TestExtractPosterFrame:
+    def test_calls_ffmpeg_and_returns_frame_bytes(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_frame = b'fake-frame-png-bytes'
+
+        def fake_run(cmd, *args, **kwargs):
+            with open(cmd[-1], 'wb') as f:
+                f.write(fake_frame)
+            return MagicMock(returncode=0)
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=fake_run):
+            result = gen._extract_poster_frame(b'fake-video-bytes')
+        assert result == fake_frame
+
+
