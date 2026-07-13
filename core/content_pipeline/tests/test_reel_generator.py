@@ -123,6 +123,29 @@ class TestGenerateMusic:
         GOOGLE_CLOUD_LOCATION='us-central1',
         VERTEX_MUSIC_MODEL='lyria-3-clip-preview',
     )
+    def test_retries_once_and_succeeds_on_second_attempt(self):
+        # El filtro de contenido de Lyria 3 Clip (preview) es no-determinista —
+        # confirmado en produccion reintentando el mismo prompt sin cambios.
+        import base64
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        mock_audio = MagicMock()
+        mock_audio.data = base64.b64encode(b'fake-music-bytes').decode()
+        mock_interaction = MagicMock()
+        mock_interaction.output_audio = mock_audio
+        with patch('core.content_pipeline.generators.reel_generator.genai.Client') as mock_client_cls:
+            mock_client_cls.return_value.interactions.create.side_effect = [
+                Exception('content_blocked'), mock_interaction,
+            ]
+            result = gen._generate_music('upbeat corporate, optimistic')
+        assert result == b'fake-music-bytes'
+        assert mock_client_cls.return_value.interactions.create.call_count == 2
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_MUSIC_MODEL='lyria-3-clip-preview',
+    )
     def test_returns_none_on_api_error(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')

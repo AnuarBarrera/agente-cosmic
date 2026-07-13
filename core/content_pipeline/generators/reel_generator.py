@@ -127,6 +127,15 @@ class ReelGenerator:
             return None
 
     def _generate_music(self, music_mood: str) -> bytes | None:
+        # El filtro de contenido de Lyria 3 Clip (preview) es no-determinista —
+        # confirmado reintentando el MISMO prompt: falla y luego funciona sin
+        # cambiar nada. 1 reintento antes de degradar a "reel sin musica".
+        result = self._generate_music_attempt(music_mood)
+        if result is None:
+            result = self._generate_music_attempt(music_mood)
+        return result
+
+    def _generate_music_attempt(self, music_mood: str) -> bytes | None:
         try:
             # Lyria 3 solo esta disponible en la ubicacion 'global' de Vertex AI (no
             # en una region como us-central1) y rechaza la peticion si se especifica
@@ -149,7 +158,7 @@ class ReelGenerator:
                 return base64.b64decode(audio.data)
             return None
         except Exception as e:
-            logger.warning(f"Lyria music generation failed (reel sin musica): {e}")
+            logger.warning(f"Lyria music generation failed (reintentando o degradando): {e}")
             return None
 
     def _generate_narration(self, narration_script: str) -> bytes | None:
