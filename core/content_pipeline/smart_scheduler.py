@@ -1,6 +1,11 @@
+import unicodedata
 from datetime import datetime, timedelta, timezone as dt_timezone, date
 
 MEXICO_TZ = dt_timezone(timedelta(hours=-6))
+
+
+def _strip_accents(text: str) -> str:
+    return ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
 
 # Benchmarks de engagement: (weekday, hour) — weekday: 0=lunes, 6=domingo
 # Cada industria tiene exactamente 7 slots, uno por día de la semana (sin repetir weekday)
@@ -50,33 +55,76 @@ _INDUSTRY_SCHEDULE = {
         5: 11,  # sábado 11am
         6: 10,  # domingo 10am
     },
-    'default': {
-        1: 9,   # martes 9am
-        3: 9,   # jueves 9am
-        2: 10,  # miércoles 10am
+    'health': {
         0: 9,   # lunes 9am
-        4: 9,   # viernes 9am
+        1: 12,  # martes 12pm
+        2: 9,   # miércoles 9am
+        3: 17,  # jueves 5pm
+        4: 12,  # viernes 12pm
         5: 10,  # sábado 10am
         6: 11,  # domingo 11am
     },
+    'pets': {
+        0: 18,  # lunes 6pm
+        1: 12,  # martes 12pm
+        2: 18,  # miércoles 6pm
+        3: 12,  # jueves 12pm
+        4: 17,  # viernes 5pm
+        5: 11,  # sábado 11am
+        6: 12,  # domingo 12pm
+    },
+    'professional': {
+        0: 9,   # lunes 9am
+        1: 10,  # martes 10am
+        2: 14,  # miércoles 2pm
+        3: 9,   # jueves 9am
+        4: 15,  # viernes 3pm
+        5: 10,  # sábado 10am
+        6: 11,  # domingo 11am
+    },
+    # Catch-all para negocios que no matchean ninguna keyword de arriba — el
+    # ICP incluye muchos rubros que no encajan en las 8 categorías de arriba
+    # (ver H51). Antes tenia solo 3 horas distintas (9/10/11am) en toda la
+    # semana, lo que se sentia repetitivo aunque tecnicamente "variara por dia".
+    'default': {
+        0: 9,   # lunes 9am
+        1: 13,  # martes 1pm
+        2: 10,  # miércoles 10am
+        3: 17,  # jueves 5pm
+        4: 12,  # viernes 12pm
+        5: 11,  # sábado 11am
+        6: 10,  # domingo 10am
+    },
 }
 
+# Keywords en minusculas y SIN acentos — detect_industry() normaliza el texto del
+# usuario antes de comparar (H51: "pediátricas" no matcheaba "pediatra" por el acento).
 _INDUSTRY_KEYWORDS = {
     'food': ['restaurant', 'restaurante', 'comida', 'food', 'cocina', 'chef', 'menu',
-             'cafeteria', 'cafe', 'café', 'pizz', 'taco', 'sushi', 'bakery', 'panaderia'],
+             'cafeteria', 'cafe', 'pizz', 'taco', 'sushi', 'bakery', 'panaderia'],
     'fitness': ['gym', 'gimnasio', 'fitness', 'entrenamiento', 'workout', 'crossfit',
                 'yoga', 'pilates', 'deporte', 'atleta', 'nutricion'],
     'retail': ['tienda', 'store', 'ropa', 'moda', 'fashion', 'boutique', 'accesorios',
                'calzado', 'zapatos', 'joyeria', 'retail', 'shop'],
-    'beauty': ['salon', 'salón', 'spa', 'belleza', 'beauty', 'peluqueria', 'estetica',
+    # "spa" suelto se quito — coincidia por substring dentro de "despacho", "espacio", etc.
+    'beauty': ['salon', 'belleza', 'beauty', 'peluqueria', 'estetica', 'masaje',
                'cosmetica', 'makeup', 'skincare', 'nail'],
+    # "ia"/"ai" sueltos se quitaron — coincidian por substring dentro de palabras
+    # comunes en español (ej. "veterinaria" contiene "ia"), dando falsos positivos.
     'tech': ['software', 'tecnologia', 'tech', 'digital', 'app', 'desarrollo', 'startup',
-             'saas', 'programacion', 'web', 'ia', 'ai'],
+             'saas', 'programacion', 'inteligencia artificial'],
+    'health': ['salud', 'medico', 'medica', 'clinica', 'doctor', 'doctora', 'dentista',
+               'pediatra', 'pediatric', 'psicolog', 'terapia', 'nutriolog', 'consultorio',
+               'hospital', 'enfermeria'],
+    'pets': ['mascota', 'mascotas', 'perro', 'perros', 'gato', 'gatos', 'veterinaria',
+             'veterinario', 'pet shop', 'canino', 'felino', 'petshop'],
+    'professional': ['consultoria', 'abogado', 'abogada', 'contador', 'contadora',
+                      'asesoria', 'despacho', 'notario', 'contable', 'bufete'],
 }
 
 
 def detect_industry(brand_dna) -> str:
-    text = f"{brand_dna.tone} {brand_dna.description}".lower()
+    text = _strip_accents(f"{brand_dna.tone} {brand_dna.description}".lower())
     for industry, keywords in _INDUSTRY_KEYWORDS.items():
         if any(kw in text for kw in keywords):
             return industry

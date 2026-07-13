@@ -29,6 +29,31 @@ class TestDetectIndustry:
         dna.description = 'Empresa de servicios generales'
         assert detect_industry(dna) == 'default'
 
+    def test_health_keywords(self):
+        dna = MagicMock()
+        dna.tone = 'profesional'
+        dna.description = 'Clinica dental con atencion personalizada'
+        assert detect_industry(dna) == 'health'
+
+    def test_pets_keywords(self):
+        dna = MagicMock()
+        dna.tone = 'amigable'
+        dna.description = 'Veterinaria y cuidado integral de mascotas, perros y gatos'
+        assert detect_industry(dna) == 'pets'
+
+    def test_professional_services_keywords(self):
+        dna = MagicMock()
+        dna.tone = 'formal'
+        dna.description = 'Despacho de abogados especializado en asesoria fiscal'
+        assert detect_industry(dna) == 'professional'
+
+    def test_matches_regardless_of_accents(self):
+        """H51: 'pediátricas' (con acento) no matcheaba 'pediatra' antes del fix."""
+        dna = MagicMock()
+        dna.tone = 'profesional'
+        dna.description = 'Consultas pediátricas para niños y adolescentes'
+        assert detect_industry(dna) == 'health'
+
 
 class TestSmartScheduleDates:
     def test_returns_7_datetimes(self):
