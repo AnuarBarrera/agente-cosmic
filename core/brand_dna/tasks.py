@@ -67,7 +67,7 @@ def analyze_brand_task(job_id: str) -> None:
         from core.content_pipeline.tasks import content_generation_task
         # Genera 7 imagenes con reintentos de QC — el timeout global (360s) se queda
         # corto. 25 min da margen amplio incluso con reintentos en varios dias.
-        django_rq.enqueue(content_generation_task, str(job_id), job_timeout=1500)
+        django_rq.enqueue(content_generation_task, str(job_id), job_timeout=2400)
 
     except Exception as e:
         ANALYSIS_DURATION.observe(time.monotonic() - start)

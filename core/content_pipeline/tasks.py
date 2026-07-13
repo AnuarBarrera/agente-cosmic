@@ -9,6 +9,8 @@ from core.brand_dna.models import AnalysisJob
 from core.content_pipeline.models import ContentCalendar, ContentPost, WeeklyFeedback
 from core.content_pipeline.generators.text_generator import TextGenerator
 from core.content_pipeline.generators.image_generator import ImageGenerator
+from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
+from core.content_pipeline.generators.reel_generator import ReelGenerator
 from core.content_pipeline.email_sender import EmailSender
 from core.content_pipeline.scheduler import schedule_daily_emails
 from core.content_pipeline.smart_scheduler import smart_schedule_dates
@@ -33,15 +35,24 @@ def _load_product_images(paths: list[str]) -> list[bytes]:
     return result
 
 
-def _generate_post_media(image_gen: ImageGenerator, fmt: str, filename: str, max_qc_retries: int = 2, **kwargs) -> tuple[str, list[str]]:
-    """Genera la imagen (o slides del carrusel, H20 + roadmap #5) de un post.
-    Retorna (image_url, image_urls) — image_url es siempre la portada/slide 1
-    para retrocompatibilidad (email, thumbnail, descarga por default)."""
+def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptGenerator, reel_gen: ReelGenerator,
+                          fmt: str, filename: str, brand_dna=None, post_data: dict = None,
+                          max_qc_retries: int = 2, **kwargs) -> tuple[str, list[str], str]:
+    """Genera el/los medio(s) de un post segun su formato. Retorna
+    (image_url, image_urls, video_url) — image_url es siempre la portada
+    (slide 1 del carrusel, poster frame del reel) para retrocompatibilidad."""
+    if fmt == ContentPost.FORMAT_REEL:
+        script = reel_script_gen.generate(post_data, brand_dna)
+        video_url, poster_url = reel_gen.generate(script=script, colors=kwargs.get('colors', []), filename_prefix=filename)
+        if not video_url:
+            url = image_gen.generate(filename=filename, max_qc_retries=max_qc_retries, **kwargs)
+            return url, [], ''
+        return poster_url, [], video_url
     if fmt == ContentPost.FORMAT_CAROUSEL:
         urls = image_gen.generate_carousel(filename_prefix=filename, max_qc_retries=max_qc_retries, **kwargs)
-        return (urls[0] if urls else ''), urls
+        return (urls[0] if urls else ''), urls, ''
     url = image_gen.generate(filename=filename, max_qc_retries=max_qc_retries, **kwargs)
-    return url, []
+    return url, [], ''
 
 
 def _product_image_for_day(day_in_week: int, images: list[bytes]) -> bytes | None:
@@ -96,16 +107,21 @@ def content_generation_task(job_id: str) -> None:
         # Cargar imágenes de producto (hasta 7, una por día)
         product_images_bytes = _load_product_images(calendar.active_product_images)
         _disable_carousel_if_full_product_week(posts_data, product_images_bytes)
+        if _product_image_for_day(1, product_images_bytes) is not None:
+            posts_data[0]['format'] = ContentPost.FORMAT_SINGLE
 
         # Generamos las 7 imágenes por adelantado — el usuario no espera en vivo
         # (flujo async: se le avisa por correo/dashboard cuando todo está listo),
         # así que el calendario completo queda disponible desde el primer momento.
         total = len(posts_data)
+        reel_script_gen = ReelScriptGenerator()
+        reel_gen = ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+
         for i, post_data in enumerate(posts_data, start=1):
             scheduled = scheduled_dates[i - 1]
             day_product = _product_image_for_day(i, product_images_bytes)
-            image_url, image_urls = _generate_post_media(
-                image_gen,
+            image_url, image_urls, video_url = _generate_post_media(
+                image_gen, reel_script_gen, reel_gen,
                 fmt=post_data.get('format', ContentPost.FORMAT_SINGLE),
                 filename=f"{job_id}-day{i}",
                 caption=post_data['caption'],
@@ -116,6 +132,8 @@ def content_generation_task(job_id: str) -> None:
                 description=brand_dna.description,
                 audience=brand_dna.audience,
                 product_image_bytes=day_product,
+                brand_dna=brand_dna,
+                post_data=post_data,
             )
 
             ContentPost.objects.create(
@@ -124,6 +142,7 @@ def content_generation_task(job_id: str) -> None:
                 caption=post_data['caption'],
                 image_url=image_url,
                 image_urls=image_urls,
+                video_url=video_url,
                 format=post_data.get('format', ContentPost.FORMAT_SINGLE),
                 suggested_time=scheduled.astimezone(MEXICO_TZ).time(),
                 hashtags=post_data.get('hashtags', []),
@@ -159,8 +178,8 @@ def _generate_missing_image(post: ContentPost) -> None:
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
         product_images = _load_product_images(post.calendar.active_product_images)
         product_image_bytes = _product_image_for_day(day_in_week, product_images)
-        post.image_url, post.image_urls = _generate_post_media(
-            image_gen,
+        post.image_url, post.image_urls, post.video_url = _generate_post_media(
+            image_gen, ReelScriptGenerator(), ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET),
             fmt=post.format,
             filename=f"{job_id}-day{post.day_number}",
             caption=post.caption,
@@ -171,8 +190,10 @@ def _generate_missing_image(post: ContentPost) -> None:
             description=brand_dna.description,
             audience=brand_dna.audience,
             product_image_bytes=product_image_bytes,
+            brand_dna=brand_dna,
+            post_data={'caption': post.caption},
         )
-        post.save(update_fields=['image_url', 'image_urls'])
+        post.save(update_fields=['image_url', 'image_urls', 'video_url'])
     except Exception as img_err:
         logger.warning(f"Imagen día {post.day_number} falló (no fatal): {img_err}")
 
@@ -227,12 +248,17 @@ def generate_next_week(calendar_id: str, week_number: int) -> None:
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
         product_images_bytes = _load_product_images(calendar.active_product_images)
         _disable_carousel_if_full_product_week(posts_data, product_images_bytes)
+        if _product_image_for_day(1, product_images_bytes) is not None:
+            posts_data[0]['format'] = ContentPost.FORMAT_SINGLE
+
+        reel_script_gen = ReelScriptGenerator()
+        reel_gen = ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
 
         for i, post_data in enumerate(posts_data, start=1):
             scheduled = scheduled_dates[i - 1]
             day_product = _product_image_for_day(i, product_images_bytes)
-            image_url, image_urls = _generate_post_media(
-                image_gen,
+            image_url, image_urls, video_url = _generate_post_media(
+                image_gen, reel_script_gen, reel_gen,
                 fmt=post_data.get('format', ContentPost.FORMAT_SINGLE),
                 filename=f"{job_id}-day{base_day + i}",
                 caption=post_data['caption'],
@@ -243,6 +269,8 @@ def generate_next_week(calendar_id: str, week_number: int) -> None:
                 description=brand_dna.description,
                 audience=brand_dna.audience,
                 product_image_bytes=day_product,
+                brand_dna=brand_dna,
+                post_data=post_data,
             )
             ContentPost.objects.create(
                 calendar=calendar,
@@ -250,6 +278,7 @@ def generate_next_week(calendar_id: str, week_number: int) -> None:
                 caption=post_data['caption'],
                 image_url=image_url,
                 image_urls=image_urls,
+                video_url=video_url,
                 format=post_data.get('format', ContentPost.FORMAT_SINGLE),
                 suggested_time=scheduled.astimezone(MEXICO_TZ).time(),
                 hashtags=post_data.get('hashtags', []),

@@ -527,7 +527,7 @@ def calendar_feedback_api(request, job_id):
         _update_active_product_images(calendar, job, request, next_week)
         calendar.next_week_generating = True
         calendar.save(update_fields=['next_week_generating'])
-        django_rq.enqueue(generate_next_week, str(calendar.id), next_week, job_timeout=1500)
+        django_rq.enqueue(generate_next_week, str(calendar.id), next_week, job_timeout=2400)
 
     return JsonResponse({'status': 'ok', 'continue_decision': feedback.continue_decision})
 
