@@ -2391,7 +2391,7 @@ Suite: 103 passed en `core.brand_dna` (mismo único fallo preexistente sin
 =================================================================
 HALLAZGO 51 — Horarios sugeridos por post son genéricos (casi siempre 5pm/10am)
 Categoría: Calidad de contenido / backend
-Estado: 🟡 Pendiente de investigar — no implementado
+Estado: ✅ RESUELTO — 2026-07-13
 =================================================================
 Surfaceado por: Anuar, revisando el símbolo de correo (📧) y horario junto a
   cada post en calendar_review.html.
@@ -2409,8 +2409,22 @@ Acción recomendada: revisar la tabla de `smart_scheduler.py` — probablemente
   colapsa hacia los mismos 2 horarios en la mayoría de los casos. No
   diagnosticado a fondo esta sesión, solo detectado.
 
+Causa raíz encontrada: `detect_industry()` solo reconocía 5 rubros (food/
+  fitness/retail/beauty/tech). Cualquier negocio fuera de esos — mascotas,
+  salud, servicios profesionales, muy comunes en el ICP actual (H28) — caía
+  en `'default'`, que solo tenía 3 horas distintas (9/10/11am) en los 7 días.
+  De ahí la sensación de "siempre lo mismo".
+
+Fix: 3 industrias nuevas (health, pets, professional) con horarios propios
+  y variados; `'default'` diversificado como mejor catch-all. Bug adicional
+  encontrado en el camino: keywords sueltas de 1 palabra corta ('ia', 'spa')
+  hacían match por substring dentro de palabras comunes en español
+  ("veterinaria" contiene "ia", "despacho" contiene "spa") — corregido.
+  También se agregó normalización de acentos en la comparación (no existía
+  antes — "pediátricas" no matcheaba "pediatra"). 4 tests nuevos.
+
 Severidad: Baja (no rompe nada, reduce la percepción de personalización)
-Prioridad: P2
+Prioridad: — (resuelto)
 
 =================================================================
 CAMBIOS APLICADOS — 2026-07-12 (segunda mitad) — pulido pre-deploy
