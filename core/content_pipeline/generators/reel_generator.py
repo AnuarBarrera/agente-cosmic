@@ -234,7 +234,12 @@ class ReelGenerator:
                     cmd += ['-filter_complex', filter_complex, '-map', '0:v', '-map', '[a]']
                 else:
                     cmd += ['-map', '0:v', '-map', '1:a']
-                cmd += ['-t', str(duration), '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path]
+                # SIN -shortest: la duracion del video (fijada por -t) manda. La
+                # narracion (TTS, ~15-20s hablados) suele ser mas corta que el video
+                # (24s) — con -shortest el output entero se recortaba a la pista de
+                # audio mas corta, perdiendo el CTA de los ultimos 3s. Sin ese flag,
+                # el audio simplemente termina en silencio y el video sigue completo.
+                cmd += ['-t', str(duration), '-c:v', 'copy', '-c:a', 'aac', output_path]
                 subprocess.run(cmd, check=True, capture_output=True)
 
             with open(output_path, 'rb') as f:
