@@ -3,7 +3,7 @@ from django.test import override_settings
 
 from core.content_pipeline.generators.reel_generator import (
     _escape_drawtext, _wrap_text, _hex_to_ffmpeg_color, _measure_text_width,
-    _build_hook_filter_parts, _build_cta_filter_parts,
+    _build_hook_filter_parts, _build_cta_filter_parts, _CTA_FONTSIZE,
 )
 
 
@@ -97,6 +97,12 @@ class TestBuildCtaFilterParts:
         assert 'boxcolor=0x002951@1.0' in parts[0]
         assert "enable='between(t,21.0,24.0)'" in parts[0]
         assert last_label == 'cta0'
+
+    def test_scale_shrinks_fontsize_and_box_border(self):
+        parts_full, _ = _build_cta_filter_parts('Compra ahora', '#002951', '0:v', 21.0, 24.0, scale=1.0)
+        parts_scaled, _ = _build_cta_filter_parts('Compra ahora', '#002951', '0:v', 21.0, 24.0, scale=0.5)
+        assert f'fontsize={_CTA_FONTSIZE}' in parts_full[0]
+        assert f'fontsize={_CTA_FONTSIZE // 2}' in parts_scaled[0]
 
 
 class TestGenerateVideoClips:
@@ -240,19 +246,27 @@ _FAKE_SCRIPT_FOR_ASSEMBLE = {
 }
 
 
+def _fake_ffmpeg_run(fake_output: bytes):
+    # _assemble_reel ahora llama ffprobe (via _probe_video_width) para saber el
+    # ancho real del video de Veo antes de posicionar el hook — ese subprocess
+    # no escribe a un archivo de salida como los demas, lee de stdout.
+    def run(cmd, *args, **kwargs):
+        if cmd[0] == 'ffprobe':
+            return MagicMock(returncode=0, stdout='1080\n')
+        with open(cmd[-1], 'wb') as f:
+            f.write(fake_output)
+        return MagicMock(returncode=0)
+    return run
+
+
 class TestAssembleReel:
     def test_calls_ffmpeg_and_returns_output_bytes(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
         fake_output = b'fake-mp4-bytes'
 
-        def fake_run(cmd, *args, **kwargs):
-            output_path = cmd[-1]
-            with open(output_path, 'wb') as f:
-                f.write(fake_output)
-            return MagicMock(returncode=0)
-
-        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=fake_run) as mock_run:
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=_fake_ffmpeg_run(fake_output)) as mock_run:
             result = gen._assemble_reel(
                 clips=[b'clip1', b'clip2', b'clip3'],
                 music=b'music-bytes',
@@ -261,7 +275,7 @@ class TestAssembleReel:
                 colors=['#1a1a2e'],
             )
         assert result == fake_output
-        assert mock_run.call_count == 3
+        assert mock_run.call_count == 4  # concat, ffprobe, overlay-drawtext, audio-mix
         mix_cmd = mock_run.call_args_list[-1].args[0]
         assert '-f s16le -ar 24000 -ac 1 -i' in ' '.join(mix_cmd)
         assert '-filter_complex' in mix_cmd
@@ -274,12 +288,8 @@ class TestAssembleReel:
         gen = ReelGenerator(bucket_name='test-bucket')
         fake_output = b'fake-mp4-bytes'
 
-        def fake_run(cmd, *args, **kwargs):
-            with open(cmd[-1], 'wb') as f:
-                f.write(fake_output)
-            return MagicMock(returncode=0)
-
-        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=fake_run):
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=_fake_ffmpeg_run(fake_output)):
             result = gen._assemble_reel(
                 clips=[b'clip1', b'clip2', b'clip3'],
                 music=None,
@@ -294,18 +304,14 @@ class TestAssembleReel:
         gen = ReelGenerator(bucket_name='test-bucket')
         fake_output = b'fake-mp4-bytes'
 
-        def fake_run(cmd, *args, **kwargs):
-            with open(cmd[-1], 'wb') as f:
-                f.write(fake_output)
-            return MagicMock(returncode=0)
-
-        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=fake_run) as mock_run:
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=_fake_ffmpeg_run(fake_output)) as mock_run:
             gen._assemble_reel(
                 clips=[b'clip1', b'clip2', b'clip3'],
                 music=None, narration=None,
                 script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
             )
-        overlay_cmd = mock_run.call_args_list[1].args[0]
+        overlay_cmd = mock_run.call_args_list[2].args[0]
         assert overlay_cmd.count('-i') == 1  # solo concat_path, sin PNGs de hook/cta como input
         filter_complex_idx = overlay_cmd.index('-filter_complex')
         filter_complex = overlay_cmd[filter_complex_idx + 1]
@@ -314,21 +320,46 @@ class TestAssembleReel:
         map_idx = overlay_cmd.index('-map')
         assert overlay_cmd[map_idx + 1] == '[cta0]'
 
+    def test_hook_centering_uses_real_probed_width(self, tmp_path):
+        # Veo no garantiza 1080px (en produccion real devolvio 720x1280) — el
+        # cursor del segmento resaltado del hook debe usar el ancho real
+        # detectado via ffprobe, no un valor fijo.
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-mp4-bytes'
+
+        def run(cmd, *args, **kwargs):
+            if cmd[0] == 'ffprobe':
+                return MagicMock(returncode=0, stdout='720\n')
+            with open(cmd[-1], 'wb') as f:
+                f.write(fake_output)
+            return MagicMock(returncode=0)
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=run) as mock_run:
+            gen._assemble_reel(
+                clips=[b'clip1', b'clip2', b'clip3'],
+                music=None, narration=None,
+                script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
+            )
+        overlay_cmd = mock_run.call_args_list[2].args[0]
+        filter_complex = overlay_cmd[overlay_cmd.index('-filter_complex') + 1]
+        # con ancho real 720 el cursor de 'nuevo' (resaltado, al final de la
+        # linea) debe quedar bien a la izquierda de 720, nunca cerca de 1080
+        highlight_filter = [p for p in filter_complex.split(';') if "text='nuevo'" in p][0]
+        x_value = int(highlight_filter.split('x=')[1].split(':')[0])
+        assert x_value < 720
+
     def test_adds_drawtext_filters_for_subtitles(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
         fake_output = b'fake-mp4-bytes'
 
-        def fake_run(cmd, *args, **kwargs):
-            with open(cmd[-1], 'wb') as f:
-                f.write(fake_output)
-            return MagicMock(returncode=0)
-
         subtitles = [
             {'text': 'Tu negocio en linea.', 'start': 0.0, 'end': 2.5},
             {'text': 'Contactanos hoy.', 'start': 2.5, 'end': 5.0},
         ]
-        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=fake_run) as mock_run:
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=_fake_ffmpeg_run(fake_output)) as mock_run:
             result = gen._assemble_reel(
                 clips=[b'clip1', b'clip2', b'clip3'],
                 music=None, narration=None,
@@ -336,7 +367,7 @@ class TestAssembleReel:
                 subtitles=subtitles,
             )
         assert result == fake_output
-        overlay_cmd = mock_run.call_args_list[1].args[0]
+        overlay_cmd = mock_run.call_args_list[2].args[0]
         filter_complex_idx = overlay_cmd.index('-filter_complex')
         filter_complex = overlay_cmd[filter_complex_idx + 1]
         assert "text='Tu negocio en linea.'" in filter_complex
@@ -351,18 +382,14 @@ class TestAssembleReel:
         gen = ReelGenerator(bucket_name='test-bucket')
         fake_output = b'fake-mp4-bytes'
 
-        def fake_run(cmd, *args, **kwargs):
-            with open(cmd[-1], 'wb') as f:
-                f.write(fake_output)
-            return MagicMock(returncode=0)
-
-        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=fake_run) as mock_run:
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=_fake_ffmpeg_run(fake_output)) as mock_run:
             gen._assemble_reel(
                 clips=[b'clip1', b'clip2', b'clip3'],
                 music=None, narration=None,
                 script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
             )
-        overlay_cmd = mock_run.call_args_list[1].args[0]
+        overlay_cmd = mock_run.call_args_list[2].args[0]
         filter_complex_idx = overlay_cmd.index('-filter_complex')
         filter_complex = overlay_cmd[filter_complex_idx + 1]
         assert 'sub0' not in filter_complex

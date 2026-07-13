@@ -48,7 +48,6 @@ _CTA_MAX_CHARS = 24
 _CTA_BOX_BORDERW = 24
 
 _SUBTITLE_FONTSIZE = 42
-_SUBTITLE_Y = 'h-300'
 
 _font_cache: dict[int, ImageFont.FreeTypeFont] = {}
 
@@ -91,9 +90,29 @@ def _measure_text_width(text: str, fontsize: int) -> int:
     return int(_font_cache[fontsize].getlength(text))
 
 
+def _probe_video_width(video_path: str) -> int:
+    # Veo NO garantiza 1080px de ancho para aspect_ratio='9:16' — en la practica
+    # veo-3.0-fast-generate-001 devolvio 720x1280 en produccion real. El
+    # centrado nativo de ffmpeg ((w-text_w)/2, usado por CTA/subtitulos/lineas
+    # de hook sin resaltado) ya se ajusta solo a esto porque 'w' es dinamico,
+    # pero el posicionamiento manual de los 3 segmentos del hook resaltado
+    # necesita el ancho real para calcular el cursor, no un valor fijo.
+    result = subprocess.run(
+        ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+         '-show_entries', 'stream=width', '-of', 'csv=p=0', video_path],
+        check=True, capture_output=True, text=True,
+    )
+    return int(result.stdout.strip())
+
+
 def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color: str,
-                              source_label: str) -> tuple[list[str], str]:
+                              source_label: str, video_width: int = _VIDEO_WIDTH,
+                              scale: float = 1.0) -> tuple[list[str], str]:
     box_color = _hex_to_ffmpeg_color(primary_color)
+    fontsize = max(1, int(_HOOK_FONTSIZE * scale))
+    line_height = int(_HOOK_LINE_HEIGHT * scale)
+    top_y = int(_HOOK_TOP_Y * scale)
+    box_borderw = max(1, int(_HOOK_BOX_BORDERW * scale))
     lines = _wrap_text(hook_text, max_chars=_HOOK_MAX_CHARS).split('\n')
     highlight_lower = highlight_word.strip().lower()
     filter_parts = []
@@ -101,14 +120,14 @@ def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color:
     enable = f"between(t,0,{_HOOK_END_SECONDS})"
 
     for i, line in enumerate(lines):
-        y = _HOOK_TOP_Y + i * _HOOK_LINE_HEIGHT
+        y = top_y + i * line_height
         idx = line.lower().find(highlight_lower) if highlight_lower else -1
 
         if idx == -1:
             next_label = f'hook{i}'
             filter_parts.append(
                 f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{_escape_drawtext(line)}':"
-                f"fontsize={_HOOK_FONTSIZE}:fontcolor=white:borderw=3:bordercolor=black:"
+                f"fontsize={fontsize}:fontcolor=white:borderw=3:bordercolor=black:"
                 f"x=(w-text_w)/2:y={y}:enable='{enable}'[{next_label}]"
             )
             last_label = next_label
@@ -117,17 +136,17 @@ def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color:
         before = line[:idx]
         highlight = line[idx:idx + len(highlight_word)]
         after = line[idx + len(highlight_word):]
-        before_w = _measure_text_width(before, _HOOK_FONTSIZE)
-        highlight_w = _measure_text_width(highlight, _HOOK_FONTSIZE)
-        after_w = _measure_text_width(after, _HOOK_FONTSIZE)
-        total_w = before_w + highlight_w + 2 * _HOOK_BOX_BORDERW + after_w
-        cursor = (_VIDEO_WIDTH - total_w) // 2
+        before_w = _measure_text_width(before, fontsize)
+        highlight_w = _measure_text_width(highlight, fontsize)
+        after_w = _measure_text_width(after, fontsize)
+        total_w = before_w + highlight_w + 2 * box_borderw + after_w
+        cursor = (video_width - total_w) // 2
 
         if before:
             next_label = f'hook{i}a'
             filter_parts.append(
                 f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{_escape_drawtext(before)}':"
-                f"fontsize={_HOOK_FONTSIZE}:fontcolor=white:borderw=3:bordercolor=black:"
+                f"fontsize={fontsize}:fontcolor=white:borderw=3:bordercolor=black:"
                 f"x={cursor}:y={y}:enable='{enable}'[{next_label}]"
             )
             last_label = next_label
@@ -136,18 +155,18 @@ def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color:
         next_label = f'hook{i}b'
         filter_parts.append(
             f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{_escape_drawtext(highlight)}':"
-            f"fontsize={_HOOK_FONTSIZE}:fontcolor=0x1a1a2e:box=1:boxcolor={box_color}@1.0:"
-            f"boxborderw={_HOOK_BOX_BORDERW}:x={cursor + _HOOK_BOX_BORDERW}:y={y}:"
+            f"fontsize={fontsize}:fontcolor=0x1a1a2e:box=1:boxcolor={box_color}@1.0:"
+            f"boxborderw={box_borderw}:x={cursor + box_borderw}:y={y}:"
             f"enable='{enable}'[{next_label}]"
         )
         last_label = next_label
-        cursor += highlight_w + 2 * _HOOK_BOX_BORDERW
+        cursor += highlight_w + 2 * box_borderw
 
         if after:
             next_label = f'hook{i}c'
             filter_parts.append(
                 f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{_escape_drawtext(after)}':"
-                f"fontsize={_HOOK_FONTSIZE}:fontcolor=white:borderw=3:bordercolor=black:"
+                f"fontsize={fontsize}:fontcolor=white:borderw=3:bordercolor=black:"
                 f"x={cursor}:y={y}:enable='{enable}'[{next_label}]"
             )
             last_label = next_label
@@ -156,14 +175,16 @@ def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color:
 
 
 def _build_cta_filter_parts(cta_text: str, primary_color: str, source_label: str,
-                             cta_start: float, duration: float) -> tuple[list[str], str]:
+                             cta_start: float, duration: float, scale: float = 1.0) -> tuple[list[str], str]:
     box_color = _hex_to_ffmpeg_color(primary_color)
+    fontsize = max(1, int(_CTA_FONTSIZE * scale))
+    box_borderw = max(1, int(_CTA_BOX_BORDERW * scale))
     text = _escape_drawtext(_wrap_text(cta_text, max_chars=_CTA_MAX_CHARS))
     next_label = 'cta0'
     filter_part = (
         f"[{source_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{text}':"
-        f"fontsize={_CTA_FONTSIZE}:fontcolor=0x1a1a2e:box=1:boxcolor={box_color}@1.0:"
-        f"boxborderw={_CTA_BOX_BORDERW}:x=(w-text_w)/2:y=(h-text_h)/2:"
+        f"fontsize={fontsize}:fontcolor=0x1a1a2e:box=1:boxcolor={box_color}@1.0:"
+        f"boxborderw={box_borderw}:x=(w-text_w)/2:y=(h-text_h)/2:"
         f"enable='between(t,{cta_start},{duration})'[{next_label}]"
     )
     return [filter_part], next_label
@@ -325,22 +346,31 @@ class ReelGenerator:
             duration = len(clips) * _VEO_CLIP_DURATION_SECONDS
             cta_start = max(0, duration - 3)
             primary_color = colors[0] if colors else '#e94560'
+            video_width = _probe_video_width(concat_path)
+            # Todas las constantes de tamano/posicion (fontsize, box borders, Y)
+            # estan calibradas para un video de 1080px de ancho — Veo no
+            # garantiza esa resolucion (en produccion real devolvio 720x1280),
+            # asi que se escalan proporcionalmente al ancho real detectado.
+            scale = video_width / _VIDEO_WIDTH
 
             filter_parts, last_label = _build_hook_filter_parts(
                 script['hook_text'], script['highlight_word'], primary_color, '0:v',
+                video_width=video_width, scale=scale,
             )
             cta_parts, last_label = _build_cta_filter_parts(
-                script['tag_cta'], primary_color, last_label, cta_start, duration,
+                script['tag_cta'], primary_color, last_label, cta_start, duration, scale=scale,
             )
             filter_parts += cta_parts
 
+            subtitle_fontsize = max(1, int(_SUBTITLE_FONTSIZE * scale))
+            subtitle_y_offset = int(300 * scale)
             for i, sub in enumerate(subtitles or []):
                 next_label = f'sub{i}'
                 text = _escape_drawtext(_wrap_text(sub['text']))
                 filter_parts.append(
                     f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{text}':"
-                    f"fontcolor=white:fontsize={_SUBTITLE_FONTSIZE}:borderw=3:bordercolor=black:"
-                    f"x=(w-text_w)/2:y={_SUBTITLE_Y}:"
+                    f"fontcolor=white:fontsize={subtitle_fontsize}:borderw=3:bordercolor=black:"
+                    f"x=(w-text_w)/2:y=h-{subtitle_y_offset}:"
                     f"enable='between(t,{sub['start']},{sub['end']})'[{next_label}]"
                 )
                 last_label = next_label
