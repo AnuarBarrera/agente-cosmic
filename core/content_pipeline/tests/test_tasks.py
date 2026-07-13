@@ -102,6 +102,53 @@ def test_content_generation_marks_job_done(job_with_dna):
     assert job_with_dna.progress == 100
 
 
+_MOCK_POSTS_WITH_CAROUSEL = [
+    {'caption': f'Post {i}', 'hashtags': ['#test'], 'suggested_time': '19:00',
+     'format': 'carousel' if i == 3 else 'single'}
+    for i in range(1, 8)
+]
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    DEFAULT_FROM_EMAIL='noreply@test.com',
+)
+def test_content_generation_uses_carousel_for_carousel_day(job_with_dna):
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS_WITH_CAROUSEL
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+        MockImage.return_value.generate_carousel.return_value = [
+            'https://storage.googleapis.com/test/slide1.jpg',
+            'https://storage.googleapis.com/test/slide2.jpg',
+            'https://storage.googleapis.com/test/slide3.jpg',
+        ]
+
+        from core.content_pipeline.tasks import content_generation_task
+        content_generation_task(str(job_with_dna.id))
+
+    assert MockImage.return_value.generate.call_count == 6
+    assert MockImage.return_value.generate_carousel.call_count == 1
+    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna).order_by('day_number')
+    carousel_post = posts.get(day_number=3)
+    assert carousel_post.format == 'carousel'
+    assert carousel_post.image_url == 'https://storage.googleapis.com/test/slide1.jpg'
+    assert carousel_post.image_urls == [
+        'https://storage.googleapis.com/test/slide1.jpg',
+        'https://storage.googleapis.com/test/slide2.jpg',
+        'https://storage.googleapis.com/test/slide3.jpg',
+    ]
+    non_carousel_posts = [p for p in posts if p.day_number != 3]
+    assert all(p.format == 'single' and p.image_urls == [] for p in non_carousel_posts)
+
+
 def test_load_product_images_takes_paths_list(tmp_path, settings):
     settings.MEDIA_ROOT = str(tmp_path)
     uploads_dir = tmp_path / 'uploads'
@@ -218,6 +265,26 @@ def test_backfill_image_task_generates_missing_image(calendar_with_dna):
 
     post.refresh_from_db()
     assert post.image_url == 'https://storage.googleapis.com/test/img.png?v=123'
+
+
+def test_backfill_image_task_uses_carousel_when_post_format_is_carousel(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 3, image_url='', format='carousel')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
+        MockImage.return_value.generate_carousel.return_value = [
+            'https://storage.googleapis.com/test/slide1.png',
+            'https://storage.googleapis.com/test/slide2.png',
+        ]
+        from core.content_pipeline.tasks import backfill_image_task
+        backfill_image_task(str(post.id))
+
+    MockImage.return_value.generate.assert_not_called()
+    MockImage.return_value.generate_carousel.assert_called_once()
+    post.refresh_from_db()
+    assert post.image_url == 'https://storage.googleapis.com/test/slide1.png'
+    assert post.image_urls == [
+        'https://storage.googleapis.com/test/slide1.png',
+        'https://storage.googleapis.com/test/slide2.png',
+    ]
 
 
 def test_backfill_image_task_skips_post_with_existing_image(calendar_with_dna):

@@ -944,3 +944,171 @@ class TestUploadToStorage:
             url1 = gen._upload_to_storage(b'fake-bytes-v1', 'job1-day3')
             url2 = gen._upload_to_storage(b'fake-bytes-v2', 'job1-day3')
         assert url1 != url2
+
+
+class TestGenerateCarouselSlidesContent:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_num_slides_items_on_fallback(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            slides = gen._generate_carousel_slides_content('Nuestros clientes confian en nosotros', num_slides=4)
+        assert len(slides) == 4
+        for slide in slides:
+            assert set(slide.keys()) == {'headline', 'subtitle', 'cta', 'tag'}
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_only_last_slide_has_real_cta_on_fallback(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            slides = gen._generate_carousel_slides_content('Nuestros clientes confian en nosotros', num_slides=3)
+        assert slides[-1]['cta'] == 'Contáctanos hoy'
+        assert all(s['cta'] == 'Desliza para ver más' for s in slides[:-1])
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_parses_valid_gemini_response_in_order(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = (
+                '[{"headline":"El problema","subtitle":"Antes batallaban","cta":"Desliza","tag":"TESTIMONIO"},'
+                '{"headline":"La solucion","subtitle":"Encontraron su respuesta","cta":"Desliza","tag":"TESTIMONIO"},'
+                '{"headline":"El resultado","subtitle":"Hoy estan felices","cta":"Contáctanos hoy","tag":"TESTIMONIO"}]'
+            )
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            slides = gen._generate_carousel_slides_content('Caption de testimonio', num_slides=3)
+        assert [s['headline'] for s in slides] == ['El problema', 'La solucion', 'El resultado']
+        assert slides[-1]['cta'] == 'Contáctanos hoy'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_fills_missing_items_with_fallback_when_gemini_returns_fewer(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '[{"headline":"Unica slide","subtitle":"Sub","cta":"Desliza","tag":"TESTIMONIO"}]'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            slides = gen._generate_carousel_slides_content('Caption', num_slides=4)
+        assert len(slides) == 4
+        assert slides[0]['headline'] == 'Unica slide'
+
+
+class TestGenerateCarousel:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_one_url_per_slide(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_bg = _png_bytes()
+        fake_shot = _png_bytes(size=(1080, 1080))
+        fake_slides = [
+            {'headline': f'H{i}', 'subtitle': 'S', 'cta': 'CTA', 'tag': 'TAG'} for i in range(4)
+        ]
+        with patch.object(gen, '_generate_background', return_value=fake_bg), \
+             patch.object(gen, '_generate_carousel_slides_content', return_value=fake_slides), \
+             patch.object(gen, '_render_html_template', return_value=fake_shot), \
+             patch.object(gen, '_upload_to_storage', side_effect=[f'https://storage.test/slide{i}.png' for i in range(4)]) as mock_upload:
+            urls = gen.generate_carousel('Caption', ['#1a1a2e'], 'profesional', 'job1-day3', num_slides=4)
+        assert len(urls) == 4
+        assert urls == [f'https://storage.test/slide{i}.png' for i in range(4)]
+        uploaded_filenames = [call.args[1] for call in mock_upload.call_args_list]
+        assert uploaded_filenames == ['job1-day3-slide1', 'job1-day3-slide2', 'job1-day3-slide3', 'job1-day3-slide4']
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_generates_background_only_once_for_all_slides(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_bg = _png_bytes()
+        fake_shot = _png_bytes(size=(1080, 1080))
+        fake_slides = [{'headline': f'H{i}', 'subtitle': 'S', 'cta': 'CTA', 'tag': 'TAG'} for i in range(4)]
+        with patch.object(gen, '_generate_background', return_value=fake_bg) as mock_bg, \
+             patch.object(gen, '_generate_carousel_slides_content', return_value=fake_slides), \
+             patch.object(gen, '_render_html_template', return_value=fake_shot) as mock_render, \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/slide.png'):
+            gen.generate_carousel('Caption', ['#1a1a2e'], 'profesional', 'job1-day3', num_slides=4)
+        mock_bg.assert_called_once()
+        assert mock_render.call_count == 4
+        for call in mock_render.call_args_list:
+            assert call.args[0] == fake_bg
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_uses_product_scene_when_product_image_provided(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_bg = _png_bytes()
+        fake_shot = _png_bytes(size=(1080, 1080))
+        fake_slides = [{'headline': 'H', 'subtitle': 'S', 'cta': 'CTA', 'tag': 'TAG'}] * 3
+        product_img = _png_bytes((200, 50, 50))
+        with patch.object(gen, '_generate_product_scene', return_value=(fake_bg, '<svg></svg>')) as mock_scene, \
+             patch.object(gen, '_generate_background') as mock_no_product_bg, \
+             patch.object(gen, '_generate_carousel_slides_content', return_value=fake_slides), \
+             patch.object(gen, '_render_html_template', return_value=fake_shot), \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/slide.png'):
+            gen.generate_carousel('Caption', ['#1a1a2e'], 'profesional', 'job1-day3', product_image_bytes=product_img, num_slides=3)
+        mock_scene.assert_called_once()
+        mock_no_product_bg.assert_not_called()
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+    )
+    def test_returns_empty_list_on_error(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_background', side_effect=Exception('Background error')):
+            urls = gen.generate_carousel('Caption', ['#1a1a2e'], 'profesional', 'job1-day3')
+        assert urls == []
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_derives_font_seed_from_filename_without_day_suffix(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_bg = _png_bytes()
+        fake_shot = _png_bytes(size=(1080, 1080))
+        fake_slides = [{'headline': 'H', 'subtitle': 'S', 'cta': 'CTA', 'tag': 'TAG'}]
+        with patch.object(gen, '_generate_background', return_value=fake_bg), \
+             patch.object(gen, '_generate_carousel_slides_content', return_value=fake_slides), \
+             patch.object(gen, '_render_html_template', return_value=fake_shot) as mock_render, \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/slide.png'):
+            gen.generate_carousel('Caption', ['#1a1a2e'], 'profesional', 'job-abc-day3', num_slides=1)
+        assert mock_render.call_args.kwargs['font_seed'] == 'job-abc'

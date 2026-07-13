@@ -33,6 +33,17 @@ def _load_product_images(paths: list[str]) -> list[bytes]:
     return result
 
 
+def _generate_post_media(image_gen: ImageGenerator, fmt: str, filename: str, max_qc_retries: int = 2, **kwargs) -> tuple[str, list[str]]:
+    """Genera la imagen (o slides del carrusel, H20 + roadmap #5) de un post.
+    Retorna (image_url, image_urls) — image_url es siempre la portada/slide 1
+    para retrocompatibilidad (email, thumbnail, descarga por default)."""
+    if fmt == ContentPost.FORMAT_CAROUSEL:
+        urls = image_gen.generate_carousel(filename_prefix=filename, max_qc_retries=max_qc_retries, **kwargs)
+        return (urls[0] if urls else ''), urls
+    url = image_gen.generate(filename=filename, max_qc_retries=max_qc_retries, **kwargs)
+    return url, []
+
+
 def _product_image_for_day(day_in_week: int, images: list[bytes]) -> bytes | None:
     """Asigna imagen de producto por día dentro de la semana (1-7).
     - Si hay imagen para ese día exacto: úsala.
@@ -82,11 +93,13 @@ def content_generation_task(job_id: str) -> None:
         for i, post_data in enumerate(posts_data, start=1):
             scheduled = scheduled_dates[i - 1]
             day_product = _product_image_for_day(i, product_images_bytes)
-            image_url = image_gen.generate(
+            image_url, image_urls = _generate_post_media(
+                image_gen,
+                fmt=post_data.get('format', ContentPost.FORMAT_SINGLE),
+                filename=f"{job_id}-day{i}",
                 caption=post_data['caption'],
                 colors=brand_dna.primary_colors,
                 tone=brand_dna.tone,
-                filename=f"{job_id}-day{i}",
                 brand_name=brand_dna.business_name,
                 keywords=brand_dna.keywords,
                 description=brand_dna.description,
@@ -99,6 +112,8 @@ def content_generation_task(job_id: str) -> None:
                 day_number=i,
                 caption=post_data['caption'],
                 image_url=image_url,
+                image_urls=image_urls,
+                format=post_data.get('format', ContentPost.FORMAT_SINGLE),
                 suggested_time=scheduled.astimezone(MEXICO_TZ).time(),
                 hashtags=post_data.get('hashtags', []),
                 scheduled_at=scheduled,
@@ -133,18 +148,20 @@ def _generate_missing_image(post: ContentPost) -> None:
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
         product_images = _load_product_images(post.calendar.active_product_images)
         product_image_bytes = _product_image_for_day(day_in_week, product_images)
-        post.image_url = image_gen.generate(
+        post.image_url, post.image_urls = _generate_post_media(
+            image_gen,
+            fmt=post.format,
+            filename=f"{job_id}-day{post.day_number}",
             caption=post.caption,
             colors=brand_dna.primary_colors,
             tone=brand_dna.tone,
-            filename=f"{job_id}-day{post.day_number}",
             brand_name=brand_dna.business_name,
             keywords=brand_dna.keywords,
             description=brand_dna.description,
             audience=brand_dna.audience,
             product_image_bytes=product_image_bytes,
         )
-        post.save(update_fields=['image_url'])
+        post.save(update_fields=['image_url', 'image_urls'])
     except Exception as img_err:
         logger.warning(f"Imagen día {post.day_number} falló (no fatal): {img_err}")
 
@@ -202,11 +219,13 @@ def generate_next_week(calendar_id: str, week_number: int) -> None:
         for i, post_data in enumerate(posts_data, start=1):
             scheduled = scheduled_dates[i - 1]
             day_product = _product_image_for_day(i, product_images_bytes)
-            image_url = image_gen.generate(
+            image_url, image_urls = _generate_post_media(
+                image_gen,
+                fmt=post_data.get('format', ContentPost.FORMAT_SINGLE),
+                filename=f"{job_id}-day{base_day + i}",
                 caption=post_data['caption'],
                 colors=brand_dna.primary_colors,
                 tone=brand_dna.tone,
-                filename=f"{job_id}-day{base_day + i}",
                 brand_name=brand_dna.business_name,
                 keywords=brand_dna.keywords,
                 description=brand_dna.description,
@@ -218,6 +237,8 @@ def generate_next_week(calendar_id: str, week_number: int) -> None:
                 day_number=base_day + i,
                 caption=post_data['caption'],
                 image_url=image_url,
+                image_urls=image_urls,
+                format=post_data.get('format', ContentPost.FORMAT_SINGLE),
                 suggested_time=scheduled.astimezone(MEXICO_TZ).time(),
                 hashtags=post_data.get('hashtags', []),
                 scheduled_at=scheduled,

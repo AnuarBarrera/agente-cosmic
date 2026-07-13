@@ -177,6 +177,35 @@ class ImageGenerator:
             logger.error(f"ImageGenerator error: {e}")
             return ''
 
+    def generate_carousel(self, caption: str, colors: list[str], tone: str, filename_prefix: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2, num_slides: int = 4) -> list[str]:
+        """Genera un carrusel de `num_slides` (H20 + roadmap #5). Reutiliza UN solo
+        fondo (misma llamada a Imagen 3/BGSWAP que un post normal) y superpone
+        contenido de texto DISTINTO por slide — evita multiplicar el costo de
+        generacion de imagen por N mientras mantiene coherencia visual entre slides."""
+        try:
+            font_seed = filename_prefix.rsplit('-day', 1)[0] if '-day' in filename_prefix else filename_prefix
+            kw_str = ', '.join((keywords or [])[:4])
+            brand_ctx = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
+
+            if product_image_bytes:
+                background_bytes, svg_overlay = self._generate_product_scene(
+                    product_image_bytes, caption, colors, tone, max_qc_retries=max_qc_retries
+                )
+            else:
+                background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
+                svg_overlay = ''
+
+            slides_content = self._generate_carousel_slides_content(caption, brand_ctx, num_slides=num_slides)
+
+            urls = []
+            for i, slide_content in enumerate(slides_content, start=1):
+                image_bytes = self._render_html_template(background_bytes, slide_content, colors, svg_overlay=svg_overlay, font_seed=font_seed)
+                urls.append(self._upload_to_storage(image_bytes, f"{filename_prefix}-slide{i}"))
+            return urls
+        except Exception as e:
+            logger.error(f"ImageGenerator.generate_carousel error: {e}")
+            return []
+
     # ------------------------------------------------------------------
     # Layered pipeline
     # ------------------------------------------------------------------
@@ -669,6 +698,82 @@ class ImageGenerator:
         except Exception as e:
             logger.warning(f"Post content generation failed, using fallback: {e}")
         return _FALLBACK
+
+    def _generate_carousel_slides_content(self, caption: str, brand_context: str = '', num_slides: int = 4) -> list[dict]:
+        """Gemini genera {headline, subtitle, cta, tag} para cada slide de un carrusel,
+        como una sola llamada que mantiene coherencia narrativa entre slides (ej. problema
+        -> solucion -> resultado -> CTA), en vez de N llamadas independientes de _generate_post_content."""
+        _fallback_single = {
+            'headline': self._extract_headline(caption),
+            'subtitle': (caption[:120] if caption else '').strip(),
+            'cta': 'Contáctanos hoy',
+            'tag': 'TESTIMONIO',
+        }
+        fallback = [
+            {
+                'headline': _fallback_single['headline'] if i == num_slides - 1 else f"Testimonio {i + 1}",
+                'subtitle': _fallback_single['subtitle'],
+                'cta': _fallback_single['cta'] if i == num_slides - 1 else 'Desliza para ver más',
+                'tag': _fallback_single['tag'],
+            }
+            for i in range(num_slides)
+        ]
+        try:
+            client = _vertex_client()
+            ctx_line = f"ADN de marca: {brand_context}\n" if brand_context else ""
+            prompt = (
+                f"{ctx_line}"
+                f"Caption del post (pilar de prueba social/testimonio): \"{caption[:300]}\"\n\n"
+                f"Genera el contenido para un CARRUSEL de Instagram de exactamente {num_slides} slides "
+                "que cuenten una historia de prueba social en secuencia (ej: problema -> solucion -> "
+                "resultado -> cierre). Cada slide tiene 4 elementos:\n"
+                "1. headline: 3-6 palabras. Frase gancho para ese momento de la historia.\n"
+                "2. subtitle: 6-14 palabras. Amplia el headline. Español correcto.\n"
+                "3. cta: 2-4 palabras. En las slides intermedias usa una invitacion a seguir "
+                "viendo (ej. 'Desliza para ver más'); en la ULTIMA slide usa una llamada a la "
+                "accion real conectada al negocio (ej. 'Contáctanos hoy').\n"
+                "4. tag: 1-3 palabras EN MAYUSCULAS. Igual en todas las slides, categoria del sector.\n\n"
+                "REGLAS: Español impecable. Sin inventar palabras. No inventes datos verificables "
+                "falsos (cifras exactas, nombres reales) — usa lenguaje representativo tipo "
+                "'un cliente nos comento...'.\n"
+                f"Responde UNICAMENTE con un array JSON de {num_slides} objetos, EN ORDEN NARRATIVO, "
+                "sin markdown:\n"
+                '[{"headline":"...","subtitle":"...","cta":"...","tag":"..."}]'
+            )
+            with track_external_api('gemini', operation='carousel_content'):
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=(
+                            "Eres 'Cosmic', Director Creativo de Agente Cosmic. "
+                            "Generas contenido de marketing para redes sociales. "
+                            "Español impecable. Cero errores ortográficos. Nunca inventes palabras."
+                        ),
+                    ),
+                )
+            record_tokens(resp, operation='carousel_content',
+                          prompt_preview=prompt[:500],
+                          response_preview=resp.text[:500] if resp.text else '')
+            raw = resp.text.strip()
+            raw = re.sub(r'^```(?:json)?\n?', '', raw)
+            raw = re.sub(r'\n?```$', '', raw)
+            match = re.search(r'\[.*\]', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                slides = []
+                for i in range(num_slides):
+                    item = data[i] if i < len(data) else {}
+                    slides.append({
+                        'headline': str(item.get('headline', '')).strip() or fallback[i]['headline'],
+                        'subtitle': str(item.get('subtitle', '')).strip() or fallback[i]['subtitle'],
+                        'cta': str(item.get('cta', '')).strip() or fallback[i]['cta'],
+                        'tag': str(item.get('tag', '')).strip().upper() or fallback[i]['tag'],
+                    })
+                return slides
+        except Exception as e:
+            logger.warning(f"Carousel slides content generation failed, using fallback: {e}")
+        return fallback
 
     _TEMPLATES = [
         'instagram_post.html',         # lower third — texto abajo

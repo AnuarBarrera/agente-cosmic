@@ -412,10 +412,11 @@ def post_action_api(request, post_id):
         post.user_status = ContentPost.USER_STATUS_CHANGE_REQUESTED
         post.regen_count += 1
 
-        # Regenerar imagen con el nuevo caption
+        # Regenerar imagen (o slides del carrusel, H20 + roadmap #5) con el nuevo caption
         new_image_url = post.image_url
         try:
             from core.content_pipeline.generators.image_generator import ImageGenerator
+            from core.content_pipeline.tasks import _generate_post_media
             brand_dna = post.calendar.brand_dna
             job_id = str(brand_dna.job.id)
             image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
@@ -424,21 +425,25 @@ def post_action_api(request, post_id):
                 gcs_path = brand_dna.job.product_image_path
                 if upload_exists(gcs_path):
                     product_image_bytes = read_upload(gcs_path)
-            generated = image_gen.generate(
+            generated_url, generated_urls = _generate_post_media(
+                image_gen,
+                fmt=post.format,
+                filename=f"{job_id}-day{post.day_number}-regen-{int(_time.time())}",
                 caption=new_caption,
                 colors=brand_dna.primary_colors,
                 tone=brand_dna.tone,
-                filename=f"{job_id}-day{post.day_number}-regen-{int(_time.time())}",
                 brand_name=brand_dna.business_name,
                 keywords=brand_dna.keywords,
                 description=brand_dna.description,
+                audience=brand_dna.audience,
                 product_image_bytes=product_image_bytes,
                 max_qc_retries=0,  # regen es síncrono — sin reintentos QC para evitar timeout
             )
-            if generated:
-                new_image_url = generated
+            if generated_url:
+                new_image_url = generated_url
                 post.image_url = new_image_url
-                post.save(update_fields=['caption', 'user_note', 'user_status', 'image_url', 'regen_count'])
+                post.image_urls = generated_urls
+                post.save(update_fields=['caption', 'user_note', 'user_status', 'image_url', 'image_urls', 'regen_count'])
             else:
                 post.save(update_fields=['caption', 'user_note', 'user_status', 'regen_count'])
         except Exception as img_err:
@@ -450,6 +455,7 @@ def post_action_api(request, post_id):
             'status': 'ok',
             'caption': new_caption,
             'image_url': new_image_url,
+            'image_urls': post.image_urls,
             'remaining_regens': remaining - 1,
         })
 

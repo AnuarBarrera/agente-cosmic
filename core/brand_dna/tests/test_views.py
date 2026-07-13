@@ -299,6 +299,30 @@ def test_download_post_image_blocks_other_user(client, django_user_model, job_wi
     assert response.status_code == 404
 
 
+def test_regenerate_action_uses_carousel_when_post_format_is_carousel(client, user, job_with_calendar):
+    post = job_with_calendar.brand_dna.calendar.posts.get(day_number=3)
+    post.format = 'carousel'
+    post.save(update_fields=['format'])
+    client.force_login(user)
+    with patch('core.brand_dna.views._regenerate_caption', return_value='Nuevo caption'), \
+         patch('core.content_pipeline.generators.image_generator.ImageGenerator.generate_carousel',
+               return_value=['https://example.com/slide1.jpg', 'https://example.com/slide2.jpg']) as mock_carousel, \
+         patch('core.content_pipeline.generators.image_generator.ImageGenerator.generate') as mock_single:
+        response = client.post(
+            f'/api/post/{post.id}/action/',
+            data=json.dumps({'action': 'regenerate', 'value': 'Hazlo mas corto'}),
+            content_type='application/json',
+        )
+    assert response.status_code == 200
+    mock_carousel.assert_called_once()
+    mock_single.assert_not_called()
+    post.refresh_from_db()
+    assert post.image_url == 'https://example.com/slide1.jpg'
+    assert post.image_urls == ['https://example.com/slide1.jpg', 'https://example.com/slide2.jpg']
+    data = response.json()
+    assert data['image_urls'] == ['https://example.com/slide1.jpg', 'https://example.com/slide2.jpg']
+
+
 def test_mark_downloaded_sets_timestamp(client, user, job_with_calendar):
     post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
     client.force_login(user)

@@ -27,11 +27,23 @@ class ContentPost(models.Model):
         (STATUS_FAILED, 'Fallido'),
     ]
 
+    FORMAT_SINGLE = 'single'
+    FORMAT_CAROUSEL = 'carousel'
+    FORMAT_CHOICES = [
+        (FORMAT_SINGLE, 'Imagen única'),
+        (FORMAT_CAROUSEL, 'Carrusel'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     calendar = models.ForeignKey(ContentCalendar, on_delete=models.CASCADE, related_name='posts')
     day_number = models.IntegerField()
     caption = models.TextField()
     image_url = models.URLField(max_length=1000)
+    # Carrusel (H20 + roadmap #5): lista ordenada de URLs de slides, vacia para posts
+    # normales. image_url sigue siendo la portada/slide 1 para retrocompatibilidad
+    # (email, thumbnail del dashboard, endpoint de descarga por default).
+    image_urls = models.JSONField(default=list, blank=True)
+    format = models.CharField(max_length=20, choices=FORMAT_CHOICES, default=FORMAT_SINGLE)
     suggested_time = models.TimeField()
     hashtags = models.JSONField(default=list)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)

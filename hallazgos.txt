@@ -734,6 +734,51 @@ Acción recomendada:
 Severidad: Baja (semana 1 funciona, semanas posteriores afectadas)
 Prioridad: P2
 
+ACTUALIZACIÓN 2026-07-13 — RESUELTO, junto con roadmap #5 (carruseles)
+=================================================================
+Anuar reformuló el pedido durante la revisión del roadmap: los posts
+genéricos no generan impacto real en la cuenta del usuario; la solución
+correcta es implementar pilares de contenido (este hallazgo) Y usar el
+formato carrusel para UNO de esos pilares — no como feature manual aparte.
+Se implementó en 2 etapas:
+
+1. Pilares de contenido (`core/content_pipeline/generators/text_generator.py`):
+   `CONTENT_PILLARS` — exactamente los 7 pilares descritos arriba, en orden
+   fijo. El prompt de Gemini ahora exige que el post N de la respuesta use
+   el pilar N. Cada post generado queda etiquetado con `pillar` (nombre) y
+   `format` ('single' o 'carousel').
+
+2. Carrusel para el día 3 — "Prueba social" (`CAROUSEL_DAY = 3`, elegido por
+   encajar naturalmente con una narrativa de varias slides: problema →
+   solución → resultado → CTA). Decisión de scope de Anuar: 3-4 slides
+   (menos que las 6 de otras herramientas), por costo.
+   `ImageGenerator.generate_carousel()` en `image_generator.py`:
+     - Genera UN SOLO fondo (misma llamada a Imagen 3 / BGSWAP que un post
+       normal) y lo reutiliza en las N slides — así el costo de generación
+       de imagen NO se multiplica por slide, solo el copy varía.
+     - `_generate_carousel_slides_content()`: una sola llamada a Gemini que
+       genera los 4 textos (headline/subtitle/cta/tag) en una narrativa
+       coherente; solo la última slide lleva CTA real, las demás invitan a
+       "Desliza para ver más".
+   Modelo: `ContentPost` ganó `image_urls` (JSONField, lista ordenada de
+   URLs de slides) y `format` (choices 'single'/'carousel'). `image_url`
+   sigue siendo la portada/slide 1 para retrocompatibilidad total (email,
+   thumbnail del dashboard, endpoint de descarga por default).
+   Wiring: `content_generation_task`, `generate_next_week`,
+   `_generate_missing_image` (backfill) y la regeneración manual por
+   feedback del usuario (`post_action_api`, action=regenerate) — los 4
+   puntos que ya llamaban a `ImageGenerator.generate()` — ahora pasan por
+   un helper común `_generate_post_media()` que decide single vs. carousel
+   según `post.format`/`post_data['format']`.
+   UI: `calendar_review.html` muestra un badge "🎠 N slides" sobre la
+   portada y una tira de thumbnails clicables (cada uno abre la slide
+   completa en pestaña nueva) debajo de la card, solo para posts carrusel.
+   Verificado end-to-end con una generación real: mismo fondo en las 4
+   slides, texto narrativo distinto, CTA solo en la última.
+   Pendiente NO implementado (fuera de scope de este pase): el botón
+   "Descargar imagen" solo descarga la portada (slide 1); las demás slides
+   se obtienen abriendo el link directo de GCS desde la tira de thumbnails.
+
 =================================================================
 HALLAZGO 21 — No existe regeneración del calendario al terminar los 7 días
 Categoría: Retención / flujo post-semana
@@ -903,10 +948,14 @@ E6 — No existe dashboard de actividad para el admin/operador:
 ACTUALIZACIÓN 2026-07-12 (D3 carrusel + E1 auto-publicación, investigación
   sin implementar): Anuar exploró `miagent` (el repo del que Cosmic es
   fork) buscando patrones reutilizables. Hallazgos:
-  - D3 (carrusel): `CarouselTool` de miagent es el patrón a reutilizar —
-    Gemini genera 6 slides con roles fijos (hook/cuerpo/CTA), pero en
-    Cosmic cada fondo se generaría con Imagen 3 en vez de Pexels (6x el
-    costo/tiempo de un post normal). Sin construir.
+  - D3 (carrusel) — RESUELTO 2026-07-13, junto con H20 (pilares de
+    contenido): a diferencia del patrón original de miagent (6 slides, un
+    fondo nuevo de Pexels por slide), Cosmic implementó UN SOLO fondo de
+    Imagen 3 reutilizado en 3-4 slides (decisión de Anuar por costo — ver
+    HALLAZGO 20, actualización 2026-07-13) — evita el 6x/4x de costo que
+    preocupaba en esta nota. Carrusel es el formato del día 3 ("Prueba
+    social") del calendario semanal, no una feature manual aparte. Detalle
+    completo de implementación en HALLAZGO 20.
   - Tipografía — RESUELTO 2026-07-13: portado el patrón de miagent (5
     fuentes vía Google Fonts: Poppins, Playfair Display, Space Grotesk,
     Bebas Neue, DM Sans) a los 3 templates con `{{font_family}}`/
