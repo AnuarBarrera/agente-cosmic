@@ -111,6 +111,13 @@ def analyze_submit(request):
             'error': f'Subiste {len(prod_files)} fotos de producto — el máximo es 7. Quita algunas e intenta de nuevo.',
         })
 
+    from core.brand_dna.moderation import check_business_legitimacy
+    is_legit, _reason = check_business_legitimacy(business_name, business_description)
+    if not is_legit:
+        return render(request, 'brand_dna/new_analysis.html', {
+            'error': 'No pudimos procesar esta descripción. Revisa que describa un negocio real y vuelve a intentar.',
+        })
+
     business_description = f"{business_name}\n{business_description}"
 
     job = AnalysisJob.objects.create(
