@@ -32,6 +32,18 @@ _VEO_CLIP_DURATION_SECONDS = 8
 _SUBTITLE_FONT_PATH = os.path.normpath(os.path.join(
     os.path.dirname(__file__), '..', 'static', 'content_pipeline', 'fonts', 'Poppins-Bold.ttf',
 ))
+
+
+def _load_font_data_uri() -> str:
+    # Se calcula una sola vez por proceso (a nivel modulo) en vez de leer el
+    # archivo del disco en cada render — evita I/O y cualquier lectura file://
+    # lenta bajo CPU cargado (varios minutos de Veo/Lyria/TTS corriendo antes).
+    with open(_SUBTITLE_FONT_PATH, 'rb') as f:
+        encoded = base64.b64encode(f.read()).decode('ascii')
+    return f'data:font/ttf;base64,{encoded}'
+
+
+_SUBTITLE_FONT_DATA_URI = _load_font_data_uri()
 _SUBTITLE_FONTSIZE = 42
 _SUBTITLE_Y = 'h-300'
 
@@ -83,12 +95,13 @@ class ReelGenerator:
             html = f.read()
         primary = colors[0] if colors else '#e94560'
         html = html.replace('{{primary_color}}', primary)
-        # Fuente local (mismo archivo que usan los subtitulos de drawtext) en vez de
-        # @import de Google Fonts por red: bajo carga real (compitiendo con las
-        # llamadas a Veo/Lyria/TTS del mismo reel) esa descarga puede fallar o
-        # tardar, y Chromium cae a una fuente de reemplazo mas ancha que Poppins —
-        # el texto se desborda aunque el margen este bien calculado para Poppins.
-        html = html.replace('{{font_path}}', f'file://{_SUBTITLE_FONT_PATH}')
+        # Fuente embebida como data URI base64 (en vez de file:// o @import por
+        # red): cero I/O de disco o red durante el render — bajo CPU cargado
+        # (varios minutos de Veo/Lyria/TTS corriendo antes) cualquier lectura
+        # externa puede tardar y Chromium cae a una fuente de reemplazo mas
+        # ancha que Poppins, desbordando el texto aunque el margen este bien
+        # calculado. El data URI ya viene incluido en el HTML mismo.
+        html = html.replace('{{font_path}}', _SUBTITLE_FONT_DATA_URI)
 
         if style == 'hook':
             escaped = _html.escape(text)
@@ -111,14 +124,26 @@ class ReelGenerator:
                 page = browser.new_page(viewport={'width': 1080, 'height': 1920})
                 page.set_content(html, wait_until='load')
                 page.evaluate('document.fonts.ready')
+                # Fuerza un reflow sincrono (leer offsetHeight obliga al motor de
+                # layout a resolverse) y da 300ms de margen para que Chromium
+                # termine de pintar — bajo CPU cargado (proceso ya corriendo
+                # varios minutos junto a Veo/Lyria/TTS) el screenshot puede
+                # dispararse antes de que el layout/paint se haya asentado.
+                page.evaluate('document.body.offsetHeight')
+                page.wait_for_timeout(300)
                 # Verificacion defensiva: en produccion (proceso ya corriendo varios
                 # minutos junto a Veo/Lyria/TTS) se observo, de forma no reproducible
-                # en aislado, que el texto a veces se renderiza mas ancho que el
-                # contenedor pese a la fuente local — se mide el bounding box real
-                # y se reintenta una vez con un browser fresco antes de aceptar el
-                # resultado, mismo patron de reintento que ya usan Veo/Lyria.
-                box = page.locator(selector).bounding_box()
-                overflows = box is not None and (box['x'] < 0 or box['x'] + box['width'] > 1080)
+                # en aislado, que el texto a veces se renderiza mas ancho que su
+                # contenedor pese a la fuente local. bounding_box() del elemento NO
+                # sirve para detectar esto — el contenedor tiene un width fijo por
+                # CSS y su caja de layout se reporta igual aunque el TEXTO adentro
+                # se desborde. La forma correcta es comparar scrollWidth (ancho real
+                # del contenido) contra clientWidth (ancho visible del contenedor).
+                overflow_px = page.evaluate(
+                    f"() => {{ const el = document.querySelector('{selector}'); "
+                    f"return el.scrollWidth - el.clientWidth; }}"
+                )
+                overflows = overflow_px is not None and overflow_px > 2
                 png_bytes = page.screenshot(omit_background=True)
                 browser.close()
             if not overflows:

@@ -39,15 +39,20 @@ class TestWrapSubtitleText:
         assert result == 'Tu negocio en linea\nen menos de 48 horas'
 
 
-_SAFE_BOX = {'x': 100, 'y': 100, 'width': 800, 'height': 100}
-_OVERFLOWING_BOX = {'x': -20, 'y': 100, 'width': 1200, 'height': 100}
-
-
 class TestRenderTextOverlay:
-    def _make_mock_playwright(self, screenshot_bytes: bytes, bounding_boxes=None):
+    def _make_mock_playwright(self, screenshot_bytes: bytes, overflow_values=None):
+        # page.evaluate() se llama 3 veces por intento: 'document.fonts.ready'
+        # y el reflow forzado ('document.body.offsetHeight') — ambos con valor
+        # ignorado — y la medicion scrollWidth-clientWidth (el que importa).
+        overflow_values = overflow_values or [0, 0]
+        evaluate_side_effect = []
+        for val in overflow_values:
+            evaluate_side_effect.append(None)  # document.fonts.ready
+            evaluate_side_effect.append(None)  # document.body.offsetHeight (reflow forzado)
+            evaluate_side_effect.append(val)   # scrollWidth - clientWidth
         mock_page = MagicMock()
         mock_page.screenshot.return_value = screenshot_bytes
-        mock_page.locator.return_value.bounding_box.side_effect = bounding_boxes or [_SAFE_BOX, _SAFE_BOX]
+        mock_page.evaluate.side_effect = evaluate_side_effect
         mock_browser = MagicMock()
         mock_browser.new_page.return_value = mock_page
         mock_pw_instance = MagicMock()
@@ -91,7 +96,7 @@ class TestRenderTextOverlay:
         gen = ReelGenerator(bucket_name='test-bucket')
         fake_png = _png_bytes()
         mock_pw_context, mock_page = self._make_mock_playwright(
-            fake_png, bounding_boxes=[_OVERFLOWING_BOX, _SAFE_BOX],
+            fake_png, overflow_values=[40, 0],
         )
         with patch('core.content_pipeline.generators.reel_generator.sync_playwright', return_value=mock_pw_context):
             result = gen._render_text_overlay('Descubre algo nuevo', 'nuevo', 'hook', ['#e94560'])
@@ -103,7 +108,7 @@ class TestRenderTextOverlay:
         gen = ReelGenerator(bucket_name='test-bucket')
         fake_png = _png_bytes()
         mock_pw_context, mock_page = self._make_mock_playwright(
-            fake_png, bounding_boxes=[_OVERFLOWING_BOX, _OVERFLOWING_BOX],
+            fake_png, overflow_values=[40, 40],
         )
         with patch('core.content_pipeline.generators.reel_generator.sync_playwright', return_value=mock_pw_context):
             result = gen._render_text_overlay('Descubre algo nuevo', 'nuevo', 'hook', ['#e94560'])
