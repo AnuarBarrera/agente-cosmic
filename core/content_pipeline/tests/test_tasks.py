@@ -191,6 +191,104 @@ def test_disable_carousel_if_full_product_week_noop_with_fewer_than_7():
     assert posts_data[-1]['format'] == 'carousel'
 
 
+_MOCK_POSTS_WITH_REEL = [
+    {'caption': f'Post {i}', 'hashtags': ['#test'], 'suggested_time': '19:00',
+     'format': 'reel' if i == 1 else 'single'}
+    for i in range(1, 8)
+]
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    DEFAULT_FROM_EMAIL='noreply@test.com',
+)
+def test_content_generation_uses_reel_for_day_1_without_product_photo(job_with_dna):
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS_WITH_REEL
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+        MockScript.return_value.generate.return_value = {'hook_text': 'H', 'scene_prompts': ['a', 'b', 'c']}
+        MockReel.return_value.generate.return_value = ('https://storage.test/reel.mp4', 'https://storage.test/poster.png')
+
+        from core.content_pipeline.tasks import content_generation_task
+        content_generation_task(str(job_with_dna.id))
+
+    assert MockReel.return_value.generate.call_count == 1
+    assert MockImage.return_value.generate.call_count == 6
+    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna)
+    reel_post = posts.get(day_number=1)
+    assert reel_post.format == 'reel'
+    assert reel_post.video_url == 'https://storage.test/reel.mp4'
+    assert reel_post.image_url == 'https://storage.test/poster.png'
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    DEFAULT_FROM_EMAIL='noreply@test.com',
+)
+def test_content_generation_falls_back_to_image_when_reel_generation_fails(job_with_dna):
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS_WITH_REEL
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/fallback.jpg'
+        MockScript.return_value.generate.return_value = {'hook_text': 'H', 'scene_prompts': ['a', 'b', 'c']}
+        MockReel.return_value.generate.return_value = ('', '')
+
+        from core.content_pipeline.tasks import content_generation_task
+        content_generation_task(str(job_with_dna.id))
+
+    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna)
+    day1 = posts.get(day_number=1)
+    assert day1.format == 'reel'
+    assert day1.video_url == ''
+    assert day1.image_url == 'https://storage.googleapis.com/test/fallback.jpg'
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    DEFAULT_FROM_EMAIL='noreply@test.com',
+)
+def test_content_generation_skips_reel_when_day1_has_product_photo(job_with_dna):
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'), \
+         patch('core.content_pipeline.tasks._load_product_images', return_value=[b'foto-dia-1']):
+        MockText.return_value.generate.return_value = [dict(p) for p in _MOCK_POSTS_WITH_REEL]
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+
+        from core.content_pipeline.tasks import content_generation_task
+        content_generation_task(str(job_with_dna.id))
+
+    MockReel.return_value.generate.assert_not_called()
+    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna)
+    assert posts.get(day_number=1).format == 'single'
+
+
 def test_load_product_images_takes_paths_list(tmp_path, settings):
     settings.MEDIA_ROOT = str(tmp_path)
     uploads_dir = tmp_path / 'uploads'
