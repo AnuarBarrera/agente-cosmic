@@ -1,3 +1,4 @@
+import base64
 import html as _html
 import logging
 import os
@@ -130,7 +131,9 @@ class ReelGenerator:
                 )
             audio = getattr(interaction, 'output_audio', None)
             if audio is not None and getattr(audio, 'data', None):
-                return audio.data
+                # La API de Interactions (a diferencia de generate_content) devuelve
+                # AudioContent.data como string base64, no bytes crudos.
+                return base64.b64decode(audio.data)
             return None
         except Exception as e:
             logger.warning(f"Lyria music generation failed (reel sin musica): {e}")

@@ -97,10 +97,11 @@ class TestGenerateMusic:
         VERTEX_MUSIC_MODEL='lyria-3-clip-preview',
     )
     def test_returns_audio_bytes_on_success(self):
+        import base64
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
         mock_audio = MagicMock()
-        mock_audio.data = b'fake-music-bytes'
+        mock_audio.data = base64.b64encode(b'fake-music-bytes').decode()
         mock_interaction = MagicMock()
         mock_interaction.output_audio = mock_audio
         with patch('core.content_pipeline.generators.reel_generator.genai.Client') as mock_client_cls:
@@ -122,8 +123,8 @@ class TestGenerateMusic:
     def test_returns_none_on_api_error(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
-            mock_vc.return_value.interactions.create.side_effect = Exception('error')
+        with patch('core.content_pipeline.generators.reel_generator.genai.Client') as mock_client_cls:
+            mock_client_cls.return_value.interactions.create.side_effect = Exception('error')
             result = gen._generate_music('upbeat')
         assert result is None
 
