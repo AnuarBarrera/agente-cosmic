@@ -924,8 +924,24 @@ ACTUALIZACIÓN 2026-07-12 (D3 carrusel + E1 auto-publicación, investigación
     pública, ver H36 Capa 3 y sección "CAMBIOS APLICADOS — 2026-07-12").
     El resto (OAuth por tenant, dispatch a Graph API) sigue sin construir,
     bloqueado hasta que Meta apruebe la app — puede tardar semanas.
-  - Video: sin explorar acceso a Veo/Lyria todavía, fuera de alcance de
-    esta sesión.
+  - Video — ACTUALIZACIÓN 2026-07-13 (investigación de acceso, sin
+    implementar): verificado vía la API de Vertex AI (`publishers/google/
+    models/<id>`) que el proyecto `agente-cosmic` SÍ tiene acceso, en GA
+    (no preview restringido), a: `veo-2.0-generate-001`,
+    `veo-3.0-generate-001`, `veo-3.0-fast-generate-001` (video),
+    `lyria-002` (música), y `gemini-2.5-flash-tts` /
+    `gemini-2.5-pro-preview-tts` (voz en off). No hay bloqueante de acceso
+    — el proyecto ya podría usarlos hoy sin pedir permiso adicional a
+    Google.
+    Costo real a considerar antes de construir: Veo 3 cuesta $0.50/seg
+    (solo video) o $0.75/seg (con audio) en Vertex AI; Veo 3 Fast baja a
+    ~$0.10/seg sin audio. Un clip de 8 segundos con Veo 3 Fast (sin audio)
+    ≈ $0.80 — para un calendario de 7 días con un video por día eso son
+    ~$5.60/semana SOLO en video, muy por encima del ~$0.27/semana actual
+    de las 7 imágenes con Imagen 3 (H47). No se investigó pricing de Lyria
+    ni de los modelos TTS. Diseño del pipeline (guion, ensamblaje,
+    duración de clips) sigue sin hacerse — este hallazgo es solo "¿se
+    puede acceder?", no "¿cómo se construye?".
 
 Prioridad: P3 (roadmap), excepto el trámite de Meta App Review (E1) que ya
   está en curso como prerequisito de infraestructura, no como feature.
