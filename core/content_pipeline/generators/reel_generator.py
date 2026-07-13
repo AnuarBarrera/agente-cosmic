@@ -83,6 +83,12 @@ class ReelGenerator:
             html = f.read()
         primary = colors[0] if colors else '#e94560'
         html = html.replace('{{primary_color}}', primary)
+        # Fuente local (mismo archivo que usan los subtitulos de drawtext) en vez de
+        # @import de Google Fonts por red: bajo carga real (compitiendo con las
+        # llamadas a Veo/Lyria/TTS del mismo reel) esa descarga puede fallar o
+        # tardar, y Chromium cae a una fuente de reemplazo mas ancha que Poppins —
+        # el texto se desborda aunque el margen este bien calculado para Poppins.
+        html = html.replace('{{font_path}}', f'file://{_SUBTITLE_FONT_PATH}')
 
         if style == 'hook':
             escaped = _html.escape(text)

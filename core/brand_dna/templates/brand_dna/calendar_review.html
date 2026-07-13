@@ -240,7 +240,7 @@
         </div>
         {% endif %}
         <div class="actions">
-          <button class="btn-action btn-download" onclick="downloadImage('{{ post.id }}')">⬇ Descargar {% if post.format == 'carousel' %}carrusel (.zip){% elif post.format == 'reel' %}reel (.mp4){% else %}imagen{% endif %}</button>
+          <button class="btn-action btn-download" onclick="downloadImage('{{ post.id }}', '{{ post.format }}')">⬇ Descargar {% if post.format == 'carousel' %}carrusel (.zip){% elif post.format == 'reel' %}reel (.mp4){% else %}imagen{% endif %}</button>
           <button class="btn-action btn-edit" id="edit-btn-{{ post.id }}" onclick="startEdit('{{ post.id }}')" style="{% if post.downloaded_at %}display:none;{% endif %}">✏ Edita la descripción</button>
           <button class="btn-action btn-regen" id="regen-btn-{{ post.id }}" onclick="toggleRegen('{{ post.id }}')" style="{% if post.downloaded_at or post.format == 'reel' %}display:none;{% endif %}">↺ Regenera la imagen</button>
           <button class="btn-action btn-save" id="save-{{ post.id }}" onclick="saveEdit('{{ post.id }}')">Guardar</button>
@@ -250,7 +250,7 @@
           <button class="btn-send-regen" onclick="requestRegen('{{ post.id }}')">Regenerar con IA ✨</button>
         </div>
         <div class="downloaded-note" id="downloaded-note-{{ post.id }}" style="{% if not post.downloaded_at %}display:none;{% endif %}margin-top:10px;color:#4caf7d;font-size:0.78rem;font-weight:600;">
-          ✓ Imagen descargada
+          ✓ {% if post.format == 'carousel' %}Carrusel descargado{% elif post.format == 'reel' %}Reel descargado{% else %}Imagen descargada{% endif %}
         </div>
       </div>
     </div>
@@ -313,7 +313,7 @@
     statusEl.textContent = label;
   }
 
-  async function downloadImage(postId) {
+  async function downloadImage(postId, format) {
     // Descarga vía el backend (mismo origen) en vez de fetch() directo a GCS —
     // el bucket no manda headers CORS, asi que un fetch cross-origin fallaria en silencio.
     const a = document.createElement('a');
@@ -329,7 +329,8 @@
       if (editBtn) editBtn.style.display = 'none';
       if (regenBtn) regenBtn.style.display = 'none';
       document.getElementById('downloaded-note-' + postId).style.display = 'block';
-      showToast('Imagen descargada ✓');
+      const label = format === 'carousel' ? 'Carrusel descargado ✓' : format === 'reel' ? 'Reel descargado ✓' : 'Imagen descargada ✓';
+      showToast(label);
     }
   }
 
