@@ -252,7 +252,7 @@ class ReelGenerator:
             else:
                 cmd = ['ffmpeg', '-y', '-i', overlay_path] + audio_input_flags
                 if audio_stream_count == 2:
-                    filter_complex = '[1:a][2:a]amix=inputs=2:duration=shortest[a]'
+                    filter_complex = '[1:a]volume=0.3[music];[2:a][music]amix=inputs=2:duration=longest[a]'
                     cmd += ['-filter_complex', filter_complex, '-map', '0:v', '-map', '[a]']
                 else:
                     cmd += ['-map', '0:v', '-map', '1:a']

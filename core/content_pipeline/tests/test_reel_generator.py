@@ -213,6 +213,10 @@ class TestAssembleReel:
         assert mock_run.call_count == 3
         mix_cmd = mock_run.call_args_list[-1].args[0]
         assert '-f s16le -ar 24000 -ac 1 -i' in ' '.join(mix_cmd)
+        assert '-filter_complex' in mix_cmd
+        filter_complex_idx = mix_cmd.index('-filter_complex')
+        expected_filter = '[1:a]volume=0.3[music];[2:a][music]amix=inputs=2:duration=longest[a]'
+        assert mix_cmd[filter_complex_idx + 1] == expected_filter
 
     def test_works_without_music_or_narration(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
