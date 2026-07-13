@@ -10,6 +10,35 @@ def _png_bytes(color=(30, 30, 60), size=(64, 64)) -> bytes:
     return buf.getvalue()
 
 
+from core.content_pipeline.generators.reel_generator import (
+    _escape_drawtext, _wrap_subtitle_text,
+)
+
+
+class TestEscapeDrawtext:
+    def test_escapes_colon(self):
+        assert _escape_drawtext('Hola: bienvenido') == 'Hola\\: bienvenido'
+
+    def test_escapes_single_quote(self):
+        assert _escape_drawtext("Tu 'mejor' opcion") == "Tu \\'mejor\\' opcion"
+
+    def test_escapes_percent(self):
+        assert _escape_drawtext('50% de descuento') == '50\\% de descuento'
+
+    def test_escapes_backslash_first(self):
+        assert _escape_drawtext('a\\b') == 'a\\\\b'
+
+
+class TestWrapSubtitleText:
+    def test_returns_unchanged_when_short(self):
+        assert _wrap_subtitle_text('Hola mundo') == 'Hola mundo'
+
+    def test_wraps_long_text_into_two_lines(self):
+        text = 'Tu negocio en linea en menos de 48 horas'
+        result = _wrap_subtitle_text(text, max_chars=20)
+        assert result == 'Tu negocio en linea\nen menos de 48 horas'
+
+
 class TestRenderTextOverlay:
     def _make_mock_playwright(self, screenshot_bytes: bytes):
         mock_page = MagicMock()
@@ -238,6 +267,62 @@ class TestAssembleReel:
             )
         assert result == fake_output
 
+    def test_adds_drawtext_filters_for_subtitles(self, tmp_path):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-mp4-bytes'
+
+        def fake_run(cmd, *args, **kwargs):
+            with open(cmd[-1], 'wb') as f:
+                f.write(fake_output)
+            return MagicMock(returncode=0)
+
+        subtitles = [
+            {'text': 'Tu negocio en linea.', 'start': 0.0, 'end': 2.5},
+            {'text': 'Contactanos hoy.', 'start': 2.5, 'end': 5.0},
+        ]
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=fake_run) as mock_run:
+            result = gen._assemble_reel(
+                clips=[b'clip1', b'clip2', b'clip3'],
+                music=None, narration=None,
+                hook_png=b'hook-png-bytes', cta_png=b'cta-png-bytes',
+                subtitles=subtitles,
+            )
+        assert result == fake_output
+        overlay_cmd = mock_run.call_args_list[1].args[0]
+        filter_complex_idx = overlay_cmd.index('-filter_complex')
+        filter_complex = overlay_cmd[filter_complex_idx + 1]
+        assert 'drawtext=fontfile=' in filter_complex
+        assert "text='Tu negocio en linea.'" in filter_complex
+        assert "text='Contactanos hoy.'" in filter_complex
+        assert "enable='between(t,0.0,2.5)'" in filter_complex
+        assert "enable='between(t,2.5,5.0)'" in filter_complex
+        map_idx = overlay_cmd.index('-map')
+        assert overlay_cmd[map_idx + 1] == '[sub1]'
+
+    def test_omits_drawtext_filters_when_no_subtitles(self, tmp_path):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-mp4-bytes'
+
+        def fake_run(cmd, *args, **kwargs):
+            with open(cmd[-1], 'wb') as f:
+                f.write(fake_output)
+            return MagicMock(returncode=0)
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=fake_run) as mock_run:
+            gen._assemble_reel(
+                clips=[b'clip1', b'clip2', b'clip3'],
+                music=None, narration=None,
+                hook_png=b'hook-png-bytes', cta_png=b'cta-png-bytes',
+            )
+        overlay_cmd = mock_run.call_args_list[1].args[0]
+        filter_complex_idx = overlay_cmd.index('-filter_complex')
+        filter_complex = overlay_cmd[filter_complex_idx + 1]
+        assert 'drawtext' not in filter_complex
+        map_idx = overlay_cmd.index('-map')
+        assert overlay_cmd[map_idx + 1] == '[v2]'
+
 
 class TestExtractPosterFrame:
     def test_calls_ffmpeg_and_returns_frame_bytes(self):
@@ -270,17 +355,41 @@ class TestGenerate:
         with patch.object(gen, '_generate_video_clips', return_value=[b'c1', b'c2', b'c3']), \
              patch.object(gen, '_generate_music', return_value=b'music'), \
              patch.object(gen, '_generate_narration', return_value=b'narration'), \
+             patch('core.content_pipeline.generators.reel_generator.SubtitleGenerator') as mock_sub_gen, \
              patch.object(gen, '_render_text_overlay', return_value=b'overlay-png'), \
-             patch.object(gen, '_assemble_reel', return_value=b'final-mp4'), \
+             patch.object(gen, '_assemble_reel', return_value=b'final-mp4') as mock_assemble, \
              patch.object(gen, '_extract_poster_frame', return_value=b'poster-png'), \
              patch.object(gen, '_upload_video_to_storage', return_value='https://storage.test/reel.mp4') as mock_up_video, \
              patch.object(gen, '_upload_to_storage', return_value='https://storage.test/poster.png') as mock_up_poster:
+            mock_sub_gen.return_value.generate.return_value = [{'text': 'Hola.', 'start': 0.0, 'end': 1.0}]
             video_url, poster_url = gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
 
         assert video_url == 'https://storage.test/reel.mp4'
         assert poster_url == 'https://storage.test/poster.png'
         mock_up_video.assert_called_once_with(b'final-mp4', 'job1-day1')
         mock_up_poster.assert_called_once_with(b'poster-png', 'job1-day1-poster')
+        mock_assemble.assert_called_once_with(
+            [b'c1', b'c2', b'c3'], b'music', b'narration', b'overlay-png', b'overlay-png',
+            [{'text': 'Hola.', 'start': 0.0, 'end': 1.0}],
+        )
+
+    def test_skips_subtitle_generation_when_narration_fails(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_video_clips', return_value=[b'c1', b'c2', b'c3']), \
+             patch.object(gen, '_generate_music', return_value=None), \
+             patch.object(gen, '_generate_narration', return_value=None), \
+             patch('core.content_pipeline.generators.reel_generator.SubtitleGenerator') as mock_sub_gen, \
+             patch.object(gen, '_render_text_overlay', return_value=b'overlay-png'), \
+             patch.object(gen, '_assemble_reel', return_value=b'final-mp4') as mock_assemble, \
+             patch.object(gen, '_extract_poster_frame', return_value=b'poster-png'), \
+             patch.object(gen, '_upload_video_to_storage', return_value='url1'), \
+             patch.object(gen, '_upload_to_storage', return_value='url2'):
+            gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
+
+        mock_sub_gen.return_value.generate.assert_not_called()
+        assembled_args = mock_assemble.call_args.args
+        assert assembled_args[-1] == []
 
     def test_returns_empty_strings_when_fewer_than_3_clips_generated(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator

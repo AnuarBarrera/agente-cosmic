@@ -14,6 +14,7 @@ from playwright.sync_api import sync_playwright
 from core.shared.metrics import GCS_OPERATIONS
 from core.shared.metrics_utils import track_external_api, record_tokens
 from core.shared.rate_limiter import call_with_429_retry
+from core.content_pipeline.generators.subtitle_generator import SubtitleGenerator
 
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,38 @@ _TEMPLATE_MAP = {
     'hook': 'reel_hook.html',
     'cta': 'reel_cta.html',
 }
+
+_SUBTITLE_FONT_PATH = os.path.normpath(os.path.join(
+    os.path.dirname(__file__), '..', '..', '..', 'static', 'fonts', 'Poppins-Bold.ttf',
+))
+_SUBTITLE_FONTSIZE = 56
+_SUBTITLE_Y = 'h-300'
+
+
+def _escape_drawtext(text: str) -> str:
+    text = text.replace('\\', '\\\\')
+    text = text.replace(':', '\\:')
+    text = text.replace("'", "\\'")
+    text = text.replace('%', '\\%')
+    return text
+
+
+def _wrap_subtitle_text(text: str, max_chars: int = 30) -> str:
+    if len(text) <= max_chars:
+        return text
+    words = text.split()
+    lines = []
+    current = ''
+    for word in words:
+        candidate = f'{current} {word}'.strip()
+        if len(candidate) > max_chars and current:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return '\n'.join(lines)
 
 
 def _vertex_client():
@@ -186,7 +219,7 @@ class ReelGenerator:
             return None
 
     def _assemble_reel(self, clips: list[bytes], music: bytes | None, narration: bytes | None,
-                        hook_png: bytes, cta_png: bytes) -> bytes:
+                        hook_png: bytes, cta_png: bytes, subtitles: list[dict] | None = None) -> bytes:
         with tempfile.TemporaryDirectory() as tmp:
             clip_paths = []
             for i, clip_bytes in enumerate(clips):
@@ -217,12 +250,26 @@ class ReelGenerator:
             duration = len(clips) * 8
             cta_start = max(0, duration - 3)
             overlay_path = os.path.join(tmp, 'overlay.mp4')
+            filter_parts = [
+                "[0:v][1:v]overlay=0:0:enable='between(t,0,3)'[v1]",
+                f"[v1][2:v]overlay=0:0:enable='between(t,{cta_start},{duration})'[v2]",
+            ]
+            last_label = 'v2'
+            for i, sub in enumerate(subtitles or []):
+                next_label = f'sub{i}'
+                text = _escape_drawtext(_wrap_subtitle_text(sub['text']))
+                filter_parts.append(
+                    f"[{last_label}]drawtext=fontfile={_SUBTITLE_FONT_PATH}:text='{text}':"
+                    f"fontcolor=white:fontsize={_SUBTITLE_FONTSIZE}:borderw=3:bordercolor=black:"
+                    f"x=(w-text_w)/2:y={_SUBTITLE_Y}:"
+                    f"enable='between(t,{sub['start']},{sub['end']})'[{next_label}]"
+                )
+                last_label = next_label
+            filter_complex = ';'.join(filter_parts)
             subprocess.run(
                 ['ffmpeg', '-y', '-i', concat_path, '-i', hook_path, '-i', cta_path,
-                 '-filter_complex',
-                 f"[0:v][1:v]overlay=0:0:enable='between(t,0,3)'[v1];"
-                 f"[v1][2:v]overlay=0:0:enable='between(t,{cta_start},{duration})'[v2]",
-                 '-map', '[v2]', '-t', str(duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+                 '-filter_complex', filter_complex,
+                 '-map', f'[{last_label}]', '-t', str(duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
                  overlay_path],
                 check=True, capture_output=True,
             )
@@ -289,10 +336,13 @@ class ReelGenerator:
 
             music = self._generate_music(script['music_mood'])
             narration = self._generate_narration(script['narration_script'])
+            subtitles = []
+            if narration is not None:
+                subtitles = SubtitleGenerator().generate(narration, script['narration_script'])
             hook_png = self._render_text_overlay(script['hook_text'], script['highlight_word'], 'hook', colors)
             cta_png = self._render_text_overlay('', '', 'cta', colors, cta_text=script['tag_cta'])
 
-            final_video = self._assemble_reel(clips, music, narration, hook_png, cta_png)
+            final_video = self._assemble_reel(clips, music, narration, hook_png, cta_png, subtitles)
             poster = self._extract_poster_frame(final_video)
 
             video_url = self._upload_video_to_storage(final_video, filename_prefix)
