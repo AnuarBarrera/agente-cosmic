@@ -1,6 +1,6 @@
 import io
 import logging
-from PIL import Image
+from PIL import Image, ImageOps
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,9 @@ def normalize_image(image_bytes: bytes, max_dimension: int = _MAX_DIMENSION) -> 
         return image_bytes
     try:
         original_size = len(image_bytes)
-        img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        img = Image.open(io.BytesIO(image_bytes))
+        img = ImageOps.exif_transpose(img)  # fotos de celular traen la orientacion real en EXIF, no en los pixeles
+        img = img.convert('RGB')
 
         if img.width > max_dimension or img.height > max_dimension:
             img.thumbnail((max_dimension, max_dimension), Image.LANCZOS)
