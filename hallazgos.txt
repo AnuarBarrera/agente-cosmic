@@ -907,12 +907,16 @@ ACTUALIZACIÓN 2026-07-12 (D3 carrusel + E1 auto-publicación, investigación
     Gemini genera 6 slides con roles fijos (hook/cuerpo/CTA), pero en
     Cosmic cada fondo se generaría con Imagen 3 en vez de Pexels (6x el
     costo/tiempo de un post normal). Sin construir.
-  - Tipografía (relacionado, no es un hallazgo separado): los 3 templates
-    de imagen de Cosmic (`instagram_post*.html`) tienen
-    `font-family: Arial` hardcodeado — Cosmic ya usa Playwright+HTML+Gemini
-    (más avanzado que miagent), solo falta portar el patrón
-    `STYLE_PRESETS` de miagent (5 fuentes vía Google Fonts) con
-    `{{font_family}}`/`{{font_import}}` parametrizados. Sin implementar.
+  - Tipografía — RESUELTO 2026-07-13: portado el patrón de miagent (5
+    fuentes vía Google Fonts: Poppins, Playfair Display, Space Grotesk,
+    Bebas Neue, DM Sans) a los 3 templates con `{{font_family}}`/
+    `{{font_import}}` parametrizados. A diferencia de miagent, la fuente se
+    elige de forma DETERMINISTA (hash del job_id) en vez de random puro,
+    para que las 7 imágenes de una semana compartan tipografía — importa
+    para consistencia de marca (H35). El color de acento sigue viniendo de
+    la paleta real de la marca, no de estos presets (solo varía la
+    fuente). 8 tests nuevos, verificado visualmente (2 presets renderizados
+    y comparados, claramente distintos entre sí y de Arial).
   - E1 (auto-publicación): el patrón de miagent (dispatch a n8n por cuenta
     fija) no generaliza a multi-tenant — Cosmic necesita OAuth de Meta por
     cuenta de tester. Esto ya está en marcha: Anuar inició el Meta App
