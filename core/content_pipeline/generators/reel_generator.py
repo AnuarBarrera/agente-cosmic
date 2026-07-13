@@ -5,7 +5,6 @@ import re
 import subprocess
 import tempfile
 import time
-import time as _time
 import google.genai as genai
 from google.genai import types
 from google.cloud import storage
@@ -263,7 +262,7 @@ class ReelGenerator:
             blob = bucket.blob(f'posts/{filename}.png')
             blob.upload_from_string(image_bytes, content_type='image/png')
         GCS_OPERATIONS.labels(operation='upload').inc()
-        return f'{blob.public_url}?v={int(_time.time())}'
+        return f'{blob.public_url}?v={int(time.time())}'
 
     def _upload_video_to_storage(self, video_bytes: bytes, filename: str) -> str:
         with track_external_api('gcs'):
@@ -272,7 +271,7 @@ class ReelGenerator:
             blob = bucket.blob(f'reels/{filename}.mp4')
             blob.upload_from_string(video_bytes, content_type='video/mp4')
         GCS_OPERATIONS.labels(operation='upload').inc()
-        return f'{blob.public_url}?v={int(_time.time())}'
+        return f'{blob.public_url}?v={int(time.time())}'
 
 
 
