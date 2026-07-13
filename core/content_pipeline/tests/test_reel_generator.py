@@ -39,10 +39,15 @@ class TestWrapSubtitleText:
         assert result == 'Tu negocio en linea\nen menos de 48 horas'
 
 
+_SAFE_BOX = {'x': 100, 'y': 100, 'width': 800, 'height': 100}
+_OVERFLOWING_BOX = {'x': -20, 'y': 100, 'width': 1200, 'height': 100}
+
+
 class TestRenderTextOverlay:
-    def _make_mock_playwright(self, screenshot_bytes: bytes):
+    def _make_mock_playwright(self, screenshot_bytes: bytes, bounding_boxes=None):
         mock_page = MagicMock()
         mock_page.screenshot.return_value = screenshot_bytes
+        mock_page.locator.return_value.bounding_box.side_effect = bounding_boxes or [_SAFE_BOX, _SAFE_BOX]
         mock_browser = MagicMock()
         mock_browser.new_page.return_value = mock_page
         mock_pw_instance = MagicMock()
@@ -80,6 +85,30 @@ class TestRenderTextOverlay:
             gen._render_text_overlay('Descubre algo nuevo', 'nuevo', 'hook', ['#e94560'])
         html_sent = mock_page.set_content.call_args.args[0]
         assert '<span class="highlight">nuevo</span>' in html_sent
+
+    def test_retries_once_when_overlay_overflows_the_frame(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_png = _png_bytes()
+        mock_pw_context, mock_page = self._make_mock_playwright(
+            fake_png, bounding_boxes=[_OVERFLOWING_BOX, _SAFE_BOX],
+        )
+        with patch('core.content_pipeline.generators.reel_generator.sync_playwright', return_value=mock_pw_context):
+            result = gen._render_text_overlay('Descubre algo nuevo', 'nuevo', 'hook', ['#e94560'])
+        assert result == fake_png
+        assert mock_page.screenshot.call_count == 2
+
+    def test_returns_last_screenshot_when_both_attempts_overflow(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_png = _png_bytes()
+        mock_pw_context, mock_page = self._make_mock_playwright(
+            fake_png, bounding_boxes=[_OVERFLOWING_BOX, _OVERFLOWING_BOX],
+        )
+        with patch('core.content_pipeline.generators.reel_generator.sync_playwright', return_value=mock_pw_context):
+            result = gen._render_text_overlay('Descubre algo nuevo', 'nuevo', 'hook', ['#e94560'])
+        assert result == fake_png
+        assert mock_page.screenshot.call_count == 2
 
 
 class TestGenerateVideoClips:

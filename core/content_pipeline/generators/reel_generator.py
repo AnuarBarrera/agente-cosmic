@@ -100,16 +100,30 @@ class ReelGenerator:
         else:
             html = html.replace('{{cta_text}}', _html.escape(cta_text))
 
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(
-                headless=True,
-                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-            )
-            page = browser.new_page(viewport={'width': 1080, 'height': 1920})
-            page.set_content(html, wait_until='load')
-            page.evaluate('document.fonts.ready')
-            png_bytes = page.screenshot(omit_background=True)
-            browser.close()
+        selector = '.hook' if style == 'hook' else '.cta'
+        png_bytes = None
+        for attempt in range(2):
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+                )
+                page = browser.new_page(viewport={'width': 1080, 'height': 1920})
+                page.set_content(html, wait_until='load')
+                page.evaluate('document.fonts.ready')
+                # Verificacion defensiva: en produccion (proceso ya corriendo varios
+                # minutos junto a Veo/Lyria/TTS) se observo, de forma no reproducible
+                # en aislado, que el texto a veces se renderiza mas ancho que el
+                # contenedor pese a la fuente local — se mide el bounding box real
+                # y se reintenta una vez con un browser fresco antes de aceptar el
+                # resultado, mismo patron de reintento que ya usan Veo/Lyria.
+                box = page.locator(selector).bounding_box()
+                overflows = box is not None and (box['x'] < 0 or box['x'] + box['width'] > 1080)
+                png_bytes = page.screenshot(omit_background=True)
+                browser.close()
+            if not overflows:
+                return png_bytes
+            logger.warning(f"Overlay '{style}' se salio del cuadro (intento {attempt + 1}), reintentando")
 
         return png_bytes
 
