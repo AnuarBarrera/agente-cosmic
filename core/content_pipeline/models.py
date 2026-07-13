@@ -29,9 +29,11 @@ class ContentPost(models.Model):
 
     FORMAT_SINGLE = 'single'
     FORMAT_CAROUSEL = 'carousel'
+    FORMAT_REEL = 'reel'
     FORMAT_CHOICES = [
         (FORMAT_SINGLE, 'Imagen única'),
         (FORMAT_CAROUSEL, 'Carrusel'),
+        (FORMAT_REEL, 'Reel'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -43,6 +45,9 @@ class ContentPost(models.Model):
     # normales. image_url sigue siendo la portada/slide 1 para retrocompatibilidad
     # (email, thumbnail del dashboard, endpoint de descarga por default).
     image_urls = models.JSONField(default=list, blank=True)
+    # Reel (roadmap #7): URL del MP4 final. image_url guarda el poster frame
+    # (segundo 1 del video) para retrocompatibilidad con email/thumbnail.
+    video_url = models.URLField(max_length=1000, blank=True, default='')
     format = models.CharField(max_length=20, choices=FORMAT_CHOICES, default=FORMAT_SINGLE)
     suggested_time = models.TimeField()
     hashtags = models.JSONField(default=list)

@@ -74,3 +74,22 @@ def test_weekly_feedback_unique_per_calendar_and_week(brand_dna):
     with pytest.raises(IntegrityError):
         with transaction.atomic():
             WeeklyFeedback.objects.create(calendar=calendar, week_number=1)
+
+
+def test_content_post_reel_format(brand_dna):
+    calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
+    scheduled = timezone.now() + timedelta(days=1)
+    post = ContentPost.objects.create(
+        calendar=calendar,
+        day_number=1,
+        caption='Reel de prueba.',
+        image_url='https://storage.googleapis.com/agente-cosmic/poster_frame.jpg',
+        video_url='https://storage.googleapis.com/agente-cosmic/video.mp4',
+        format=ContentPost.FORMAT_REEL,
+        suggested_time='19:00',
+        hashtags=['#reel', '#test'],
+        scheduled_at=scheduled,
+    )
+    assert post.format == 'reel'
+    assert post.video_url == 'https://storage.googleapis.com/agente-cosmic/video.mp4'
+    assert post.image_url == 'https://storage.googleapis.com/agente-cosmic/poster_frame.jpg'
