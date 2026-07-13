@@ -2053,6 +2053,15 @@ ACTUALIZACIÓN 2026-07-12 — extensión del mismo auditor: caso real, una
   pose dinámica (saltando, corriendo) fue compuesta sobre un fondo que
   implica que está parado. Test nuevo. `image_generator.py::_validate_background`.
 
+ACTUALIZACIÓN 2026-07-13 — se encontró y corrigió la causa raíz real del
+  mismo caso (ver H52 para el detalle completo): la foto de producto subida
+  por el usuario ("El perro rebelde") venía con orientación EXIF de celular
+  sin corregir — Imagen 3 recibía los píxeles crudos (de lado) y componía
+  la pose distorsionada/flotando que este auditor detectaba. El auditor
+  (arriba) sigue siendo válido como red de seguridad para OTROS casos, pero
+  ya no es la defensa principal contra este patrón específico — la causa de
+  raíz (imagen de origen mal orientada) ya no ocurre.
+
 =================================================================
 HALLAZGO 47 — Encuesta de renovación (opt-in) genera fricción; usuarios
   prefieren continuidad automática con opt-out
@@ -2401,3 +2410,45 @@ Nota operativa (no es un hallazgo de producto): producción
 
 Suite: 107 passed en `core.brand_dna` (mismo único fallo preexistente sin
   relación). Todo commiteado y pusheado.
+
+=================================================================
+HALLAZGO 52 — Fotos de producto de celular sin corregir orientación EXIF,
+  causaba composiciones distorsionadas en Imagen 3 (causa raíz de H46)
+Categoría: Bug / backend / procesamiento de imágenes
+Estado: ✅ RESUELTO — 2026-07-13 (hotfix directo en producción por Anuar)
+=================================================================
+Surfaceado por: Anuar, en producción — el perro de "El perro rebelde"
+  (mismo caso que motivó la extensión del auditor en H46) aparecía compuesto
+  en una pose enroscada/invertida sobre el nuevo fondo, claramente distorsionado.
+  Anuar diagnosticó la causa real directo en producción: la foto de origen
+  venía "de lado".
+
+Causa raíz: `normalize_image()` (`core/content_pipeline/image_utils.py`) —
+  la función que convierte a WebP y redimensiona toda foto subida por el
+  usuario (producto Y logo, usada en `content_pipeline/tasks.py` y
+  `brand_dna/tasks.py`) — abría la imagen con PIL y la procesaba usando los
+  píxeles crudos, sin aplicar el tag EXIF `Orientation`. Las fotos tomadas
+  con celular casi siempre guardan los píxeles en una orientación fija
+  (ej. landscape) y usan el tag EXIF para indicar cómo mostrarla realmente
+  (ej. rotar 90°) — sin corregir esto antes de mandarla a Imagen 3 BGSWAP,
+  el modelo recibía la mascota/producto literalmente de lado o invertido, y
+  componía una pose imposible sobre el nuevo fondo. Esto explica el patrón
+  que motivó la extensión del auditor en H46 — no era que Imagen 3
+  "alucinara" la pose, es que el input que recibía ya venía mal.
+
+Fix: `ImageOps.exif_transpose()` aplicado antes del `.convert('RGB')` en
+  `normalize_image()`. 5 tests nuevos (`test_image_utils.py`) cubren:
+  orientación 6 corregida antes de redimensionar, el tag EXIF no queda
+  residual en el output, imágenes sin tag EXIF no se ven afectadas,
+  conversión a WebP sigue funcionando, bytes vacíos siguen retornando vacío.
+  Verificado regenerando el post real afectado directo con `ImageGenerator`
+  (sin tocar `regen_count`/`edit_count` del usuario).
+
+Severidad: Alta (afectaba cualquier foto de celular sin corregir — muy
+  común en el ICP de baja madurez digital, que sube fotos tal cual las toma
+  con el teléfono, sin editar). Cierra la causa raíz real de H46.
+Prioridad: — (ya resuelto, hotfix directo en producción, traído a dev vía
+  pull). Tests corridos en dev: 216 passed, mismos 3 fallos preexistentes
+  sin relación (`test_load_product_images_takes_paths_list`,
+  `test_update_active_product_images_new_uploads`,
+  `test_no_product_uses_imagen3_flow`).
