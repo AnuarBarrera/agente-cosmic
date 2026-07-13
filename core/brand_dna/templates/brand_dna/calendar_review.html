@@ -61,6 +61,8 @@
     .post-img.carousel-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; }
     .post-img.carousel-grid a { display: block; width: 100%; height: 100%; overflow: hidden; }
     .carousel-badge { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.7rem; font-weight: 700; padding: 3px 8px; border-radius: 20px; z-index: 2; pointer-events: none; }
+    .reel-badge { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.7rem; font-weight: 700; padding: 3px 8px; border-radius: 20px; z-index: 2; pointer-events: none; }
+    .post-img video { width: 100%; height: 100%; object-fit: cover; }
     .post-body { padding: 16px; }
     .post-schedule { font-size: 0.75rem; color: #888; margin-bottom: 10px; }
     .post-caption { font-size: 0.85rem; color: #ccc; line-height: 1.5; margin-bottom: 12px; }
@@ -204,7 +206,12 @@
     {% for post in week.posts %}
     <div class="post-card {{ post.user_status }}" id="card-{{ post.id }}">
       <div class="post-img{% if post.format == 'carousel' and post.image_urls %} carousel-grid{% endif %}">
-        {% if post.format == 'carousel' and post.image_urls %}
+        {% if post.format == 'reel' and post.video_url %}
+          <video controls poster="{{ post.image_url }}" style="width:100%;height:100%;object-fit:cover;">
+            <source src="{{ post.video_url }}" type="video/mp4">
+          </video>
+          <div class="reel-badge">🎬 Reel</div>
+        {% elif post.format == 'carousel' and post.image_urls %}
           {% for slide_url in post.image_urls %}
           <a href="{{ slide_url }}" target="_blank" rel="noopener" title="Slide {{ forloop.counter }}">
             <img src="{{ slide_url }}" alt="Slide {{ forloop.counter }} del día {{ post.day_number }}" loading="lazy" style="cursor:zoom-in;">
@@ -233,9 +240,9 @@
         </div>
         {% endif %}
         <div class="actions">
-          <button class="btn-action btn-download" onclick="downloadImage('{{ post.id }}')">⬇ Descargar {% if post.format == 'carousel' %}carrusel (.zip){% else %}imagen{% endif %}</button>
+          <button class="btn-action btn-download" onclick="downloadImage('{{ post.id }}')">⬇ Descargar {% if post.format == 'carousel' %}carrusel (.zip){% elif post.format == 'reel' %}reel (.mp4){% else %}imagen{% endif %}</button>
           <button class="btn-action btn-edit" id="edit-btn-{{ post.id }}" onclick="startEdit('{{ post.id }}')" style="{% if post.downloaded_at %}display:none;{% endif %}">✏ Edita la descripción</button>
-          <button class="btn-action btn-regen" id="regen-btn-{{ post.id }}" onclick="toggleRegen('{{ post.id }}')" style="{% if post.downloaded_at %}display:none;{% endif %}">↺ Regenera la imagen</button>
+          <button class="btn-action btn-regen" id="regen-btn-{{ post.id }}" onclick="toggleRegen('{{ post.id }}')" style="{% if post.downloaded_at or post.format == 'reel' %}display:none;{% endif %}">↺ Regenera la imagen</button>
           <button class="btn-action btn-save" id="save-{{ post.id }}" onclick="saveEdit('{{ post.id }}')">Guardar</button>
         </div>
         <div class="feedback-area" id="regen-{{ post.id }}">
