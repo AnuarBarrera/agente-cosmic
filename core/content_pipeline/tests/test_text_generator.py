@@ -86,6 +86,56 @@ def test_generate_post_has_required_keys(brand_dna):
     assert isinstance(post['hashtags'], list)
 
 
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_tags_each_post_with_its_pillar(brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator, CONTENT_PILLARS
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
+        gen = TextGenerator()
+        result = gen.generate(brand_dna)
+
+    assert [p['pillar'] for p in result] == [pillar['name'] for pillar in CONTENT_PILLARS]
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_marks_only_carousel_day_as_carousel_format(brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator, CAROUSEL_DAY
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
+        gen = TextGenerator()
+        result = gen.generate(brand_dna)
+
+    formats = [p['format'] for p in result]
+    assert formats.count('carousel') == 1
+    assert formats[CAROUSEL_DAY - 1] == 'carousel'
+    assert all(f == 'single' for i, f in enumerate(formats) if i != CAROUSEL_DAY - 1)
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_prompt_includes_pillars_block(brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator, CONTENT_PILLARS
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_client = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
+        mock_vc.return_value = mock_client
+        TextGenerator().generate(brand_dna)
+
+    prompt_sent = mock_client.models.generate_content.call_args.kwargs['contents']
+    for pillar in CONTENT_PILLARS:
+        assert pillar['name'] in prompt_sent
+
+
 @pytest.fixture
 def sensitive_brand_dna():
     job = AnalysisJob.objects.create(email='t@t.com', business_url='https://pediatra.com')

@@ -10,9 +10,29 @@ from core.shared.rate_limiter import call_with_429_retry
 
 logger = logging.getLogger(__name__)
 
+# Pilares de contenido (H20): cada dia tiene un PROPOSITO ESTRATEGICO distinto en vez
+# de 7 variaciones del mismo tema generico — la falta de esto era la razon real de que
+# los posts "no generaran impacto" pese a ser tecnicamente correctos. Orden fijo,
+# indice 0 = dia 1.
+CONTENT_PILLARS = [
+    {'day': 1, 'name': 'Producto', 'angle': 'Presenta que vendes o que servicio ofreces de forma directa y atractiva.'},
+    {'day': 2, 'name': 'Diferenciador', 'angle': 'Explica que te hace unico frente a otras opciones del mismo mercado.'},
+    {'day': 3, 'name': 'Prueba social', 'angle': 'Comparte un testimonio o resultado representativo de un cliente satisfecho, sin inventar datos verificables falsos.'},
+    {'day': 4, 'name': 'Detras de camaras', 'angle': 'Muestra el proceso, la fabricacion, o el dia a dia detras del negocio.'},
+    {'day': 5, 'name': 'Educativo', 'angle': 'Comparte un tip o dato util relevante para tu audiencia, sin vender directamente.'},
+    {'day': 6, 'name': 'CTA / Oferta', 'angle': 'Invita a la accion de forma directa — una oferta, promocion, o llamada clara a contactar.'},
+    {'day': 7, 'name': 'Historia de marca', 'angle': 'Cuenta la historia del fundador o el origen del negocio — conexion personal.'},
+]
+
+# El pilar "Prueba social" se presta naturalmente a un formato de varias slides
+# (antes/despues, cita del cliente, resultado, CTA) — es el unico dia que usa carrusel.
+CAROUSEL_DAY = 3
+
 _PROMPT = (
     "Eres un experto en marketing de contenidos. Genera exactamente 7 posts para redes sociales "
-    "para la siguiente marca. Cada post debe ser unico y usar el tono y audiencia de la marca.\n\n"
+    "para la siguiente marca — cada uno con un PROPOSITO ESTRATEGICO DISTINTO (pilar de "
+    "contenido), no 7 variaciones del mismo tema generico. Usa el tono y audiencia de la marca "
+    "en todos.\n\n"
     "MARCA: {business_name}\n"
     "DESCRIPCION: {description}\n"
     "AUDIENCIA: {audience}\n"
@@ -20,6 +40,9 @@ _PROMPT = (
     "KEYWORDS: {keywords}\n"
     "ESTILO DE POSTS PREVIOS: {posting_style}\n"
     "HASHTAGS COMUNES: {hashtags}\n\n"
+    "PILARES DE CONTENIDO (uno por dia, EN ESTE ORDEN EXACTO — el post 1 de tu respuesta usa "
+    "el pilar 1, el post 2 usa el pilar 2, etc.):\n"
+    "{pillars_block}\n\n"
     "REGLA DE SEGURIDAD (siempre aplica): si el negocio, keywords o audiencia sugieren un "
     "nicho sensible (niños, salud, medicina, finanzas, credito, temas legales), usa tono "
     "neutro-positivo y evita lenguaje retador o de urgencia con audiencias vulnerables. "
@@ -27,7 +50,8 @@ _PROMPT = (
     "'aseguramos', 'asegurando', 'resultados 100% seguros', 'nunca falla', 'sin riesgo'. "
     "No afirmes resultados medicos, financieros, legales o educativos que no puedan "
     "verificarse (ej: no digas que un tratamiento 'asegura' o 'garantiza' un resultado).\n\n"
-    "Responde UNICAMENTE con un array JSON de 7 objetos, sin markdown:\n"
+    "Responde UNICAMENTE con un array JSON de 7 objetos EN EL MISMO ORDEN que los pilares de "
+    "arriba, sin markdown:\n"
     "[\n"
     '  {{"caption": "texto del post, maximo {avg_length} caracteres",\n'
     '   "hashtags": ["#tag1", "#tag2", "#tag3"],\n'
@@ -35,6 +59,12 @@ _PROMPT = (
     "]\n\n"
     "Los horarios sugeridos deben variar entre 09:00, 12:00, 17:00 y 19:00."
 )
+
+
+def _pillars_block() -> str:
+    return '\n'.join(
+        f"Dia {p['day']} — {p['name']}: {p['angle']}" for p in CONTENT_PILLARS
+    )
 
 
 _SENSITIVE_KEYWORDS = (
@@ -104,6 +134,7 @@ class TextGenerator:
             posting_style=brand_dna.posting_style or 'No disponible',
             hashtags=', '.join(brand_dna.common_hashtags or []),
             avg_length=brand_dna.avg_caption_length,
+            pillars_block=_pillars_block(),
         )
         def _call():
             with track_external_api('gemini', operation='text_gen'):
@@ -120,6 +151,14 @@ class TextGenerator:
         if not match:
             raise ValueError(f"No se encontro un array JSON en la respuesta de Gemini: {raw[:200]}")
         posts = json.loads(match.group())[:7]
+
+        # Pilar/formato por posicion — el orden de la respuesta debe coincidir con
+        # CONTENT_PILLARS (se lo pedimos explicitamente en el prompt). Si Gemini
+        # devuelve menos de 7 posts, los ultimos pilares simplemente no se usan.
+        for i, post in enumerate(posts):
+            pillar = CONTENT_PILLARS[i] if i < len(CONTENT_PILLARS) else None
+            post['pillar'] = pillar['name'] if pillar else ''
+            post['format'] = 'carousel' if pillar and pillar['day'] == CAROUSEL_DAY else 'single'
 
         if _is_sensitive_niche(brand_dna):
             logger.info(f"Nicho sensible detectado para '{brand_dna.business_name}' — auditando captions")
