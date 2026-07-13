@@ -25,7 +25,7 @@ _TEMPLATE_MAP = {
 }
 
 _SUBTITLE_FONT_PATH = os.path.normpath(os.path.join(
-    os.path.dirname(__file__), '..', '..', '..', 'static', 'fonts', 'Poppins-Bold.ttf',
+    os.path.dirname(__file__), '..', 'static', 'content_pipeline', 'fonts', 'Poppins-Bold.ttf',
 ))
 _SUBTITLE_FONTSIZE = 56
 _SUBTITLE_Y = 'h-300'
