@@ -193,6 +193,99 @@ class RedisMetricsCollector:
                     c_cost_i.add_metric([img_type], val)
             yield c_cost_i
 
+            # --- Clips de Veo generados y segundos totales ---
+            c_veo = CounterMetricFamily(
+                'cosmic_veo_clips_total',
+                'Veo video clips generated — all processes',
+                labels=[],
+            )
+            val = float(r.get('cosmic:prom:V:clips') or 0)
+            if val > 0:
+                c_veo.add_metric([], val)
+            yield c_veo
+
+            c_veo_secs = CounterMetricFamily(
+                'cosmic_veo_seconds_total',
+                'Veo video seconds generated — all processes',
+                labels=[],
+            )
+            val = float(r.get('cosmic:prom:V:seconds') or 0)
+            if val > 0:
+                c_veo_secs.add_metric([], val)
+            yield c_veo_secs
+
+            c_cost_veo = CounterMetricFamily(
+                'cosmic_veo_cost_microdollars_total',
+                'Estimated Veo cost microdollars — all processes',
+                labels=[],
+            )
+            val = float(r.get('cosmic:prom:VC:generate') or 0)
+            if val > 0:
+                c_cost_veo.add_metric([], val)
+            yield c_cost_veo
+
+            # --- Lyria y TTS (solo conteo/uso, sin tarifa publica confirmada) ---
+            c_lyria = CounterMetricFamily(
+                'cosmic_lyria_clips_total',
+                'Lyria music clips generated — all processes',
+                labels=[],
+            )
+            val = float(r.get('cosmic:prom:LY:clips') or 0)
+            if val > 0:
+                c_lyria.add_metric([], val)
+            yield c_lyria
+
+            c_tts = CounterMetricFamily(
+                'cosmic_tts_clips_total',
+                'TTS narration clips generated — all processes',
+                labels=[],
+            )
+            val = float(r.get('cosmic:prom:TTS:clips') or 0)
+            if val > 0:
+                c_tts.add_metric([], val)
+            yield c_tts
+
+            c_tts_chars = CounterMetricFamily(
+                'cosmic_tts_characters_total',
+                'TTS narration characters synthesized — all processes',
+                labels=[],
+            )
+            val = float(r.get('cosmic:prom:TTS:chars') or 0)
+            if val > 0:
+                c_tts_chars.add_metric([], val)
+            yield c_tts_chars
+
+            # --- Cloud Speech-to-Text: llamadas, segundos de audio, costo ---
+            c_stt = CounterMetricFamily(
+                'cosmic_stt_calls_total',
+                'Cloud Speech-to-Text calls — all processes',
+                labels=[],
+            )
+            val = float(r.get('cosmic:prom:STT:calls') or 0)
+            if val > 0:
+                c_stt.add_metric([], val)
+            yield c_stt
+
+            c_stt_secs = CounterMetricFamily(
+                'cosmic_stt_seconds_total',
+                'Cloud Speech-to-Text audio seconds processed — all processes',
+                labels=[],
+            )
+            val = float(r.get('cosmic:prom:STT:seconds') or 0)
+            if val > 0:
+                c_stt_secs.add_metric([], val)
+            yield c_stt_secs
+
+            c_cost_stt = CounterMetricFamily(
+                'cosmic_stt_cost_microdollars_total',
+                'Estimated Cloud Speech-to-Text cost microdollars — all processes',
+                labels=[],
+            )
+            val = float(r.get('cosmic:prom:STTC:recognize') or 0)
+            if val > 0:
+                c_cost_stt.add_metric([], val)
+            yield c_cost_stt
+
             # --- Llamadas LLM por operación y resultado ---
             c_llm = CounterMetricFamily(
                 'cosmic_llm_calls_total',

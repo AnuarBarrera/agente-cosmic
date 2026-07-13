@@ -12,7 +12,10 @@ from google.cloud import storage
 from django.conf import settings
 from playwright.sync_api import sync_playwright
 from core.shared.metrics import GCS_OPERATIONS
-from core.shared.metrics_utils import track_external_api, record_tokens
+from core.shared.metrics_utils import (
+    track_external_api, record_tokens, record_veo_generation,
+    record_lyria_generation, record_tts_generation,
+)
 from core.shared.rate_limiter import call_with_429_retry
 from core.content_pipeline.generators.subtitle_generator import SubtitleGenerator
 
@@ -23,6 +26,8 @@ _TEMPLATE_MAP = {
     'hook': 'reel_hook.html',
     'cta': 'reel_cta.html',
 }
+
+_VEO_CLIP_DURATION_SECONDS = 8
 
 _SUBTITLE_FONT_PATH = os.path.normpath(os.path.join(
     os.path.dirname(__file__), '..', 'static', 'content_pipeline', 'fonts', 'Poppins-Bold.ttf',
@@ -138,7 +143,7 @@ class ReelGenerator:
                         prompt=prompt,
                         config=types.GenerateVideosConfig(
                             aspect_ratio='9:16',
-                            duration_seconds=8,
+                            duration_seconds=_VEO_CLIP_DURATION_SECONDS,
                             number_of_videos=1,
                             generate_audio=False,
                         ),
@@ -154,6 +159,7 @@ class ReelGenerator:
             generated = operation.result.generated_videos
             if not generated:
                 return None
+            record_veo_generation(duration_seconds=_VEO_CLIP_DURATION_SECONDS)
             return generated[0].video.video_bytes
         except Exception as e:
             logger.warning(f"Veo clip generation failed: {e}")
@@ -188,6 +194,7 @@ class ReelGenerator:
             if audio is not None and getattr(audio, 'data', None):
                 # La API de Interactions (a diferencia de generate_content) devuelve
                 # AudioContent.data como string base64, no bytes crudos.
+                record_lyria_generation()
                 return base64.b64decode(audio.data)
             return None
         except Exception as e:
@@ -212,6 +219,7 @@ class ReelGenerator:
                 )
             for part in resp.candidates[0].content.parts:
                 if part.inline_data:
+                    record_tts_generation(char_count=len(narration_script))
                     return part.inline_data.data
             return None
         except Exception as e:

@@ -1,7 +1,7 @@
 import logging
 import re
 from google.cloud import speech
-from core.shared.metrics_utils import track_external_api
+from core.shared.metrics_utils import track_external_api, record_stt_call
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,8 @@ def _call_stt_attempt(narration_audio: bytes) -> list[dict] | None:
                     'start': word_info.start_time.total_seconds(),
                     'end': word_info.end_time.total_seconds(),
                 })
+        audio_duration = len(narration_audio) / (_PCM_BYTES_PER_SAMPLE * _PCM_SAMPLE_RATE)
+        record_stt_call(audio_duration_seconds=audio_duration)
         return words
     except Exception as e:
         logger.warning(f"Cloud Speech-to-Text failed: {e}")
