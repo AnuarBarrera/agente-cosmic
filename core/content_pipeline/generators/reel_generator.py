@@ -114,12 +114,19 @@ class ReelGenerator:
 
     def _generate_music(self, music_mood: str) -> bytes | None:
         try:
-            client = _vertex_client()
+            # Lyria 3 solo esta disponible en la ubicacion 'global' de Vertex AI (no
+            # en una region como us-central1) y rechaza la peticion si se especifica
+            # response_modalities/response_format explicito — el modelo devuelve
+            # audio implicitamente, sin necesidad de pedirlo.
+            client = genai.Client(
+                vertexai=True,
+                project=settings.GOOGLE_CLOUD_PROJECT,
+                location='global',
+            )
             with track_external_api('lyria', operation='music_generate'):
                 interaction = client.interactions.create(
                     model=settings.VERTEX_MUSIC_MODEL,
                     input=f"Instrumental only, no vocals. {music_mood}",
-                    response_modalities=['audio'],
                 )
             audio = getattr(interaction, 'output_audio', None)
             if audio is not None and getattr(audio, 'data', None):
@@ -136,7 +143,14 @@ class ReelGenerator:
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TTS_MODEL,
                     contents=narration_script,
-                    config=types.GenerateContentConfig(response_modalities=['AUDIO']),
+                    config=types.GenerateContentConfig(
+                        response_modalities=['AUDIO'],
+                        speech_config=types.SpeechConfig(
+                            voice_config=types.VoiceConfig(
+                                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name='Kore')
+                            )
+                        ),
+                    ),
                 )
             for part in resp.candidates[0].content.parts:
                 if part.inline_data:

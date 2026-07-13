@@ -103,10 +103,16 @@ class TestGenerateMusic:
         mock_audio.data = b'fake-music-bytes'
         mock_interaction = MagicMock()
         mock_interaction.output_audio = mock_audio
-        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
-            mock_vc.return_value.interactions.create.return_value = mock_interaction
+        with patch('core.content_pipeline.generators.reel_generator.genai.Client') as mock_client_cls:
+            mock_client_cls.return_value.interactions.create.return_value = mock_interaction
             result = gen._generate_music('upbeat corporate, optimistic')
         assert result == b'fake-music-bytes'
+        mock_client_cls.assert_called_once_with(
+            vertexai=True, project='agente-cosmic', location='global',
+        )
+        call_kwargs = mock_client_cls.return_value.interactions.create.call_args.kwargs
+        assert 'response_modalities' not in call_kwargs
+        assert 'response_format' not in call_kwargs
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
@@ -139,6 +145,8 @@ class TestGenerateNarration:
             mock_vc.return_value.models.generate_content.return_value = mock_resp
             result = gen._generate_narration('Bienvenido a nuestra tienda.')
         assert result == b'fake-narration-bytes'
+        call_kwargs = mock_vc.return_value.models.generate_content.call_args.kwargs
+        assert call_kwargs['config'].speech_config is not None
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
