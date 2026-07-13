@@ -185,6 +185,8 @@ class TestAssembleReel:
             )
         assert result == fake_output
         assert mock_run.call_count == 3
+        mix_cmd = mock_run.call_args_list[-1].args[0]
+        assert '-f s16le -ar 24000 -ac 1 -i' in ' '.join(mix_cmd)
 
     def test_works_without_music_or_narration(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator

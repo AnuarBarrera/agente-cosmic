@@ -205,28 +205,31 @@ class ReelGenerator:
                 check=True, capture_output=True,
             )
 
-            audio_inputs = []
-            audio_paths = []
+            audio_input_flags = []
+            audio_stream_count = 0
             if music is not None:
                 music_path = os.path.join(tmp, 'music.mp3')
                 with open(music_path, 'wb') as f:
                     f.write(music)
-                audio_paths.append(music_path)
+                audio_input_flags += ['-i', music_path]
+                audio_stream_count += 1
             if narration is not None:
-                narration_path = os.path.join(tmp, 'narration.mp3')
+                # TTS (gemini-2.5-flash-tts) devuelve PCM crudo (audio/L16, 24kHz,
+                # mono, sin contenedor/cabecera) — sin estas flags de INPUT (deben ir
+                # antes del -i de este archivo) ffmpeg no puede adivinar el formato.
+                narration_path = os.path.join(tmp, 'narration.pcm')
                 with open(narration_path, 'wb') as f:
                     f.write(narration)
-                audio_paths.append(narration_path)
+                audio_input_flags += ['-f', 's16le', '-ar', '24000', '-ac', '1', '-i', narration_path]
+                audio_stream_count += 1
 
             output_path = os.path.join(tmp, 'output.mp4')
-            if not audio_paths:
+            if audio_stream_count == 0:
                 subprocess.run(['ffmpeg', '-y', '-i', overlay_path, '-c', 'copy', output_path],
                                 check=True, capture_output=True)
             else:
-                cmd = ['ffmpeg', '-y', '-i', overlay_path]
-                for p in audio_paths:
-                    cmd += ['-i', p]
-                if len(audio_paths) == 2:
+                cmd = ['ffmpeg', '-y', '-i', overlay_path] + audio_input_flags
+                if audio_stream_count == 2:
                     filter_complex = '[1:a][2:a]amix=inputs=2:duration=shortest[a]'
                     cmd += ['-filter_complex', filter_complex, '-map', '0:v', '-map', '[a]']
                 else:
