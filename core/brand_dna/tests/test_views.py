@@ -1,4 +1,5 @@
 import pytest
+import io
 import json
 import os
 from unittest.mock import patch, MagicMock
@@ -282,6 +283,29 @@ def test_download_post_image_returns_attachment(client, user, job_with_calendar)
     assert response['Content-Type'] == 'image/png'
     assert 'attachment' in response['Content-Disposition']
     assert response.content == b'fake-image-bytes'
+
+
+def test_download_post_image_returns_zip_for_carousel(client, user, job_with_calendar):
+    import zipfile
+    post = job_with_calendar.brand_dna.calendar.posts.get(day_number=3)
+    post.format = 'carousel'
+    post.image_urls = ['https://example.com/slide1.png', 'https://example.com/slide2.png']
+    post.save(update_fields=['format', 'image_urls'])
+    client.force_login(user)
+
+    def _fake_urlopen(url, timeout=15):
+        fake_response = MagicMock()
+        fake_response.read.return_value = b'fake-slide-bytes-' + url.encode()[-6:]
+        fake_response.__enter__.return_value = fake_response
+        return fake_response
+
+    with patch('urllib.request.urlopen', side_effect=_fake_urlopen):
+        response = client.get(f'/api/post/{post.id}/download/')
+    assert response.status_code == 200
+    assert response['Content-Type'] == 'application/zip'
+    assert 'carrusel.zip' in response['Content-Disposition']
+    zf = zipfile.ZipFile(io.BytesIO(response.content))
+    assert zf.namelist() == ['slide-1.png', 'slide-2.png']
 
 
 def test_download_post_image_blocks_other_user(client, django_user_model, job_with_calendar, free_plan):

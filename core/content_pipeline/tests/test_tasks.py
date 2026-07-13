@@ -149,6 +149,48 @@ def test_content_generation_uses_carousel_for_carousel_day(job_with_dna):
     assert all(p.format == 'single' and p.image_urls == [] for p in non_carousel_posts)
 
 
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    DEFAULT_FROM_EMAIL='noreply@test.com',
+)
+def test_content_generation_disables_carousel_when_7_product_images(job_with_dna):
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'), \
+         patch('core.content_pipeline.tasks._load_product_images', return_value=[b'img'] * 7):
+        MockText.return_value.generate.return_value = [dict(p) for p in _MOCK_POSTS_WITH_CAROUSEL]
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+        MockImage.return_value.generate_carousel.return_value = ['https://storage.googleapis.com/test/slide1.jpg']
+
+        from core.content_pipeline.tasks import content_generation_task
+        content_generation_task(str(job_with_dna.id))
+
+    MockImage.return_value.generate_carousel.assert_not_called()
+    assert MockImage.return_value.generate.call_count == 7
+    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna)
+    assert all(p.format == 'single' for p in posts)
+
+
+def test_disable_carousel_if_full_product_week_forces_single():
+    from core.content_pipeline.tasks import _disable_carousel_if_full_product_week
+    posts_data = [{'format': 'single'}] * 6 + [{'format': 'carousel'}]
+    _disable_carousel_if_full_product_week(posts_data, [b'img'] * 7)
+    assert all(p['format'] == 'single' for p in posts_data)
+
+
+def test_disable_carousel_if_full_product_week_noop_with_fewer_than_7():
+    from core.content_pipeline.tasks import _disable_carousel_if_full_product_week
+    posts_data = [{'format': 'single'}] * 6 + [{'format': 'carousel'}]
+    _disable_carousel_if_full_product_week(posts_data, [b'img'] * 3)
+    assert posts_data[-1]['format'] == 'carousel'
+
+
 def test_load_product_images_takes_paths_list(tmp_path, settings):
     settings.MEDIA_ROOT = str(tmp_path)
     uploads_dir = tmp_path / 'uploads'

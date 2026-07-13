@@ -60,6 +60,16 @@ def _product_image_for_day(day_in_week: int, images: list[bytes]) -> bytes | Non
     return None
 
 
+def _disable_carousel_if_full_product_week(posts_data: list[dict], product_images_bytes: list[bytes]) -> None:
+    """Si el usuario subio una foto de producto por cada dia de la semana (7),
+    el carrusel (que usa un fondo generado por IA) le restaria protagonismo a
+    esas fotos — el usuario quiere mostrar SUS productos ese dia, no
+    contenido generico. En ese caso, todos los posts se generan como 'single'."""
+    if len(product_images_bytes) == 7:
+        for post in posts_data:
+            post['format'] = ContentPost.FORMAT_SINGLE
+
+
 def content_generation_task(job_id: str) -> None:
     job = AnalysisJob.objects.get(id=job_id)
     brand_dna = job.brand_dna
@@ -85,6 +95,7 @@ def content_generation_task(job_id: str) -> None:
 
         # Cargar imágenes de producto (hasta 7, una por día)
         product_images_bytes = _load_product_images(calendar.active_product_images)
+        _disable_carousel_if_full_product_week(posts_data, product_images_bytes)
 
         # Generamos las 7 imágenes por adelantado — el usuario no espera en vivo
         # (flujo async: se le avisa por correo/dashboard cuando todo está listo),
@@ -215,6 +226,7 @@ def generate_next_week(calendar_id: str, week_number: int) -> None:
         base_day = (week_number - 1) * 7
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
         product_images_bytes = _load_product_images(calendar.active_product_images)
+        _disable_carousel_if_full_product_week(posts_data, product_images_bytes)
 
         for i, post_data in enumerate(posts_data, start=1):
             scheduled = scheduled_dates[i - 1]

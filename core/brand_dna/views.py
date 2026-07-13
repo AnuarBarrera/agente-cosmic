@@ -307,7 +307,10 @@ def download_post_image(request, post_id):
     """Sirve la imagen del post como descarga forzada (Content-Disposition: attachment).
     Evita depender de fetch()+blob en el navegador — el bucket de GCS no manda headers
     CORS, así que un fetch cross-origin directo desde el JS del cliente falla en
-    silencio. Proxeamos la imagen desde el backend (mismo origen, sin CORS)."""
+    silencio. Proxeamos la imagen desde el backend (mismo origen, sin CORS).
+    Posts carrusel (H20 + roadmap #5) se sirven como un único .zip con las N
+    slides — descargar 4 archivos sueltos por click es mala UX y los navegadores
+    suelen bloquear descargas múltiples automáticas como si fueran popups."""
     import urllib.request
     from core.content_pipeline.models import ContentPost
     post = get_object_or_404(
@@ -317,6 +320,23 @@ def download_post_image(request, post_id):
     )
     if not post.image_url:
         raise Http404
+
+    if post.format == ContentPost.FORMAT_CAROUSEL and post.image_urls:
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for i, slide_url in enumerate(post.image_urls, start=1):
+                try:
+                    with urllib.request.urlopen(slide_url, timeout=15) as resp:
+                        zf.writestr(f'slide-{i}.png', resp.read())
+                except Exception as e:
+                    logger.warning(f"download_post_image: no se pudo obtener la slide {i} de {slide_url}: {e}")
+        if not buf.getbuffer().nbytes:
+            raise Http404
+        response = HttpResponse(buf.getvalue(), content_type='application/zip')
+        response['Content-Disposition'] = f'attachment; filename="post-dia-{post.day_number}-carrusel.zip"'
+        return response
+
     try:
         with urllib.request.urlopen(post.image_url, timeout=15) as resp:
             data = resp.read()

@@ -58,10 +58,9 @@
     .post-card.change_requested { box-shadow: 0 0 0 2px #f0c040; }
     .post-img { position: relative; width: 100%; aspect-ratio: 1; object-fit: cover; background: #111; display: flex; align-items: center; justify-content: center; color: #333; font-size: 2rem; }
     .post-img img { width: 100%; height: 100%; object-fit: cover; }
+    .post-img.carousel-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; }
+    .post-img.carousel-grid a { display: block; width: 100%; height: 100%; overflow: hidden; }
     .carousel-badge { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.7rem; font-weight: 700; padding: 3px 8px; border-radius: 20px; z-index: 2; pointer-events: none; }
-    .carousel-thumbs { display: flex; gap: 6px; padding: 10px 16px 0; overflow-x: auto; }
-    .carousel-thumbs img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; flex-shrink: 0; opacity: 0.85; transition: opacity 0.15s; }
-    .carousel-thumbs img:hover { opacity: 1; }
     .post-body { padding: 16px; }
     .post-schedule { font-size: 0.75rem; color: #888; margin-bottom: 10px; }
     .post-caption { font-size: 0.85rem; color: #ccc; line-height: 1.5; margin-bottom: 12px; }
@@ -204,27 +203,22 @@
     <div class="posts-grid">
     {% for post in week.posts %}
     <div class="post-card {{ post.user_status }}" id="card-{{ post.id }}">
-      <div class="post-img">
-        {% if post.image_url %}
+      <div class="post-img{% if post.format == 'carousel' and post.image_urls %} carousel-grid{% endif %}">
+        {% if post.format == 'carousel' and post.image_urls %}
+          {% for slide_url in post.image_urls %}
+          <a href="{{ slide_url }}" target="_blank" rel="noopener" title="Slide {{ forloop.counter }}">
+            <img src="{{ slide_url }}" alt="Slide {{ forloop.counter }} del día {{ post.day_number }}" loading="lazy" style="cursor:zoom-in;">
+          </a>
+          {% endfor %}
+          <div class="carousel-badge">🎠 Carrusel</div>
+        {% elif post.image_url %}
           <a href="{{ post.image_url }}" target="_blank" rel="noopener" title="Ver imagen completa" style="display:block;width:100%;height:100%;">
             <img src="{{ post.image_url }}" alt="Día {{ post.day_number }}" loading="lazy" style="cursor:zoom-in;">
           </a>
-          {% if post.format == 'carousel' and post.image_urls %}
-            <div class="carousel-badge">🎠 {{ post.image_urls|length }} slides</div>
-          {% endif %}
         {% else %}
           📸
         {% endif %}
       </div>
-      {% if post.format == 'carousel' and post.image_urls %}
-      <div class="carousel-thumbs">
-        {% for slide_url in post.image_urls %}
-        <a href="{{ slide_url }}" target="_blank" rel="noopener" title="Slide {{ forloop.counter }}">
-          <img src="{{ slide_url }}" alt="Slide {{ forloop.counter }} del día {{ post.day_number }}" loading="lazy">
-        </a>
-        {% endfor %}
-      </div>
-      {% endif %}
       <div class="post-body">
         <div class="post-schedule" data-scheduled="{{ post.scheduled_at|date:'c' }}">
           📅 {{ post.scheduled_at|date:"D d M" }} · 📧 {{ post.scheduled_at|date:"H:i" }}h
@@ -239,7 +233,7 @@
         </div>
         {% endif %}
         <div class="actions">
-          <button class="btn-action btn-download" onclick="downloadImage('{{ post.id }}')">⬇ Descargar imagen</button>
+          <button class="btn-action btn-download" onclick="downloadImage('{{ post.id }}')">⬇ Descargar {% if post.format == 'carousel' %}carrusel (.zip){% else %}imagen{% endif %}</button>
           <button class="btn-action btn-edit" id="edit-btn-{{ post.id }}" onclick="startEdit('{{ post.id }}')" style="{% if post.downloaded_at %}display:none;{% endif %}">✏ Edita la descripción</button>
           <button class="btn-action btn-regen" id="regen-btn-{{ post.id }}" onclick="toggleRegen('{{ post.id }}')" style="{% if post.downloaded_at %}display:none;{% endif %}">↺ Regenera la imagen</button>
           <button class="btn-action btn-save" id="save-{{ post.id }}" onclick="saveEdit('{{ post.id }}')">Guardar</button>
@@ -398,23 +392,21 @@
       // Actualizar imagen si el servidor generó una nueva
       if (data.image_url) {
         const card = document.getElementById('card-' + postId);
-        const imgEl = card.querySelector('.post-img img');
-        const linkEl = card.querySelector('.post-img a');
-        const freshUrl = data.image_url + '?t=' + Date.now();
-        if (imgEl) imgEl.src = freshUrl;
-        if (linkEl) linkEl.href = data.image_url;
+        const imgContainer = card.querySelector('.post-img');
+        const t = Date.now();
         if (data.image_urls && data.image_urls.length) {
-          let thumbs = card.querySelector('.carousel-thumbs');
-          if (!thumbs) {
-            thumbs = document.createElement('div');
-            thumbs.className = 'carousel-thumbs';
-            card.querySelector('.post-img').insertAdjacentElement('afterend', thumbs);
-          }
-          thumbs.innerHTML = data.image_urls.map(function(url, i) {
-            const t = Date.now();
+          imgContainer.classList.add('carousel-grid');
+          imgContainer.innerHTML = data.image_urls.map(function(url, i) {
             return '<a href="' + url + '" target="_blank" rel="noopener" title="Slide ' + (i + 1) + '">'
-              + '<img src="' + url + '?t=' + t + '" alt="Slide ' + (i + 1) + '" loading="lazy"></a>';
-          }).join('');
+              + '<img src="' + url + '?t=' + t + '" alt="Slide ' + (i + 1) + '" loading="lazy" style="cursor:zoom-in;"></a>';
+          }).join('') + '<div class="carousel-badge">🎠 Carrusel</div>';
+        } else {
+          imgContainer.classList.remove('carousel-grid');
+          const imgEl = imgContainer.querySelector('img');
+          const linkEl = imgContainer.querySelector('a');
+          const freshUrl = data.image_url + '?t=' + t;
+          if (imgEl) imgEl.src = freshUrl;
+          if (linkEl) linkEl.href = data.image_url;
         }
       }
       document.getElementById('regen-' + postId).style.display = 'none';

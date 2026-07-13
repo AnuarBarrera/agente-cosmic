@@ -770,14 +770,36 @@ Se implementó en 2 etapas:
    puntos que ya llamaban a `ImageGenerator.generate()` — ahora pasan por
    un helper común `_generate_post_media()` que decide single vs. carousel
    según `post.format`/`post_data['format']`.
-   UI: `calendar_review.html` muestra un badge "🎠 N slides" sobre la
-   portada y una tira de thumbnails clicables (cada uno abre la slide
-   completa en pestaña nueva) debajo de la card, solo para posts carrusel.
    Verificado end-to-end con una generación real: mismo fondo en las 4
    slides, texto narrativo distinto, CTA solo en la última.
-   Pendiente NO implementado (fuera de scope de este pase): el botón
-   "Descargar imagen" solo descarga la portada (slide 1); las demás slides
-   se obtienen abriendo el link directo de GCS desde la tira de thumbnails.
+
+ACTUALIZACIÓN 2026-07-13 (misma sesión) — 3 ajustes de UX pedidos por Anuar
+tras probar el carrusel en vivo:
+   1. Si el usuario subió una foto de producto por cada día de la semana
+      (7), YA NO se genera carrusel para ningún día — el carrusel usa un
+      fondo generado por IA, lo que le quitaría protagonismo a esas fotos
+      reales del producto que el usuario específicamente quiere mostrar
+      ese día. `tasks.py::_disable_carousel_if_full_product_week()`, se
+      llama justo después de cargar las imágenes de producto y antes de
+      generar imágenes, tanto en `content_generation_task` como en
+      `generate_next_week`.
+   2. La UI mostraba solo la portada + una tira de thumbnails de 44x44px
+      — había que abrir cada slide en pestaña nueva para verla. Ahora
+      `calendar_review.html` muestra las N slides en un grid 2x2 directo
+      dentro de la tarjeta (mismo tamaño que un post normal), cada una
+      clicable para ver a tamaño completo. Reemplaza el badge "N slides" +
+      tira de thumbnails por un badge simple "🎠 Carrusel" sobre el grid.
+   3. El botón "Descargar imagen" solo descargaba la portada (slide 1).
+      Ahora, para posts carrusel, `download_post_image` arma un .zip en
+      memoria con las N slides (`slide-1.png`...`slide-N.png`) y lo sirve
+      como un solo archivo — descargar 4 archivos sueltos por click es
+      mala UX y los navegadores suelen bloquear descargas múltiples
+      automáticas como si fueran popups. El botón cambia su texto a
+      "Descargar carrusel (.zip)" para posts carrusel.
+   Verificado visualmente (grid 2x2 renderizado con 4 colores distintos,
+   badge y botón correctos) y con tests nuevos (zip válido con las N
+   slides, regla de "7 fotos = sin carrusel" cubierta a nivel unitario e
+   integración).
 
 =================================================================
 HALLAZGO 21 — No existe regeneración del calendario al terminar los 7 días
