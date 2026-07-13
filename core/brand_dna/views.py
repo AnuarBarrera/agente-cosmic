@@ -321,6 +321,17 @@ def download_post_image(request, post_id):
     if not post.image_url:
         raise Http404
 
+    if post.format == ContentPost.FORMAT_REEL and post.video_url:
+        try:
+            with urllib.request.urlopen(post.video_url, timeout=30) as resp:
+                data = resp.read()
+        except Exception as e:
+            logger.warning(f"download_post_image: no se pudo obtener el reel de {post.video_url}: {e}")
+            raise Http404
+        response = HttpResponse(data, content_type='video/mp4')
+        response['Content-Disposition'] = f'attachment; filename="post-dia-{post.day_number}-reel.mp4"'
+        return response
+
     if post.format == ContentPost.FORMAT_CAROUSEL and post.image_urls:
         import zipfile
         buf = io.BytesIO()
@@ -417,6 +428,8 @@ def post_action_api(request, post_id):
         return JsonResponse({'status': 'ok', 'caption': post.caption, 'remaining_edits': remaining - 1})
 
     if action == 'regenerate':
+        if post.format == ContentPost.FORMAT_REEL:
+            return JsonResponse({'error': 'La regeneración no está disponible para reels todavía.'}, status=400)
         if not value:
             return JsonResponse({'error': 'Feedback vacío'}, status=400)
         from core.brand_dna.rate_limits import can_regenerate
@@ -445,8 +458,10 @@ def post_action_api(request, post_id):
                 gcs_path = brand_dna.job.product_image_path
                 if upload_exists(gcs_path):
                     product_image_bytes = read_upload(gcs_path)
-            generated_url, generated_urls = _generate_post_media(
+            generated_url, generated_urls, _ = _generate_post_media(
                 image_gen,
+                None,  # reel_script_gen
+                None,  # reel_gen
                 fmt=post.format,
                 filename=f"{job_id}-day{post.day_number}-regen-{int(_time.time())}",
                 caption=new_caption,

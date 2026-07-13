@@ -596,7 +596,15 @@ def test_update_active_product_images_new_uploads(job_with_calendar, tmp_path, s
         'image_choice': 'new',
         'product_images': [image1, image2],
     })
-    _update_active_product_images(calendar, job, request, next_week=2)
+    def mock_save_upload(file_bytes, path):
+        full_path = os.path.join(settings.MEDIA_ROOT, path)
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        with open(full_path, 'wb') as f:
+            f.write(file_bytes)
+
+    with patch('core.brand_dna.views._validate_image_bytes', return_value=True), \
+         patch('core.brand_dna.views.save_upload', side_effect=mock_save_upload):
+        _update_active_product_images(calendar, job, request, next_week=2)
 
     job.refresh_from_db()
     calendar.refresh_from_db()
@@ -633,3 +641,36 @@ def test_ga4_tag_absent_when_measurement_id_empty(settings):
     c = Client()
     response = c.get('/privacidad/')
     assert b'gtag' not in response.content
+
+
+def test_download_post_image_returns_mp4_for_reel(client, user, job_with_calendar):
+    post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
+    post.format = 'reel'
+    post.video_url = 'https://example.com/reel.mp4'
+    post.save(update_fields=['format', 'video_url'])
+    client.force_login(user)
+    fake_response = MagicMock()
+    fake_response.read.return_value = b'fake-mp4-bytes'
+    fake_response.__enter__.return_value = fake_response
+    with patch('urllib.request.urlopen', return_value=fake_response):
+        response = client.get(f'/api/post/{post.id}/download/')
+    assert response.status_code == 200
+    assert response['Content-Type'] == 'video/mp4'
+    assert 'reel.mp4' in response['Content-Disposition']
+    assert response.content == b'fake-mp4-bytes'
+
+
+def test_regenerate_action_blocked_for_reel_posts(client, user, job_with_calendar):
+    post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
+    post.format = 'reel'
+    post.video_url = 'https://example.com/reel.mp4'
+    post.save(update_fields=['format', 'video_url'])
+    client.force_login(user)
+    response = client.post(
+        f'/api/post/{post.id}/action/',
+        data=json.dumps({'action': 'regenerate', 'value': 'Hazlo mas corto'}),
+        content_type='application/json',
+    )
+    assert response.status_code == 400
+    post.refresh_from_db()
+    assert post.video_url == 'https://example.com/reel.mp4'
