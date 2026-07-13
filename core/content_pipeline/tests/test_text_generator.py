@@ -107,7 +107,7 @@ def test_generate_tags_each_post_with_its_pillar(brand_dna):
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
 )
 def test_generate_marks_only_carousel_day_as_carousel_format(brand_dna):
-    from core.content_pipeline.generators.text_generator import TextGenerator, CAROUSEL_DAY
+    from core.content_pipeline.generators.text_generator import TextGenerator, CAROUSEL_DAY, REEL_DAY
     with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
         mock_vc.return_value = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
         gen = TextGenerator()
@@ -116,7 +116,20 @@ def test_generate_marks_only_carousel_day_as_carousel_format(brand_dna):
     formats = [p['format'] for p in result]
     assert formats.count('carousel') == 1
     assert formats[CAROUSEL_DAY - 1] == 'carousel'
-    assert all(f == 'single' for i, f in enumerate(formats) if i != CAROUSEL_DAY - 1)
+    special_days = {CAROUSEL_DAY - 1, REEL_DAY - 1}
+    assert all(f == 'single' for i, f in enumerate(formats) if i not in special_days)
+
+
+def test_generate_marks_only_reel_day_as_reel_format(brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator, REEL_DAY
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
+        gen = TextGenerator()
+        result = gen.generate(brand_dna)
+
+    formats = [p['format'] for p in result]
+    assert formats.count('reel') == 1
+    assert formats[REEL_DAY - 1] == 'reel'
 
 
 @override_settings(

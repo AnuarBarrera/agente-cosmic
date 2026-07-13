@@ -28,6 +28,11 @@ CONTENT_PILLARS = [
 # (antes/despues, cita del cliente, resultado, CTA) — es el unico dia que usa carrusel.
 CAROUSEL_DAY = 3
 
+# El pilar "Producto" (dia 1, mayor exposicion de la semana) usa reel — Veo + Lyria 3 +
+# TTS + overlay de texto (roadmap #7). tasks.py::_product_image_for_day baja esto a
+# 'single' si el usuario subio una foto real para el dia 1 (ver reel_generator.py).
+REEL_DAY = 1
+
 _PROMPT = (
     "Eres un experto en marketing de contenidos. Genera exactamente 7 posts para redes sociales "
     "para la siguiente marca — cada uno con un PROPOSITO ESTRATEGICO DISTINTO (pilar de "
@@ -158,7 +163,12 @@ class TextGenerator:
         for i, post in enumerate(posts):
             pillar = CONTENT_PILLARS[i] if i < len(CONTENT_PILLARS) else None
             post['pillar'] = pillar['name'] if pillar else ''
-            post['format'] = 'carousel' if pillar and pillar['day'] == CAROUSEL_DAY else 'single'
+            if pillar and pillar['day'] == REEL_DAY:
+                post['format'] = 'reel'
+            elif pillar and pillar['day'] == CAROUSEL_DAY:
+                post['format'] = 'carousel'
+            else:
+                post['format'] = 'single'
 
         if _is_sensitive_niche(brand_dna):
             logger.info(f"Nicho sensible detectado para '{brand_dna.business_name}' — auditando captions")
