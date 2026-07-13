@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import html as _html
 import json
 import logging
@@ -21,6 +22,30 @@ from PIL import Image
 import io
 
 logger = logging.getLogger(__name__)
+
+# Tipografías reales via Google Fonts (antes: font-family: Arial hardcodeado en los
+# 3 templates HTML). Solo varía la fuente — el color de acento/botón sigue viniendo
+# de la paleta real de la marca (primary_color/button_color), no de estos presets.
+_FONT_PRESETS = [
+    {'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins:wght@400;600;700;900'},
+    {'font_family': "'Playfair Display', serif", 'font_import': 'Playfair+Display:wght@400;600;700;900'},
+    {'font_family': "'Space Grotesk', sans-serif", 'font_import': 'Space+Grotesk:wght@400;500;600;700'},
+    {'font_family': "'Bebas Neue', sans-serif", 'font_import': 'Bebas+Neue'},
+    {'font_family': "'DM Sans', sans-serif", 'font_import': 'DM+Sans:wght@400;500;700'},
+]
+
+
+def _choose_font_preset(seed: str) -> dict:
+    """Elige una fuente de forma determinista a partir de `seed` (el job_id del
+    calendario) en vez de puramente al azar — así las 7 imagenes de una misma
+    semana usan la MISMA fuente (consistencia de marca, ver H35), incluso si el
+    usuario regenera un solo post despues (nueva instancia de ImageGenerator,
+    pero mismo seed => mismo preset)."""
+    if not seed:
+        return random.choice(_FONT_PRESETS)
+    digest = hashlib.sha256(seed.encode()).hexdigest()
+    idx = int(digest, 16) % len(_FONT_PRESETS)
+    return _FONT_PRESETS[idx]
 
 
 def _crop_to_square(image_bytes: bytes) -> bytes:
@@ -143,7 +168,10 @@ class ImageGenerator:
 
     def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2) -> str:
         try:
-            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description, audience=audience, product_image_bytes=product_image_bytes, max_qc_retries=max_qc_retries)
+            # job_id (sin el sufijo "-dayN") como seed de fuente — asi las 7 imagenes
+            # de una semana comparten tipografia, incluso si se regenera un solo post.
+            font_seed = filename.rsplit('-day', 1)[0] if '-day' in filename else filename
+            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description, audience=audience, product_image_bytes=product_image_bytes, max_qc_retries=max_qc_retries, font_seed=font_seed)
             return self._upload_to_storage(image_bytes, filename)
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")
@@ -153,7 +181,7 @@ class ImageGenerator:
     # Layered pipeline
     # ------------------------------------------------------------------
 
-    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2) -> bytes:
+    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2, font_seed: str = '') -> bytes:
         if product_image_bytes:
             kw_str = ', '.join((keywords or [])[:3])
             brand_context = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
@@ -161,10 +189,10 @@ class ImageGenerator:
                 product_image_bytes, caption, colors, tone, max_qc_retries=max_qc_retries
             )
             content = self._generate_post_content(caption, product_image_bytes=product_image_bytes, brand_context=brand_context)
-            result = self._render_html_template(background_bytes, content, colors, svg_overlay=svg_overlay)
+            result = self._render_html_template(background_bytes, content, colors, svg_overlay=svg_overlay, font_seed=font_seed)
             if max_qc_retries > 0 and svg_overlay and not self._validate_final_image(result):
                 logger.warning("Final QC falló — reintentando sin SVG overlay")
-                result = self._render_html_template(background_bytes, content, colors, svg_overlay='')
+                result = self._render_html_template(background_bytes, content, colors, svg_overlay='', font_seed=font_seed)
             return result
         else:
             background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
@@ -172,7 +200,7 @@ class ImageGenerator:
             brand_ctx = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
             content = self._generate_post_content(caption, product_image_bytes=None, brand_context=brand_ctx)
             svg_overlay = ''
-        return self._render_html_template(background_bytes, content, colors, svg_overlay=svg_overlay)
+        return self._render_html_template(background_bytes, content, colors, svg_overlay=svg_overlay, font_seed=font_seed)
 
     def _generate_product_scene(self, product_image_bytes: bytes, caption: str, colors: list[str], tone: str, max_qc_retries: int = 2) -> tuple[bytes, str]:
         """Pipeline agéntico de 3 pasos con QC en la escena generada:
@@ -691,7 +719,7 @@ class ImageGenerator:
             logger.warning(f"Selección de plantilla por IA falló, usando aleatorio: {e}")
         return random.choice(self._TEMPLATES)
 
-    def _render_html_template(self, background_bytes: bytes, content: dict, colors: list[str], svg_overlay: str = '') -> bytes:
+    def _render_html_template(self, background_bytes: bytes, content: dict, colors: list[str], svg_overlay: str = '', font_seed: str = '') -> bytes:
         """Inject background + content + optional SVG overlay into an HTML template chosen by
         Gemini based on where the image has visual space for text → PNG."""
         background_bytes = _crop_to_square(background_bytes)
@@ -714,9 +742,12 @@ class ImageGenerator:
         )
 
         button_color = _pick_button_color(colors)
+        font_preset = _choose_font_preset(font_seed)
         html = html.replace('{{bg_data_url}}', f'data:{bg_mime};base64,{bg_b64}')
         html = html.replace('{{primary_color}}', primary)
         html = html.replace('{{button_color}}', button_color)
+        html = html.replace('{{font_family}}', font_preset['font_family'])
+        html = html.replace('{{font_import}}', font_preset['font_import'])
         html = html.replace('{{svg_overlay}}', svg_div)
         html = html.replace('{{tag}}', _html.escape(content.get('tag', 'DESTACADO')))
         html = html.replace('{{headline}}', _html.escape(content.get('headline', '')))
@@ -729,7 +760,8 @@ class ImageGenerator:
                 args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
             )
             page = browser.new_page(viewport={'width': 1080, 'height': 1080})
-            page.set_content(html, wait_until='domcontentloaded')
+            page.set_content(html, wait_until='load')
+            page.evaluate('document.fonts.ready')
             png_bytes = page.screenshot(full_page=False)
             browser.close()
 

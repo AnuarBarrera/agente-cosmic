@@ -38,6 +38,27 @@ def test_generate_returns_url():
     GOOGLE_CLOUD_LOCATION='us-central1',
     VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
 )
+def test_generate_derives_font_seed_from_filename_without_day_suffix():
+    """Las 7 imagenes de una semana comparten job_id en el filename (job-day1..7) —
+    el seed de fuente debe ser el mismo para todas, sin importar el dia."""
+    from core.content_pipeline.generators.image_generator import ImageGenerator
+    gen = ImageGenerator(bucket_name='test-bucket')
+    with patch.object(gen, '_layered_pipeline', return_value=b'fake-png-bytes') as mock_pipeline, \
+         patch.object(gen, '_upload_to_storage', return_value='https://storage.googleapis.com/test/img.jpg'):
+        gen.generate(
+            caption='Diseno web profesional',
+            colors=['#1a1a2e'],
+            tone='profesional',
+            filename='job-abc-day3',
+        )
+    assert mock_pipeline.call_args.kwargs['font_seed'] == 'job-abc'
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+)
 def test_generate_returns_fallback_on_error():
     from core.content_pipeline.generators.image_generator import ImageGenerator
     gen = ImageGenerator(bucket_name='test-bucket')
@@ -207,6 +228,58 @@ class TestRenderHtmlTemplate:
         fallback = _pick_button_color([])
         assert fallback in html_arg
 
+    def test_injects_font_family_into_html(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator, _choose_font_preset
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_bg = _png_bytes()
+        fake_shot = _png_bytes(size=(1080, 1080))
+        content = {'headline': 'Título', 'subtitle': 'Subtítulo', 'cta': 'Empieza', 'tag': 'TEST'}
+        mock_pw, mock_page = self._make_mock_playwright(fake_shot)
+
+        with patch('core.content_pipeline.generators.image_generator.sync_playwright', return_value=mock_pw), \
+             patch.object(ImageGenerator, '_choose_template_for_image', return_value='instagram_post.html'):
+            gen._render_html_template(fake_bg, content, ['#e94560'], font_seed='job-abc')
+
+        html_arg = mock_page.set_content.call_args[0][0]
+        expected = _choose_font_preset('job-abc')
+        assert expected['font_family'] in html_arg
+        assert expected['font_import'] in html_arg
+        assert '{{font_family}}' not in html_arg
+        assert '{{font_import}}' not in html_arg
+
+    def test_waits_for_fonts_ready_before_screenshot(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_bg = _png_bytes()
+        fake_shot = _png_bytes(size=(1080, 1080))
+        content = {'headline': 'Título', 'subtitle': 'Subtítulo', 'cta': 'Empieza', 'tag': 'TEST'}
+        mock_pw, mock_page = self._make_mock_playwright(fake_shot)
+
+        with patch('core.content_pipeline.generators.image_generator.sync_playwright', return_value=mock_pw), \
+             patch.object(ImageGenerator, '_choose_template_for_image', return_value='instagram_post.html'):
+            gen._render_html_template(fake_bg, content, ['#e94560'])
+
+        mock_page.evaluate.assert_called_once_with('document.fonts.ready')
+
+
+class TestChooseFontPreset:
+    def test_same_seed_always_returns_same_preset(self):
+        from core.content_pipeline.generators.image_generator import _choose_font_preset
+        first = _choose_font_preset('job-123')
+        second = _choose_font_preset('job-123')
+        assert first == second
+
+    def test_empty_seed_does_not_raise(self):
+        from core.content_pipeline.generators.image_generator import _choose_font_preset, _FONT_PRESETS
+        result = _choose_font_preset('')
+        assert result in _FONT_PRESETS
+
+    def test_different_seeds_can_return_different_presets(self):
+        from core.content_pipeline.generators.image_generator import _choose_font_preset
+        seeds = [f'job-{i}' for i in range(20)]
+        results = {_choose_font_preset(s)['font_family'] for s in seeds}
+        assert len(results) > 1
+
 
 class TestLayeredPipeline:
     @override_settings(
@@ -228,7 +301,7 @@ class TestLayeredPipeline:
              patch.object(gen, '_render_html_template', return_value=fake_shot) as mock_render:
             result = gen._layered_pipeline('Caption de prueba', ['#1a1a2e'], 'profesional')
 
-        mock_render.assert_called_once_with(fake_bg, fake_content, ['#1a1a2e'], svg_overlay='')
+        mock_render.assert_called_once_with(fake_bg, fake_content, ['#1a1a2e'], svg_overlay='', font_seed='')
         assert result == fake_shot
 
     @override_settings(
@@ -535,7 +608,7 @@ class TestLayeredPipelineWithProduct:
         call_kwargs = mock_content.call_args.kwargs
         assert call_kwargs['product_image_bytes'] == product_img
         assert 'brand_context' in call_kwargs and len(call_kwargs['brand_context']) > 0
-        mock_render.assert_called_once_with(scene_img, fake_content, ['#c0c0c0'], svg_overlay=fake_svg)
+        mock_render.assert_called_once_with(scene_img, fake_content, ['#c0c0c0'], svg_overlay=fake_svg, font_seed='')
         assert result == fake_shot
 
     @override_settings(
