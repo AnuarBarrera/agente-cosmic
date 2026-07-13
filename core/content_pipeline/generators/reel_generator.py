@@ -5,6 +5,7 @@ import re
 import subprocess
 import tempfile
 import time
+import time as _time
 import google.genai as genai
 from google.genai import types
 from google.cloud import storage
@@ -232,5 +233,46 @@ class ReelGenerator:
             )
             with open(frame_path, 'rb') as f:
                 return f.read()
+
+    def generate(self, script: dict, colors: list[str], filename_prefix: str) -> tuple[str, str]:
+        try:
+            clips = self._generate_video_clips(script['scene_prompts'])
+            if len(clips) < 3:
+                logger.warning(f"Reel abortado: solo {len(clips)}/3 clips de Veo generados")
+                return '', ''
+
+            music = self._generate_music(script['music_mood'])
+            narration = self._generate_narration(script['narration_script'])
+            hook_png = self._render_text_overlay(script['hook_text'], script['highlight_word'], 'hook', colors)
+            cta_png = self._render_text_overlay('', '', 'cta', colors, cta_text=script['tag_cta'])
+
+            final_video = self._assemble_reel(clips, music, narration, hook_png, cta_png)
+            poster = self._extract_poster_frame(final_video)
+
+            video_url = self._upload_video_to_storage(final_video, filename_prefix)
+            poster_url = self._upload_to_storage(poster, f'{filename_prefix}-poster')
+            return video_url, poster_url
+        except Exception as e:
+            logger.error(f"ReelGenerator.generate error: {e}")
+            return '', ''
+
+    def _upload_to_storage(self, image_bytes: bytes, filename: str) -> str:
+        with track_external_api('gcs'):
+            client = storage.Client(project=settings.GOOGLE_CLOUD_PROJECT)
+            bucket = client.bucket(self._bucket)
+            blob = bucket.blob(f'posts/{filename}.png')
+            blob.upload_from_string(image_bytes, content_type='image/png')
+        GCS_OPERATIONS.labels(operation='upload').inc()
+        return f'{blob.public_url}?v={int(_time.time())}'
+
+    def _upload_video_to_storage(self, video_bytes: bytes, filename: str) -> str:
+        with track_external_api('gcs'):
+            client = storage.Client(project=settings.GOOGLE_CLOUD_PROJECT)
+            bucket = client.bucket(self._bucket)
+            blob = bucket.blob(f'reels/{filename}.mp4')
+            blob.upload_from_string(video_bytes, content_type='video/mp4')
+        GCS_OPERATIONS.labels(operation='upload').inc()
+        return f'{blob.public_url}?v={int(_time.time())}'
+
 
 

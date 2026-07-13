@@ -214,3 +214,63 @@ class TestExtractPosterFrame:
         assert result == fake_frame
 
 
+_FAKE_SCRIPT = {
+    'hook_text': 'Descubre algo nuevo', 'highlight_word': 'nuevo',
+    'tag_cta': 'Compra ahora', 'narration_script': 'Bienvenido a nuestra tienda.',
+    'scene_prompts': ['scene 1', 'scene 2', 'scene 3'],
+    'music_mood': 'upbeat, optimistic',
+}
+
+
+class TestGenerate:
+    def test_returns_video_and_poster_urls_on_success(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_video_clips', return_value=[b'c1', b'c2', b'c3']), \
+             patch.object(gen, '_generate_music', return_value=b'music'), \
+             patch.object(gen, '_generate_narration', return_value=b'narration'), \
+             patch.object(gen, '_render_text_overlay', return_value=b'overlay-png'), \
+             patch.object(gen, '_assemble_reel', return_value=b'final-mp4'), \
+             patch.object(gen, '_extract_poster_frame', return_value=b'poster-png'), \
+             patch.object(gen, '_upload_video_to_storage', return_value='https://storage.test/reel.mp4') as mock_up_video, \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/poster.png') as mock_up_poster:
+            video_url, poster_url = gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
+
+        assert video_url == 'https://storage.test/reel.mp4'
+        assert poster_url == 'https://storage.test/poster.png'
+        mock_up_video.assert_called_once_with(b'final-mp4', 'job1-day1')
+        mock_up_poster.assert_called_once_with(b'poster-png', 'job1-day1-poster')
+
+    def test_returns_empty_strings_when_fewer_than_3_clips_generated(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_video_clips', return_value=[b'c1', b'c2']):
+            video_url, poster_url = gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
+        assert (video_url, poster_url) == ('', '')
+
+    def test_returns_empty_strings_when_assembly_raises(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_video_clips', return_value=[b'c1', b'c2', b'c3']), \
+             patch.object(gen, '_generate_music', return_value=None), \
+             patch.object(gen, '_generate_narration', return_value=None), \
+             patch.object(gen, '_render_text_overlay', return_value=b'overlay-png'), \
+             patch.object(gen, '_assemble_reel', side_effect=Exception('ffmpeg error')):
+            video_url, poster_url = gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
+        assert (video_url, poster_url) == ('', '')
+
+
+class TestUploadVideoToStorage:
+    def test_uploads_with_video_mimetype_and_cache_busting(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        mock_blob = MagicMock()
+        mock_blob.public_url = 'https://storage.googleapis.com/test-bucket/reels/job1-day1.mp4'
+        mock_bucket = MagicMock()
+        mock_bucket.blob.return_value = mock_blob
+        mock_client = MagicMock()
+        mock_client.bucket.return_value = mock_bucket
+        with patch('core.content_pipeline.generators.reel_generator.storage.Client', return_value=mock_client):
+            url = gen._upload_video_to_storage(b'fake-mp4-bytes', 'job1-day1')
+        mock_blob.upload_from_string.assert_called_once_with(b'fake-mp4-bytes', content_type='video/mp4')
+        assert url.startswith('https://storage.googleapis.com/test-bucket/reels/job1-day1.mp4?v=')
