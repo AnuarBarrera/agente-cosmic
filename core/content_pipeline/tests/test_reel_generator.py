@@ -144,6 +144,67 @@ class TestGenerateVideoClips:
             clips = gen._generate_video_clips(['scene 1'])
         assert clips == []
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
+    )
+    def test_single_clip_returns_none_if_operation_never_completes_within_timeout(self):
+        # La operacion de larga duracion (LRO) de Veo puede quedarse en done=False
+        # indefinidamente sin devolver error — sin un limite de tiempo el polling
+        # espera para siempre. Se simula tiempo avanzando mas alla del limite sin
+        # dormir de verdad (time.sleep y time.monotonic mockeados).
+        from core.content_pipeline.generators.reel_generator import (
+            ReelGenerator, _VEO_POLL_TIMEOUT_SECONDS,
+        )
+        gen = ReelGenerator(bucket_name='test-bucket')
+        mock_op = MagicMock()
+        mock_op.done = False
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc, \
+             patch('core.content_pipeline.generators.reel_generator.time.sleep') as mock_sleep, \
+             patch('core.content_pipeline.generators.reel_generator.time.monotonic') as mock_monotonic:
+            mock_vc.return_value.models.generate_videos.return_value = mock_op
+            mock_vc.return_value.operations.get.return_value = mock_op
+            # 2 llamadas de track_external_api (start/elapsed, comparten el mismo
+            # modulo time con reel_generator) + poll_start + 1er chequeo de limite.
+            mock_monotonic.side_effect = [0, 0, 0, _VEO_POLL_TIMEOUT_SECONDS + 1]
+            result = gen._generate_single_clip('prompt')
+        assert result is None
+        mock_sleep.assert_not_called()
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
+    )
+    def test_single_clip_keeps_polling_while_under_timeout(self):
+        # Una operacion lenta pero real (ej. 24 min observados en produccion) NO
+        # debe cortarse antes de tiempo — solo el limite duro debe detenerla.
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_video = b'fake-video-bytes'
+        mock_video = MagicMock()
+        mock_video.video_bytes = fake_video
+        mock_generated = MagicMock()
+        mock_generated.video = mock_video
+        mock_op_pending = MagicMock()
+        mock_op_pending.done = False
+        mock_op_done = MagicMock()
+        mock_op_done.done = True
+        mock_op_done.error = None
+        mock_op_done.result.generated_videos = [mock_generated]
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc, \
+             patch('core.content_pipeline.generators.reel_generator.time.sleep') as mock_sleep, \
+             patch('core.content_pipeline.generators.reel_generator.time.monotonic') as mock_monotonic:
+            mock_vc.return_value.models.generate_videos.return_value = mock_op_pending
+            mock_vc.return_value.operations.get.return_value = mock_op_done
+            # 2 llamadas de track_external_api (start/elapsed) + poll_start + 1er
+            # chequeo de limite (20 min transcurridos, sigue bajo el limite de 30).
+            mock_monotonic.side_effect = [0, 0, 0, 1200]
+            result = gen._generate_single_clip('prompt')
+        assert result == fake_video
+        mock_sleep.assert_called_once_with(10)
+
 
 class TestGenerateMusic:
     @override_settings(
@@ -289,6 +350,7 @@ def _fake_ffmpeg_run(fake_output: bytes):
 
 
 class TestAssembleReel:
+    @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
     def test_calls_ffmpeg_and_returns_output_bytes(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
@@ -312,6 +374,7 @@ class TestAssembleReel:
         expected_filter = '[1:a]volume=0.3[music];[2:a][music]amix=inputs=2:duration=longest[a]'
         assert mix_cmd[filter_complex_idx + 1] == expected_filter
 
+    @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
     def test_works_without_music_or_narration(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
@@ -328,6 +391,7 @@ class TestAssembleReel:
             )
         assert result == fake_output
 
+    @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
     def test_hook_and_cta_drawtext_filters_are_always_present(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
@@ -349,6 +413,7 @@ class TestAssembleReel:
         map_idx = overlay_cmd.index('-map')
         assert overlay_cmd[map_idx + 1] == '[cta0]'
 
+    @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
     def test_hook_centering_uses_real_probed_width(self, tmp_path):
         # Veo no garantiza 1080px (en produccion real devolvio 720x1280) — el
         # cursor del segmento resaltado del hook debe usar el ancho real
@@ -378,6 +443,7 @@ class TestAssembleReel:
         x_value = int(highlight_filter.split('x=')[1].split(':')[0])
         assert x_value < 720
 
+    @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
     def test_adds_drawtext_filters_for_subtitles(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
@@ -406,6 +472,7 @@ class TestAssembleReel:
         map_idx = overlay_cmd.index('-map')
         assert overlay_cmd[map_idx + 1] == '[sub1]'
 
+    @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
     def test_omits_subtitle_filters_when_no_subtitles(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')

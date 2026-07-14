@@ -25,6 +25,11 @@ from core.content_pipeline.generators.subtitle_generator import SubtitleGenerato
 logger = logging.getLogger(__name__)
 
 _VEO_CLIP_DURATION_SECONDS = 8
+# La LRO (long-running operation) de Veo puede quedar en done=False indefinidamente
+# sin devolver error — el polling sin limite espera para siempre. 30 min (no los 5
+# min sugeridos por una fuente externa) porque en produccion real un clip tardo 24
+# min y SI completo con exito; un limite mas corto lo habria descartado igual.
+_VEO_POLL_TIMEOUT_SECONDS = 1800
 _VIDEO_WIDTH = 1080
 
 # Fuente compartida por hook, CTA y subtitulos — todo el texto de los reels se
@@ -330,7 +335,11 @@ class ReelGenerator:
                     )
             operation = call_with_429_retry(_call, settings.VERTEX_VIDEO_MODEL)
             client = _vertex_client()
+            poll_start = time.monotonic()
             while not operation.done:
+                if time.monotonic() - poll_start > _VEO_POLL_TIMEOUT_SECONDS:
+                    logger.warning(f"Veo no completo en {_VEO_POLL_TIMEOUT_SECONDS}s, abandonando esta operacion")
+                    return None
                 time.sleep(10)
                 operation = client.operations.get(operation)
             if operation.error:
