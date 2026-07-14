@@ -2597,3 +2597,145 @@ Prioridad: — (ya resuelto, hotfix directo en producción, traído a dev vía
   sin relación (`test_load_product_images_takes_paths_list`,
   `test_update_active_product_images_new_uploads`,
   `test_no_product_uses_imagen3_flow`).
+
+=================================================================
+HALLAZGO 53 — Overlay de texto de reels (hook/CTA/subtítulos) se desbordaba
+  del cuadro en producción real, irreproducible en pruebas aisladas
+Categoría: Bug / pipeline de reels / renderizado de texto
+Estado: ✅ RESUELTO — 2026-07-14 (migración completa a ffmpeg drawtext)
+=================================================================
+Surfaceado por: Anuar, probando reels reales generados en producción — el
+  hook, el CTA y los subtítulos se cortaban del cuadro del video.
+
+Causa raíz: el overlay original usaba HTML/CSS real vía Playwright (mismo
+  enfoque que ya usa Cosmic para las imágenes de posts). Funcionaba perfecto
+  en TODA prueba aislada, pero fallaba en producción con Veo/Lyria/TTS
+  corriendo 3-4 min antes. Se probaron 10+ mitigaciones (fuente local, fuente
+  base64, `position:absolute` con dimensiones fijas, forzar reflow +
+  wait_for_timeout, detección de desborde vía `scrollWidth-clientWidth` en
+  vez de `bounding_box()`) sin resolverlo de forma reproducible. Por orden
+  explícita de Anuar se eliminó Playwright del pipeline de reels por
+  completo. El desborde SIGUIÓ apareciendo después — la causa raíz real
+  resultó ser otra completamente distinta, ver HALLAZGO 54. Es probable que
+  ambos problemas estuvieran confundidos entre sí desde el inicio.
+
+Fix: Playwright reemplazado por `drawtext` nativo de ffmpeg (con medición de
+  texto vía PIL `ImageFont.getlength` para el resaltado de palabra en el
+  hook). `reel_hook.html`/`reel_cta.html` eliminados. Nunca falló en ninguna
+  prueba real desde entonces.
+
+Severidad: Alta (bloqueaba el formato reel completo).
+Prioridad: — (resuelto). PENDIENTE evaluar (no bloqueante): ahora que se
+  conoce la causa raíz real (HALLAZGO 54), reintentar el overlay vía
+  Playwright/HTML-CSS podría dar mejor calidad tipográfica que drawtext —
+  pedido explícito de Anuar para una sesión futura.
+
+=================================================================
+HALLAZGO 54 — Veo 3 Fast entrega video 720×1280 real, no 1080×1920 como
+  asumía todo el sizing del overlay de texto
+Categoría: Bug / pipeline de reels / causa raíz
+Estado: ✅ RESUELTO — 2026-07-14
+=================================================================
+Surfaceado por: Claude, investigando por qué el desborde de HALLAZGO 53
+  seguía apareciendo incluso después de eliminar Playwright del pipeline.
+
+Causa raíz: `veo-3.0-fast-generate-001` con `aspect_ratio='9:16'` entrega
+  video real de 720×1280 píxeles, no 1080×1920 como asumía todo el código de
+  overlay (fontsize, box borderw, cursor de centrado del resaltado — todos
+  constantes fijas calibradas para 1080px). Confirmado vía `ffprobe` directo
+  sobre un video real descargado. Esto — no Chromium bajo carga de CPU — era
+  la causa real (o al menos una causa real adicional y confundida) del
+  desborde que motivó toda la migración de HALLAZGO 53.
+
+Fix: `_probe_video_width()` (ffprobe sobre el clip concatenado antes de
+  aplicar el overlay) + `scale = video_width / 1080` aplicado
+  proporcionalmente a todo el sizing de hook/CTA/subtítulos en
+  `reel_generator.py`. Verificado con test sintético 720×1280 y con una
+  generación real de Veo — hook, subtítulo y CTA correctamente contenidos
+  dentro del cuadro.
+
+Severidad: Alta (causa raíz del bloqueante completo del formato reel).
+Prioridad: — (resuelto).
+
+=================================================================
+HALLAZGO 55 — Reproductor de video de reels no funcionaba en la UI (solo vía
+  descarga) — 2 causas distintas
+Categoría: Bug / frontend / pipeline de reels
+Estado: ✅ RESUELTO — 2026-07-14
+=================================================================
+Surfaceado por: Anuar — "no puedo reproducir en la UI, tengo que descargarlo",
+  y luego "sigo teniendo problemas con el reproductor, ¿es por el caché del
+  navegador?" incluso en modo incógnito.
+
+Causa raíz 1 (parcial): ffmpeg por default deja el átomo `moov` (índice del
+  archivo) al final del MP4 — el navegador necesita descargarlo casi
+  completo antes de poder reproducir en streaming progresivo. Diagnosticado
+  inspeccionando directamente los bytes del MP4 descargado (posición de
+  `moov` vs `mdat`).
+
+Causa raíz 2 (la real, encontrada después de que el problema "persistiera
+  incluso en incógnito"): el CSP (`Content-Security-Policy`) del sitio tenía
+  `default-src 'self'` sin directiva `media-src` explícita — por spec de
+  CSP, eso bloquea CUALQUIER `<video src="https://storage.googleapis.com/...">`
+  en TODO navegador, sin importar caché. Confirmado que no era caché
+  precisamente porque persistía en incógnito.
+
+Fix: `-movflags +faststart` en los comandos ffmpeg de salida de
+  `_assemble_reel` + `media-src 'self' https://storage.googleapis.com;`
+  agregado al CSP en `core/shared/middleware/security.py` y
+  `request_limits.py` (fallback).
+
+Lección: cuando un problema de carga de recurso persiste en modo incógnito,
+  no es caché del navegador — revisar headers de respuesta (CSP, CORS)
+  antes que cualquier hipótesis relacionada al navegador del usuario.
+
+Severidad: Alta (el reel generado no se podía ver dentro del producto).
+Prioridad: — (resuelto).
+
+=================================================================
+HALLAZGO 56 — Subtítulo largo de reel se cortaba por desbordar verticalmente
+  en un solo párrafo
+Categoría: Bug / pipeline de reels / subtítulos
+Estado: ✅ RESUELTO — 2026-07-14
+=================================================================
+Surfaceado por: Anuar, viendo un reel real generado.
+
+Causa raíz: frases del guion de narración sin puntuación intermedia podían
+  superar ampliamente lo que cabe verticalmente cuando `subtitle_generator.py`
+  las mostraba completas en un solo cuadro de subtítulo.
+
+Fix: `_split_long_subtitles(subtitles, max_words=10)` — re-parte cualquier
+  subtítulo de más de 10 palabras en bloques más cortos, repartiendo la
+  ventana de tiempo original proporcionalmente a la cantidad de palabras de
+  cada bloque. Verificado con caso real de 18 palabras → 2 bloques limpios.
+
+Severidad: Media.
+Prioridad: — (resuelto).
+
+=================================================================
+HALLAZGO 57 — Lyria 3 (música de reels) bloquea contenido de forma
+  no-determinista, reel terminaba sin música
+Categoría: Bug / pipeline de reels / dependencia externa (modelo en preview)
+Estado: 🟡 MITIGADO — 2026-07-14 (causa raíz no confirmada, es un modelo
+  preview de Google)
+=================================================================
+Surfaceado por: Anuar, notando que un reel real no tenía música de fondo;
+  preguntó explícitamente si era un tema de rate limits.
+
+Causa raíz: confirmado que NO es rate limit — el error es HTTP 400
+  `content_blocked` (política de contenido), no HTTP 429. Confirmado en
+  producción, reintentando el MISMO prompt sin cambiar nada, que a veces
+  falla y luego funciona — evidencia directa de que es ruido/flakiness del
+  filtro de contenido de un modelo todavía en preview (`lyria-3-clip-preview`),
+  no un prompt realmente problemático (el prompt ya era en inglés, ya decía
+  "instrumental only, no vocals", sin nombres de artistas/marcas).
+
+Fix (mitigación, no resuelve la causa raíz — fuera de nuestro control, es un
+  modelo de Google en preview): 1 reintento con el mismo mood del guion +
+  un 3er intento con un prompt genérico neutro ("corporate uplifting
+  instrumental, soft piano and light percussion, warm and motivational,
+  100 BPM") antes de degradar del todo a "reel sin música". Reduce cuántos
+  reels terminan sin música, no lo elimina del todo.
+
+Severidad: Media (degrada con gracia, el reel se genera igual sin música).
+Prioridad: Baja — reevaluar si Lyria 3 Clip sale de preview.
