@@ -523,3 +523,104 @@ class TestUploadVideoToStorage:
             url = gen._upload_video_to_storage(b'fake-mp4-bytes', 'job1-day1')
         mock_blob.upload_from_string.assert_called_once_with(b'fake-mp4-bytes', content_type='video/mp4')
         assert url.startswith('https://storage.googleapis.com/test-bucket/reels/job1-day1.mp4?v=')
+
+
+class TestRenderTextOverlayPlaywright:
+    def _make_mock_playwright(self, screenshot_bytes: bytes, evaluate_side_effect: list):
+        mock_page = MagicMock()
+        mock_page.screenshot.return_value = screenshot_bytes
+        mock_page.evaluate.side_effect = evaluate_side_effect
+        mock_browser = MagicMock()
+        mock_browser.new_page.return_value = mock_page
+        mock_pw_ctx = MagicMock()
+        mock_pw_ctx.chromium.launch.return_value = mock_browser
+        mock_pw = MagicMock()
+        mock_pw.__enter__ = MagicMock(return_value=mock_pw_ctx)
+        mock_pw.__exit__ = MagicMock(return_value=False)
+        return mock_pw, mock_page
+
+    def test_returns_screenshot_when_no_overflow(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_png = b'fake-hook-png'
+        # 3 evaluate() por intento: fonts.ready, offsetHeight, scrollWidth-clientWidth.
+        # Solo el 3er valor importa (overflow_px); 0 = sin desborde.
+        mock_pw, mock_page = self._make_mock_playwright(fake_png, [None, None, 0])
+
+        with patch('core.content_pipeline.generators.reel_generator.sync_playwright', return_value=mock_pw), \
+             patch('core.content_pipeline.generators.reel_generator.record_playwright_overlay_fallback') as mock_metric:
+            result = gen._render_text_overlay_playwright(
+                'Descubre algo nuevo', 'nuevo', 'hook', '#002951',
+            )
+
+        assert result == fake_png
+        mock_metric.assert_not_called()
+        html_arg = mock_page.set_content.call_args[0][0]
+        assert '<span class="highlight">nuevo</span>' in html_arg
+        assert '#002951' in html_arg
+        assert '{{font_path}}' not in html_arg
+
+    def test_retries_once_and_succeeds_on_second_attempt(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_png = b'fake-hook-png'
+        # 1er intento: overflow_px=10 (desborda). 2do intento: overflow_px=0 (ok).
+        mock_pw, mock_page = self._make_mock_playwright(fake_png, [None, None, 10, None, None, 0])
+
+        with patch('core.content_pipeline.generators.reel_generator.sync_playwright', return_value=mock_pw), \
+             patch('core.content_pipeline.generators.reel_generator.record_playwright_overlay_fallback') as mock_metric:
+            result = gen._render_text_overlay_playwright(
+                'Descubre algo nuevo', 'nuevo', 'hook', '#002951',
+            )
+
+        assert result == fake_png
+        mock_metric.assert_not_called()
+        assert mock_pw.__enter__.call_count == 2
+
+    def test_returns_none_and_records_fallback_after_second_overflow(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_png = b'fake-hook-png'
+        # Ambos intentos desbordan (overflow_px=10 las 2 veces).
+        mock_pw, mock_page = self._make_mock_playwright(fake_png, [None, None, 10, None, None, 10])
+
+        with patch('core.content_pipeline.generators.reel_generator.sync_playwright', return_value=mock_pw), \
+             patch('core.content_pipeline.generators.reel_generator.record_playwright_overlay_fallback') as mock_metric:
+            result = gen._render_text_overlay_playwright(
+                'Descubre algo nuevo', 'nuevo', 'hook', '#002951',
+            )
+
+        assert result is None
+        mock_metric.assert_called_once_with('hook')
+
+    def test_returns_none_and_records_fallback_on_exception(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+
+        with patch('core.content_pipeline.generators.reel_generator.sync_playwright',
+                    side_effect=Exception('chromium crashed')), \
+             patch('core.content_pipeline.generators.reel_generator.record_playwright_overlay_fallback') as mock_metric:
+            result = gen._render_text_overlay_playwright(
+                '', '', 'cta', '#002951', cta_text='Compra ahora',
+            )
+
+        assert result is None
+        mock_metric.assert_called_once_with('cta')
+
+    def test_cta_style_injects_cta_text_not_hook(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_png = b'fake-cta-png'
+        mock_pw, mock_page = self._make_mock_playwright(fake_png, [None, None, 0])
+
+        with patch('core.content_pipeline.generators.reel_generator.sync_playwright', return_value=mock_pw), \
+             patch('core.content_pipeline.generators.reel_generator.record_playwright_overlay_fallback'):
+            result = gen._render_text_overlay_playwright(
+                '', '', 'cta', '#002951', cta_text='Compra ahora',
+            )
+
+        assert result == fake_png
+        html_arg = mock_page.set_content.call_args[0][0]
+        assert 'Compra ahora' in html_arg
+        assert 'class="hook"' not in html_arg
+

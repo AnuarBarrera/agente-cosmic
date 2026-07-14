@@ -1,6 +1,8 @@
 import base64
+import html as _html
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -8,11 +10,13 @@ import google.genai as genai
 from google.genai import types
 from google.cloud import storage
 from django.conf import settings
+from playwright.sync_api import sync_playwright
 from PIL import ImageFont
 from core.shared.metrics import GCS_OPERATIONS
 from core.shared.metrics_utils import (
     track_external_api, record_tokens, record_veo_generation,
     record_lyria_generation, record_tts_generation,
+    record_playwright_overlay_fallback,
 )
 from core.shared.rate_limiter import call_with_429_retry
 from core.content_pipeline.generators.subtitle_generator import SubtitleGenerator
@@ -35,6 +39,20 @@ _VIDEO_WIDTH = 1080
 _DRAWTEXT_FONT_PATH = os.path.normpath(os.path.join(
     os.path.dirname(__file__), '..', 'static', 'content_pipeline', 'fonts', 'Poppins-Bold.ttf',
 ))
+
+_VIDEO_HEIGHT = 1920  # alto fijo del canvas de Playwright (viewport 1080x1920)
+
+_OVERLAY_TEMPLATE_MAP = {'hook': 'reel_hook.html', 'cta': 'reel_cta.html'}
+
+
+def _load_font_data_uri() -> str:
+    with open(_DRAWTEXT_FONT_PATH, 'rb') as f:
+        encoded = base64.b64encode(f.read()).decode('ascii')
+    return f'data:font/ttf;base64,{encoded}'
+
+
+_OVERLAY_FONT_DATA_URI = _load_font_data_uri()
+
 
 _HOOK_FONTSIZE = 64
 _HOOK_MAX_CHARS = 20
@@ -222,6 +240,57 @@ class ReelGenerator:
         "If a screen or monitor appears, it must be blank, off, or showing only abstract "
         "blurred light — never legible text or interface elements."
     )
+
+    def _render_text_overlay_playwright(self, text: str, highlight_word: str,
+                                         style: str, primary_color: str,
+                                         cta_text: str = '') -> bytes | None:
+        try:
+            template_path = os.path.normpath(os.path.join(
+                os.path.dirname(__file__), '..', 'templates', 'content_pipeline',
+                _OVERLAY_TEMPLATE_MAP[style],
+            ))
+            with open(template_path) as f:
+                html = f.read()
+            html = html.replace('{{primary_color}}', primary_color)
+            html = html.replace('{{font_path}}', _OVERLAY_FONT_DATA_URI)
+
+            if style == 'hook':
+                escaped = _html.escape(text)
+                if highlight_word:
+                    escaped_word = _html.escape(highlight_word)
+                    pattern = re.compile(re.escape(escaped_word), re.IGNORECASE)
+                    escaped = pattern.sub(f'<span class="highlight">{escaped_word}</span>', escaped, count=1)
+                html = html.replace('{{hook_html}}', escaped)
+            else:
+                html = html.replace('{{cta_text}}', _html.escape(cta_text))
+
+            selector = '.hook' if style == 'hook' else '.cta'
+            for attempt in range(2):
+                with sync_playwright() as pw:
+                    browser = pw.chromium.launch(
+                        headless=True,
+                        args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+                    )
+                    page = browser.new_page(viewport={'width': 1080, 'height': 1920})
+                    page.set_content(html, wait_until='load')
+                    page.evaluate('document.fonts.ready')
+                    page.evaluate('document.body.offsetHeight')
+                    page.wait_for_timeout(300)
+                    overflow_px = page.evaluate(
+                        f"() => {{ const el = document.querySelector('{selector}'); "
+                        f"return el.scrollWidth - el.clientWidth; }}"
+                    )
+                    overflows = overflow_px is not None and overflow_px > 2
+                    png_bytes = page.screenshot(omit_background=True)
+                    browser.close()
+                if not overflows:
+                    return png_bytes
+                logger.warning(f"Overlay Playwright '{style}' se salio del cuadro (intento {attempt + 1})")
+        except Exception as e:
+            logger.warning(f"Overlay Playwright '{style}' fallo con excepcion (cae a drawtext): {e}")
+
+        record_playwright_overlay_fallback(style)
+        return None
 
     def _generate_video_clips(self, scene_prompts: list[str]) -> list[bytes]:
         clips = []
