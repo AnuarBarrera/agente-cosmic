@@ -73,3 +73,30 @@ class TestRecordTokens:
         class FakeResp:
             pass
         record_tokens(FakeResp())
+
+
+class TestRecordPlaywrightOverlayFallback:
+    def test_records_fallback_for_hook(self):
+        from core.shared.metrics_utils import record_playwright_overlay_fallback
+        increments = {}
+
+        def fake_redis_inc(key, amount=1.0):
+            increments[key] = increments.get(key, 0) + amount
+
+        with patch('core.shared.metrics_utils._redis_inc', side_effect=fake_redis_inc):
+            record_playwright_overlay_fallback('hook')
+
+        assert increments.get('reel_playwright_fallback_hook_total', 0) == 1
+
+    def test_records_fallback_for_cta(self):
+        from core.shared.metrics_utils import record_playwright_overlay_fallback
+        increments = {}
+
+        def fake_redis_inc(key, amount=1.0):
+            increments[key] = increments.get(key, 0) + amount
+
+        with patch('core.shared.metrics_utils._redis_inc', side_effect=fake_redis_inc):
+            record_playwright_overlay_fallback('cta')
+
+        assert increments.get('reel_playwright_fallback_cta_total', 0) == 1
+

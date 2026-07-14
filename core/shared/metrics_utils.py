@@ -138,6 +138,11 @@ def record_stt_call(audio_duration_seconds: float):
         _redis_inc('cosmic:prom:STTC:recognize', cost)
 
 
+def record_playwright_overlay_fallback(element: str):
+    """Registra que un elemento (hook/cta) cayo de Playwright a drawtext — mide la tasa real de fallo bajo carga de produccion durante el experimento de REEL_TEXT_OVERLAY_ENGINE."""
+    _redis_inc(f'reel_playwright_fallback_{element}_total')
+
+
 def _classify_error(exc: Exception) -> str:
     msg = str(exc).lower()
     if 'timeout' in msg or 'timed out' in msg:

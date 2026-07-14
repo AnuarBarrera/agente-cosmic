@@ -174,6 +174,7 @@ VERTEX_VERTEX_MODEL = 'publishers/google/models/gemini-2.5-flash'
 VERTEX_VIDEO_MODEL = 'veo-3.0-fast-generate-001'
 VERTEX_MUSIC_MODEL = 'lyria-3-clip-preview'
 VERTEX_TTS_MODEL = 'publishers/google/models/gemini-2.5-flash-tts'
+REEL_TEXT_OVERLAY_ENGINE = get_env('REEL_TEXT_OVERLAY_ENGINE', default='drawtext')
 # GOOGLE_APPLICATION_CREDENTIALS se inyecta vía docker-compose (volumen ADC)
 
 # Google OAuth (para Sign in with Google)
