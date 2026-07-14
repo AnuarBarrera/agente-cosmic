@@ -405,7 +405,13 @@ class ReelGenerator:
 
             output_path = os.path.join(tmp, 'output.mp4')
             if audio_stream_count == 0:
-                subprocess.run(['ffmpeg', '-y', '-i', overlay_path, '-c', 'copy', output_path],
+                # -movflags +faststart mueve el atomo moov (indice del archivo) al
+                # inicio del MP4 — sin esto queda al final (comportamiento default
+                # del muxer), y el navegador necesita descargar casi todo el
+                # archivo antes de poder reproducirlo en streaming (funciona al
+                # descargar completo, falla en el reproductor <video> de la UI).
+                subprocess.run(['ffmpeg', '-y', '-i', overlay_path, '-c', 'copy',
+                                 '-movflags', '+faststart', output_path],
                                 check=True, capture_output=True)
             else:
                 cmd = ['ffmpeg', '-y', '-i', overlay_path] + audio_input_flags
@@ -419,7 +425,9 @@ class ReelGenerator:
                 # (24s) — con -shortest el output entero se recortaba a la pista de
                 # audio mas corta, perdiendo el CTA de los ultimos 3s. Sin ese flag,
                 # el audio simplemente termina en silencio y el video sigue completo.
-                cmd += ['-t', str(duration), '-c:v', 'copy', '-c:a', 'aac', output_path]
+                # +faststart: ver comentario arriba (mismo motivo, streaming en <video>).
+                cmd += ['-t', str(duration), '-c:v', 'copy', '-c:a', 'aac',
+                        '-movflags', '+faststart', output_path]
                 subprocess.run(cmd, check=True, capture_output=True)
 
             with open(output_path, 'rb') as f:

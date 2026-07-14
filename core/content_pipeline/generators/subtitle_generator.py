@@ -81,6 +81,35 @@ def _proportional_fallback(phrases: list[str], total_duration: float) -> list[di
     return result
 
 
+def _split_long_subtitles(subtitles: list[dict], max_words: int = 10) -> list[dict]:
+    # Una frase de guion puede tener muchas mas de 10 palabras (sin punto
+    # intermedio) — mostrarla completa en un solo cuadro de subtitulo la hace
+    # envolverse en demasiadas lineas y desbordarse verticalmente. Se corta en
+    # bloques de maximo max_words palabras, cada uno con su propia ventana de
+    # tiempo (repartida proporcionalmente por cantidad de palabras dentro de
+    # la ventana [start,end] original de la frase).
+    result = []
+    for sub in subtitles:
+        words = sub['text'].split()
+        if len(words) <= max_words:
+            result.append(sub)
+            continue
+        chunks = [words[i:i + max_words] for i in range(0, len(words), max_words)]
+        total_words = len(words)
+        duration = sub['end'] - sub['start']
+        cursor = sub['start']
+        for chunk in chunks:
+            share = len(chunk) / total_words
+            chunk_duration = duration * share
+            result.append({
+                'text': ' '.join(chunk),
+                'start': cursor,
+                'end': cursor + chunk_duration,
+            })
+            cursor += chunk_duration
+    return result
+
+
 class SubtitleGenerator:
     def generate(self, narration_audio: bytes, narration_script: str) -> list[dict]:
         phrases = _split_into_phrases(narration_script)
@@ -93,7 +122,7 @@ class SubtitleGenerator:
 
         aligned = _align_phrases_with_stt(phrases, stt_words)
         if aligned is not None:
-            return aligned
+            return _split_long_subtitles(aligned)
 
         total_duration = len(narration_audio) / (_PCM_BYTES_PER_SAMPLE * _PCM_SAMPLE_RATE)
-        return _proportional_fallback(phrases, total_duration)
+        return _split_long_subtitles(_proportional_fallback(phrases, total_duration))

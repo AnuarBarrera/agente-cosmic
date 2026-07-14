@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from core.content_pipeline.generators.subtitle_generator import (
-    SubtitleGenerator, _split_into_phrases,
+    SubtitleGenerator, _split_into_phrases, _split_long_subtitles,
 )
 
 
@@ -65,6 +65,25 @@ class TestGenerateHappyPath:
         ]
 
     @patch('core.content_pipeline.generators.subtitle_generator.speech.SpeechClient')
+    def test_splits_long_aligned_phrase_into_multiple_subtitles(self, mock_speech_client):
+        # Una sola frase (sin punto intermedio) con 12 palabras -> debe quedar
+        # partida en 2 subtitulos de <=10 palabras cada uno.
+        script_words = [f'palabra{i}' for i in range(1, 13)]
+        script = ' '.join(script_words) + '.'
+        words = [_make_word(w, float(i), float(i) + 0.5) for i, w in enumerate(script_words[:-1])]
+        words.append(_make_word(script_words[-1] + '.', 11.0, 11.5))
+        mock_client_instance = MagicMock()
+        mock_client_instance.recognize.return_value = _make_stt_response(words)
+        mock_speech_client.return_value = mock_client_instance
+
+        gen = SubtitleGenerator()
+        result = gen.generate(b'\x00\x01' * 100, script)
+
+        assert len(result) == 2
+        assert len(result[0]['text'].split()) == 10
+        assert len(result[1]['text'].split()) == 2
+
+    @patch('core.content_pipeline.generators.subtitle_generator.speech.SpeechClient')
     def test_sends_correct_recognition_config(self, mock_speech_client):
         words = [_make_word('Hola.', 0.0, 0.5)]
         mock_client_instance = MagicMock()
@@ -79,6 +98,37 @@ class TestGenerateHappyPath:
         assert config.sample_rate_hertz == 24000
         assert config.language_code == 'es-ES'
         assert config.enable_word_time_offsets is True
+
+
+class TestSplitLongSubtitles:
+    def test_leaves_short_subtitle_unchanged(self):
+        subs = [{'text': 'Tu negocio en linea.', 'start': 0.0, 'end': 1.5}]
+        assert _split_long_subtitles(subs, max_words=10) == subs
+
+    def test_splits_subtitle_over_max_words_into_chunks(self):
+        # 14 palabras -> 2 bloques de 10 y 4, tiempo repartido proporcional
+        # a la cantidad de palabras de cada bloque.
+        text = ' '.join(f'palabra{i}' for i in range(1, 15))
+        subs = [{'text': text, 'start': 0.0, 'end': 14.0}]
+        result = _split_long_subtitles(subs, max_words=10)
+
+        assert len(result) == 2
+        assert result[0]['text'] == ' '.join(f'palabra{i}' for i in range(1, 11))
+        assert result[1]['text'] == ' '.join(f'palabra{i}' for i in range(11, 15))
+        assert result[0]['start'] == 0.0
+        assert result[0]['end'] == pytest.approx(10.0)
+        assert result[1]['start'] == pytest.approx(10.0)
+        assert result[1]['end'] == pytest.approx(14.0)
+
+    def test_preserves_short_subtitles_among_long_ones(self):
+        long_text = ' '.join(f'p{i}' for i in range(12))
+        subs = [
+            {'text': 'Corto.', 'start': 0.0, 'end': 1.0},
+            {'text': long_text, 'start': 1.0, 'end': 5.0},
+        ]
+        result = _split_long_subtitles(subs, max_words=10)
+        assert result[0] == {'text': 'Corto.', 'start': 0.0, 'end': 1.0}
+        assert len(result) == 3
 
 
 class TestGenerateFallback:
