@@ -98,7 +98,7 @@ _SAFETY_QC_PROMPT = (
     "'garantizamos tu recuperacion', 'triplica tus ingresos').\n"
     "has_website_mention: true si el texto invita a visitar un sitio web, pagina o URL "
     "(ej. 'visita nuestra web', 'entra a nuestro sitio', menciona www. o una URL).\n"
-    "ok: true SOLO si has_absolute_promise and has_unverifiable_claim son false. "
+    "ok: true SOLO si has_absolute_promise y has_unverifiable_claim son false. "
     "Ignora has_website_mention para calcular ok — se evalua aparte en el codigo."
 )
 
