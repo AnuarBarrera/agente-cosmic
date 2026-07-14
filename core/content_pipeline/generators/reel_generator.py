@@ -49,6 +49,15 @@ _CTA_BOX_BORDERW = 24
 
 _SUBTITLE_FONTSIZE = 42
 
+# Prompt de emergencia para cuando el filtro de contenido de Lyria bloquea el
+# music_mood generado por el guionista (ver _generate_music) — generico y
+# neutro (estilo "corporate stock music") para no chocar con el tono de
+# ningun negocio.
+_MUSIC_FALLBACK_PROMPT = (
+    "instrumental, corporate uplifting background music, soft piano and "
+    "light percussion, warm and motivational, 100 BPM"
+)
+
 _font_cache: dict[int, ImageFont.FreeTypeFont] = {}
 
 
@@ -263,13 +272,17 @@ class ReelGenerator:
     def _generate_music(self, music_mood: str) -> bytes | None:
         # El filtro de contenido de Lyria 3 Clip (preview) es no-determinista —
         # confirmado reintentando el MISMO prompt: falla y luego funciona sin
-        # cambiar nada. 1 reintento antes de degradar a "reel sin musica".
-        result = self._generate_music_attempt(music_mood)
+        # cambiar nada. 1 reintento con el mismo mood y, si ambos fallan, un
+        # ultimo intento con un prompt generico "corporate stock music" que
+        # no depende del guion — antes de degradar a "reel sin musica".
+        result = self._generate_music_attempt(f"Instrumental only, no vocals. {music_mood}")
         if result is None:
-            result = self._generate_music_attempt(music_mood)
+            result = self._generate_music_attempt(f"Instrumental only, no vocals. {music_mood}")
+        if result is None:
+            result = self._generate_music_attempt(_MUSIC_FALLBACK_PROMPT)
         return result
 
-    def _generate_music_attempt(self, music_mood: str) -> bytes | None:
+    def _generate_music_attempt(self, prompt: str) -> bytes | None:
         try:
             # Lyria 3 solo esta disponible en la ubicacion 'global' de Vertex AI (no
             # en una region como us-central1) y rechaza la peticion si se especifica
@@ -283,7 +296,7 @@ class ReelGenerator:
             with track_external_api('lyria', operation='music_generate'):
                 interaction = client.interactions.create(
                     model=settings.VERTEX_MUSIC_MODEL,
-                    input=f"Instrumental only, no vocals. {music_mood}",
+                    input=prompt,
                 )
             audio = getattr(interaction, 'output_audio', None)
             if audio is not None and getattr(audio, 'data', None):

@@ -24,6 +24,7 @@ class SecurityHeadersMiddleware(MiddlewareMixin):
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
             "img-src 'self' data: https:; "
+            "media-src 'self' https://storage.googleapis.com; "
             "connect-src 'self' https://api.gemini.com https://generativelanguage.googleapis.com; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "

@@ -205,6 +205,35 @@ class TestGenerateMusic:
             mock_client_cls.return_value.interactions.create.side_effect = Exception('error')
             result = gen._generate_music('upbeat')
         assert result is None
+        assert mock_client_cls.return_value.interactions.create.call_count == 3
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_MUSIC_MODEL='lyria-3-clip-preview',
+    )
+    def test_falls_back_to_generic_prompt_on_third_attempt(self):
+        # Si el mood del guion falla 2 veces (posible bloqueo del filtro de
+        # contenido), el 3er intento usa un prompt generico "corporate stock
+        # music" que no depende del guion, para no perder la musica del todo.
+        import base64
+        from core.content_pipeline.generators.reel_generator import (
+            ReelGenerator, _MUSIC_FALLBACK_PROMPT,
+        )
+        gen = ReelGenerator(bucket_name='test-bucket')
+        mock_audio = MagicMock()
+        mock_audio.data = base64.b64encode(b'fallback-music-bytes').decode()
+        mock_interaction = MagicMock()
+        mock_interaction.output_audio = mock_audio
+        with patch('core.content_pipeline.generators.reel_generator.genai.Client') as mock_client_cls:
+            mock_client_cls.return_value.interactions.create.side_effect = [
+                Exception('content_blocked'), Exception('content_blocked'), mock_interaction,
+            ]
+            result = gen._generate_music('upbeat corporate, optimistic')
+        assert result == b'fallback-music-bytes'
+        assert mock_client_cls.return_value.interactions.create.call_count == 3
+        third_call_kwargs = mock_client_cls.return_value.interactions.create.call_args_list[2].kwargs
+        assert third_call_kwargs['input'] == _MUSIC_FALLBACK_PROMPT
 
 
 class TestGenerateNarration:

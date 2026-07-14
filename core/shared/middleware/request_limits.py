@@ -234,6 +234,7 @@ class SecurityHeadersEnforcementMiddleware(MiddlewareMixin):
                 "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
                 "style-src 'self' 'unsafe-inline'; "
                 "img-src 'self' data: https:; "
+                "media-src 'self' https://storage.googleapis.com; "
                 "font-src 'self'; "
                 "connect-src 'self'; "
                 "frame-ancestors 'none'"
