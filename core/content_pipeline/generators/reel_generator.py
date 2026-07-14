@@ -109,6 +109,13 @@ def _hex_to_ffmpeg_color(hex_color: str) -> str:
     return '0x' + hex_color.lstrip('#')
 
 
+def _write_tmp_png(tmp_dir: str, filename: str, data: bytes) -> str:
+    path = os.path.join(tmp_dir, filename)
+    with open(path, 'wb') as f:
+        f.write(data)
+    return path
+
+
 def _measure_text_width(text: str, fontsize: int) -> int:
     if not text:
         return 0
@@ -435,14 +442,49 @@ class ReelGenerator:
             # asi que se escalan proporcionalmente al ancho real detectado.
             scale = video_width / _VIDEO_WIDTH
 
-            filter_parts, last_label = _build_hook_filter_parts(
-                script['hook_text'], script['highlight_word'], primary_color, '0:v',
-                video_width=video_width, scale=scale,
-            )
-            cta_parts, last_label = _build_cta_filter_parts(
-                script['tag_cta'], primary_color, last_label, cta_start, duration, scale=scale,
-            )
-            filter_parts += cta_parts
+            hook_png = cta_png = None
+            if settings.REEL_TEXT_OVERLAY_ENGINE == 'playwright':
+                hook_png = self._render_text_overlay_playwright(
+                    script['hook_text'], script['highlight_word'], 'hook', primary_color,
+                )
+                cta_png = self._render_text_overlay_playwright(
+                    '', '', 'cta', primary_color, cta_text=script['tag_cta'],
+                )
+
+            scaled_w = max(1, int(_VIDEO_WIDTH * scale))
+            scaled_h = max(1, int(_VIDEO_HEIGHT * scale))
+            extra_inputs = []
+            filter_parts = []
+            last_label = '0:v'
+
+            if hook_png is not None:
+                extra_inputs += ['-i', _write_tmp_png(tmp, 'hook.png', hook_png)]
+                idx = len(extra_inputs) // 2
+                filter_parts.append(
+                    f"[{idx}:v]scale={scaled_w}:{scaled_h}[hookscaled];"
+                    f"[{last_label}][hookscaled]overlay=0:0:enable='between(t,0,{_HOOK_END_SECONDS})'[hookout]"
+                )
+                last_label = 'hookout'
+            else:
+                filter_parts_h, last_label = _build_hook_filter_parts(
+                    script['hook_text'], script['highlight_word'], primary_color, last_label,
+                    video_width=video_width, scale=scale,
+                )
+                filter_parts += filter_parts_h
+
+            if cta_png is not None:
+                extra_inputs += ['-i', _write_tmp_png(tmp, 'cta.png', cta_png)]
+                idx = len(extra_inputs) // 2
+                filter_parts.append(
+                    f"[{idx}:v]scale={scaled_w}:{scaled_h}[ctascaled];"
+                    f"[{last_label}][ctascaled]overlay=0:0:enable='between(t,{cta_start},{duration})'[ctaout]"
+                )
+                last_label = 'ctaout'
+            else:
+                cta_parts, last_label = _build_cta_filter_parts(
+                    script['tag_cta'], primary_color, last_label, cta_start, duration, scale=scale,
+                )
+                filter_parts += cta_parts
 
             subtitle_fontsize = max(1, int(_SUBTITLE_FONTSIZE * scale))
             subtitle_y_offset = int(300 * scale)
@@ -460,8 +502,8 @@ class ReelGenerator:
             filter_complex = ';'.join(filter_parts)
             overlay_path = os.path.join(tmp, 'overlay.mp4')
             subprocess.run(
-                ['ffmpeg', '-y', '-i', concat_path,
-                 '-filter_complex', filter_complex,
+                ['ffmpeg', '-y', '-i', concat_path] + extra_inputs +
+                ['-filter_complex', filter_complex,
                  '-map', f'[{last_label}]', '-t', str(duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
                  overlay_path],
                 check=True, capture_output=True,

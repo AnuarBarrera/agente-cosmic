@@ -426,6 +426,79 @@ class TestAssembleReel:
         assert overlay_cmd[map_idx + 1] == '[cta0]'
 
 
+class TestAssembleReelPlaywrightEngine:
+    @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
+    def test_drawtext_engine_never_calls_playwright_render(self, tmp_path):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-mp4-bytes'
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=_fake_ffmpeg_run(fake_output)), \
+             patch.object(gen, '_render_text_overlay_playwright') as mock_render:
+            gen._assemble_reel(
+                clips=[b'clip1', b'clip2', b'clip3'],
+                music=None, narration=None,
+                script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
+            )
+        mock_render.assert_not_called()
+
+    @override_settings(REEL_TEXT_OVERLAY_ENGINE='playwright')
+    def test_playwright_engine_composes_both_pngs_via_overlay(self, tmp_path):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-mp4-bytes'
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=_fake_ffmpeg_run(fake_output)) as mock_run, \
+             patch.object(gen, '_render_text_overlay_playwright',
+                           side_effect=[b'hook-png-bytes', b'cta-png-bytes']) as mock_render:
+            gen._assemble_reel(
+                clips=[b'clip1', b'clip2', b'clip3'],
+                music=None, narration=None,
+                script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
+            )
+
+        assert mock_render.call_count == 2
+        hook_call, cta_call = mock_render.call_args_list
+        assert hook_call.args == ('Descubre algo nuevo', 'nuevo', 'hook', '#1a1a2e')
+        assert cta_call.args == ('', '', 'cta', '#1a1a2e')
+        assert cta_call.kwargs == {'cta_text': 'Compra ahora'}
+
+        overlay_cmd = mock_run.call_args_list[2].args[0]
+        assert overlay_cmd.count('-i') == 3  # concat + hook.png + cta.png
+        filter_complex = overlay_cmd[overlay_cmd.index('-filter_complex') + 1]
+        assert filter_complex.count('overlay=0:0') == 2
+        assert "text='nuevo'" not in filter_complex  # hook via PNG, no drawtext
+        assert "text='Compra ahora'" not in filter_complex  # cta via PNG, no drawtext
+        map_idx = overlay_cmd.index('-map')
+        assert overlay_cmd[map_idx + 1] == '[ctaout]'
+
+    @override_settings(REEL_TEXT_OVERLAY_ENGINE='playwright')
+    def test_playwright_engine_falls_back_to_drawtext_per_element(self, tmp_path):
+        # Hook se desbordo en Playwright (devuelve None) -> cae a drawtext.
+        # CTA si funciono en Playwright -> se compone via overlay de PNG.
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-mp4-bytes'
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=_fake_ffmpeg_run(fake_output)) as mock_run, \
+             patch.object(gen, '_render_text_overlay_playwright',
+                           side_effect=[None, b'cta-png-bytes']):
+            gen._assemble_reel(
+                clips=[b'clip1', b'clip2', b'clip3'],
+                music=None, narration=None,
+                script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
+            )
+
+        overlay_cmd = mock_run.call_args_list[2].args[0]
+        assert overlay_cmd.count('-i') == 2  # concat + cta.png (hook no genero PNG)
+        filter_complex = overlay_cmd[overlay_cmd.index('-filter_complex') + 1]
+        assert "text='nuevo'" in filter_complex  # hook cayo a drawtext
+        assert filter_complex.count('overlay=0:0') == 1  # solo cta via PNG
+
+
 class TestExtractPosterFrame:
     def test_calls_ffmpeg_and_returns_frame_bytes(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
