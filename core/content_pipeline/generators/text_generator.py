@@ -89,21 +89,25 @@ _SAFETY_QC_PROMPT = (
     "Contexto de la marca — tono: {tone}, audiencia: {audience}\n\n"
     "Texto: \"{caption}\"\n\n"
     "Responde UNICAMENTE con este JSON (sin markdown):\n"
-    '{{"has_absolute_promise": <bool>, "has_unverifiable_claim": <bool>, "ok": <bool>}}\n\n'
+    '{{"has_absolute_promise": <bool>, "has_unverifiable_claim": <bool>, "has_website_mention": <bool>, "ok": <bool>}}\n\n'
     "has_absolute_promise: true si usa palabras o frases como 'garantizado', 'garantizamos', "
     "'asegurar', 'aseguramos', 'asegurando', '100%', 'nunca falla', 'sin riesgo', o cualquier "
     "promesa absoluta de resultado.\n"
     "has_unverifiable_claim: true si afirma un resultado medico, financiero, legal o educativo "
     "especifico que no se puede verificar (ej: 'aseguramos un desarrollo optimo', "
     "'garantizamos tu recuperacion', 'triplica tus ingresos').\n"
-    "ok: true SOLO si ambos son false."
+    "has_website_mention: true si el texto invita a visitar un sitio web, pagina o URL "
+    "(ej. 'visita nuestra web', 'entra a nuestro sitio', menciona www. o una URL).\n"
+    "ok: true SOLO si has_absolute_promise and has_unverifiable_claim son false. "
+    "Ignora has_website_mention para calcular ok — se evalua aparte en el codigo."
 )
 
 _SAFETY_FIX_PROMPT = (
     "Reescribe el siguiente post de marketing para que NO haga promesas absolutas ni afirme "
-    "resultados de salud, financieros, legales o educativos no verificables. Mantén el mismo "
-    "mensaje central y longitud aproximada, pero en tono neutro-positivo, sin palabras como "
-    "'garantizado', 'asegurar', 'aseguramos', '100%'.\n\n"
+    "resultados de salud, financieros, legales o educativos no verificables, y que NO invite a "
+    "visitar un sitio web, pagina o URL. Mantén el mismo mensaje central y longitud aproximada, "
+    "pero en tono neutro-positivo, sin palabras como 'garantizado', 'asegurar', 'aseguramos', "
+    "'100%', ni frases como 'visita nuestra web'.\n\n"
     "Post original: {caption}\n\n"
     "Tono de la marca: {tone}\n"
     "Responde UNICAMENTE con el texto corregido, sin comillas ni explicaciones."
@@ -170,15 +174,15 @@ class TextGenerator:
             else:
                 post['format'] = 'single'
 
-        if _is_sensitive_niche(brand_dna):
-            logger.info(f"Nicho sensible detectado para '{brand_dna.business_name}' — auditando captions")
+        if _is_sensitive_niche(brand_dna) or not brand_dna.business_url:
+            logger.info(f"Auditando captions para '{brand_dna.business_name}' (nicho sensible o sin business_url)")
             for post in posts:
                 post['caption'] = self._ensure_safe_caption(post['caption'], brand_dna, max_qc_retries)
         return posts
 
     def _ensure_safe_caption(self, caption: str, brand_dna: BrandDNA, max_qc_retries: int) -> str:
         for attempt in range(max_qc_retries + 1):
-            if self._validate_caption_safety(caption, brand_dna.tone, brand_dna.audience):
+            if self._validate_caption_safety(caption, brand_dna.tone, brand_dna.audience, brand_dna.business_url):
                 return caption
             if attempt < max_qc_retries:
                 logger.warning(f"Caption safety QC falló (intento {attempt + 1}/{max_qc_retries + 1}), regenerando...")
@@ -186,7 +190,7 @@ class TextGenerator:
         logger.warning(f"Safety QC: reintentos agotados para '{brand_dna.business_name}', se usa el ultimo caption generado")
         return caption
 
-    def _validate_caption_safety(self, caption: str, tone: str, audience: str) -> bool:
+    def _validate_caption_safety(self, caption: str, tone: str, audience: str, business_url: str) -> bool:
         try:
             client = _vertex_client()
             prompt = _SAFETY_QC_PROMPT.format(caption=caption, tone=tone, audience=audience)
@@ -202,8 +206,10 @@ class TextGenerator:
             if match:
                 data = json.loads(match.group())
                 ok = bool(data.get('ok', True))
+                if not business_url and data.get('has_website_mention'):
+                    ok = False
                 if not ok:
-                    flags = [k for k in ('has_absolute_promise', 'has_unverifiable_claim') if data.get(k)]
+                    flags = [k for k in ('has_absolute_promise', 'has_unverifiable_claim', 'has_website_mention') if data.get(k)]
                     logger.warning(f"Caption safety QC REJECTED: {', '.join(flags)} | caption={caption[:100]}")
                 return ok
         except Exception as e:

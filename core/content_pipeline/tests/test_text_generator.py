@@ -250,3 +250,64 @@ def test_pillars_day_3_4_7_match_rework_spec():
     assert by_day[7]['name'] == 'Conexion emocional'
     assert len(CONTENT_PILLARS) == 7
 
+
+@pytest.fixture
+def brand_dna_no_url():
+    job = AnalysisJob.objects.create(email='sinurl@t.com', business_url='')
+    return BrandDNA.objects.create(
+        job=job, business_name='Perro Rebelde', business_url='',
+        description='Ropa para perros hecha de ropa reciclada',
+        keywords=['ropa para perros', 'reciclaje'],
+        audience='Dueños de mascotas', tone='casual', primary_colors=['#1a1a2e'],
+    )
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_runs_safety_qc_when_no_business_url(brand_dna_no_url):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc, \
+         patch.object(TextGenerator, '_validate_caption_safety', return_value=True) as mock_qc, \
+         patch.object(TextGenerator, '_regenerate_safe_caption') as mock_fix:
+        mock_vc.return_value = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
+        gen = TextGenerator()
+        result = gen.generate(brand_dna_no_url)
+
+    assert mock_qc.call_count == 7
+    mock_fix.assert_not_called()
+    assert len(result) == 7
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_validate_caption_safety_rejects_website_mention_when_no_url(brand_dna_no_url):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    gen = TextGenerator()
+    mock_resp_text = '{"has_absolute_promise": false, "has_unverifiable_claim": false, "has_website_mention": true, "ok": true}'
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(mock_resp_text)
+        result = gen._validate_caption_safety('Visita nuestra pagina web', 'casual', 'Dueños de mascotas', '')
+    assert result is False
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_validate_caption_safety_allows_website_mention_when_url_present(brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    gen = TextGenerator()
+    mock_resp_text = '{"has_absolute_promise": false, "has_unverifiable_claim": false, "has_website_mention": true, "ok": true}'
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(mock_resp_text)
+        result = gen._validate_caption_safety('Visita nuestra pagina web', 'profesional', 'PYMEs', 'https://tuwebmx.com')
+    assert result is True
+
+
