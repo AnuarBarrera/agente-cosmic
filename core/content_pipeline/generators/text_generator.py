@@ -17,15 +17,15 @@ logger = logging.getLogger(__name__)
 CONTENT_PILLARS = [
     {'day': 1, 'name': 'Producto', 'angle': 'Presenta que vendes o que servicio ofreces de forma directa y atractiva.'},
     {'day': 2, 'name': 'Diferenciador', 'angle': 'Explica que te hace unico frente a otras opciones del mismo mercado.'},
-    {'day': 3, 'name': 'Prueba social', 'angle': 'Comparte un testimonio o resultado representativo de un cliente satisfecho, sin inventar datos verificables falsos.'},
-    {'day': 4, 'name': 'Detras de camaras', 'angle': 'Muestra el proceso, la fabricacion, o el dia a dia detras del negocio.'},
+    {'day': 3, 'name': 'Antes y despues', 'angle': 'Cuenta una transformacion tipica: el problema que enfrenta tu audiencia antes de conocerte y como tu producto/servicio cambia esa situacion — ilustrativo, sin inventar datos verificables falsos.'},
+    {'day': 4, 'name': 'Beneficio en profundidad', 'angle': 'Profundiza en UN beneficio o caracteristica especifica de tu producto/servicio (distinto al enfoque general del dia 1).'},
     {'day': 5, 'name': 'Educativo', 'angle': 'Comparte un tip o dato util relevante para tu audiencia, sin vender directamente.'},
     {'day': 6, 'name': 'CTA / Oferta', 'angle': 'Invita a la accion de forma directa — una oferta, promocion, o llamada clara a contactar.'},
-    {'day': 7, 'name': 'Historia de marca', 'angle': 'Cuenta la historia del fundador o el origen del negocio — conexion personal.'},
+    {'day': 7, 'name': 'Conexion emocional', 'angle': 'Describe como se siente tu cliente al usar tu producto/servicio — la emocion o sensacion que genera (tranquilidad, confianza, orgullo, alivio), sin afirmar resultados o datos verificables.'},
 ]
 
-# El pilar "Prueba social" se presta naturalmente a un formato de varias slides
-# (antes/despues, cita del cliente, resultado, CTA) — es el unico dia que usa carrusel.
+# El pilar "Antes y despues" se presta naturalmente a un formato de varias slides
+# (problema, transicion, beneficio, CTA) — es el unico dia que usa carrusel.
 CAROUSEL_DAY = 3
 
 # El pilar "Producto" (dia 1, mayor exposicion de la semana) usa reel — Veo + Lyria 3 +

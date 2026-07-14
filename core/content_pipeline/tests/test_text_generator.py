@@ -240,3 +240,13 @@ def test_generate_gives_up_after_max_retries_and_keeps_last_caption(sensitive_br
     # 3 intentos (0,1,2) por cada uno de los 7 captions = 21 llamadas a QC
     assert mock_qc.call_count == 21
     assert result[0]['caption'] == 'Sigue sin pasar QC'
+
+
+def test_pillars_day_3_4_7_match_rework_spec():
+    from core.content_pipeline.generators.text_generator import CONTENT_PILLARS
+    by_day = {p['day']: p for p in CONTENT_PILLARS}
+    assert by_day[3]['name'] == 'Antes y despues'
+    assert by_day[4]['name'] == 'Beneficio en profundidad'
+    assert by_day[7]['name'] == 'Conexion emocional'
+    assert len(CONTENT_PILLARS) == 7
+
