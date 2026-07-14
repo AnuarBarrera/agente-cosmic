@@ -22,7 +22,6 @@ urlpatterns = [
     path('auth/google/callback/', auth_views.google_callback_view, name='google_callback'),
     path('dashboard/', auth_views.dashboard_view, name='dashboard'),
     path('dashboard/apply-code/', auth_views.apply_code_view, name='apply_code'),
-    path('dashboard/tester-preferences/', auth_views.update_tester_preferences_view, name='update_tester_preferences'),
     path('dashboard/delete-account/', auth_views.deactivate_account_view, name='deactivate_account'),
     path('auth/reactivate/<str:token>/', auth_views.reactivate_account_view, name='reactivate_account'),
     path('calendar/<uuid:job_id>/', views.calendar_review_view, name='calendar_review'),

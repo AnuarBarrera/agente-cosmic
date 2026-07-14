@@ -118,25 +118,6 @@
     </div>
     {% endif %}
 
-    {% if user.groups.all.0.name == 'tester' or user.groups.all.0.name == 'admin' %}
-    <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:12px;padding:20px 24px;margin-bottom:24px;">
-      <div style="font-weight:600;font-size:0.95rem;margin-bottom:12px;">Funciones beta</div>
-      <form method="POST" action="{% url 'update_tester_preferences' %}" style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;">
-        {% csrf_token %}
-        <label style="display:flex;align-items:center;gap:8px;font-size:0.88rem;cursor:pointer;">
-          <input type="checkbox" name="reels_enabled" {% if user.reels_enabled %}checked{% endif %}>
-          Reels (día 1)
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;font-size:0.88rem;cursor:pointer;">
-          <input type="checkbox" name="carousel_enabled" {% if user.carousel_enabled %}checked{% endif %}>
-          Carrusel (día 3)
-        </label>
-        <button type="submit" style="padding:10px 20px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;white-space:nowrap;">Guardar</button>
-      </form>
-      <div style="font-size:0.78rem;color:#aaa;margin-top:10px;">Afecta solo a los próximos calendarios que generes — los posts ya creados esta semana no cambian.</div>
-    </div>
-    {% endif %}
-
     {% if jobs %}
       {% for job in jobs %}
       <div class="job-card" data-job-id="{{ job.id }}" data-status="{{ job.status }}">
