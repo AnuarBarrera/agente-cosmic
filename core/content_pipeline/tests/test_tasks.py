@@ -289,12 +289,10 @@ def test_content_generation_skips_reel_when_day1_has_product_photo(job_with_dna)
     assert posts.get(day_number=1).format == 'single'
 
 
-def test_load_product_images_takes_paths_list(tmp_path, settings):
-    settings.MEDIA_ROOT = str(tmp_path)
-    uploads_dir = tmp_path / 'uploads'
-    uploads_dir.mkdir()
-    (uploads_dir / 'product.webp').write_bytes(b'fake-image-bytes')
-
+@patch('core.content_pipeline.tasks.upload_exists', return_value=True)
+@patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-image-bytes')
+@patch('core.content_pipeline.tasks.normalize_image', side_effect=lambda x: x)
+def test_load_product_images_takes_paths_list(mock_normalize, mock_read, mock_exists, tmp_path, settings):
     from core.content_pipeline.tasks import _load_product_images
     result = _load_product_images(['uploads/product.webp'])
     assert result == [b'fake-image-bytes']
@@ -537,3 +535,73 @@ def test_generate_next_week_resets_flag_even_on_failure(job_with_dna):
     calendar.refresh_from_db()
     assert calendar.next_week_generating is False
     assert calendar.posts.count() == 0
+
+
+def _create_tester(reels_enabled=True, carousel_enabled=True):
+    from django.contrib.auth import get_user_model
+    from django.contrib.auth.models import Group
+    import secrets
+    User = get_user_model()
+    email = f'tester-{secrets.token_hex(4)}@test.com'
+    pwd = f"T3st-{secrets.token_urlsafe(10)}!"
+    user = User.objects.create_user(email=email, password=pwd, username=email)
+    user.reels_enabled = reels_enabled
+    user.carousel_enabled = carousel_enabled
+    user.save(update_fields=['reels_enabled', 'carousel_enabled'])
+    group, _ = Group.objects.get_or_create(name='tester')
+    user.groups.add(group)
+    return user
+
+
+def test_disable_reel_and_carousel_for_tester_preference_noop_with_none_user():
+    from core.content_pipeline.tasks import _disable_reel_and_carousel_for_tester_preference
+    posts_data = [{'format': 'reel'}, {'format': 'carousel'}, {'format': 'single'}]
+    _disable_reel_and_carousel_for_tester_preference(posts_data, None)
+    assert posts_data[0]['format'] == 'reel'
+    assert posts_data[1]['format'] == 'carousel'
+
+
+def test_disable_reel_and_carousel_for_tester_preference_noop_for_non_tester():
+    from core.content_pipeline.tasks import _disable_reel_and_carousel_for_tester_preference
+    from django.contrib.auth import get_user_model
+    import secrets
+    User = get_user_model()
+    email = f'normal-{secrets.token_hex(4)}@test.com'
+    pwd = f"T3st-{secrets.token_urlsafe(10)}!"
+    user = User.objects.create_user(email=email, password=pwd, username=email)
+    user.reels_enabled = False
+    user.carousel_enabled = False
+    user.save(update_fields=['reels_enabled', 'carousel_enabled'])
+    posts_data = [{'format': 'reel'}, {'format': 'carousel'}]
+    _disable_reel_and_carousel_for_tester_preference(posts_data, user)
+    assert posts_data[0]['format'] == 'reel'
+    assert posts_data[1]['format'] == 'carousel'
+
+
+def test_disable_reel_and_carousel_for_tester_preference_disables_reel_when_off():
+    from core.content_pipeline.tasks import _disable_reel_and_carousel_for_tester_preference
+    user = _create_tester(reels_enabled=False, carousel_enabled=True)
+    posts_data = [{'format': 'reel'}, {'format': 'carousel'}, {'format': 'single'}]
+    _disable_reel_and_carousel_for_tester_preference(posts_data, user)
+    assert posts_data[0]['format'] == 'single'
+    assert posts_data[1]['format'] == 'carousel'
+    assert posts_data[2]['format'] == 'single'
+
+
+def test_disable_reel_and_carousel_for_tester_preference_disables_carousel_when_off():
+    from core.content_pipeline.tasks import _disable_reel_and_carousel_for_tester_preference
+    user = _create_tester(reels_enabled=True, carousel_enabled=False)
+    posts_data = [{'format': 'reel'}, {'format': 'carousel'}]
+    _disable_reel_and_carousel_for_tester_preference(posts_data, user)
+    assert posts_data[0]['format'] == 'reel'
+    assert posts_data[1]['format'] == 'single'
+
+
+def test_disable_reel_and_carousel_for_tester_preference_noop_when_both_enabled():
+    from core.content_pipeline.tasks import _disable_reel_and_carousel_for_tester_preference
+    user = _create_tester(reels_enabled=True, carousel_enabled=True)
+    posts_data = [{'format': 'reel'}, {'format': 'carousel'}]
+    _disable_reel_and_carousel_for_tester_preference(posts_data, user)
+    assert posts_data[0]['format'] == 'reel'
+    assert posts_data[1]['format'] == 'carousel'
+
