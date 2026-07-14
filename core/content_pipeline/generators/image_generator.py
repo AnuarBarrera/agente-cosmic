@@ -172,22 +172,36 @@ def _truncate_at_word_boundary(text: str, max_len: int = 120) -> str:
     return truncated + '…'
 
 
+_WEB_VISIT_PATTERN = re.compile(
+    r'visita(?:nos)?|entra a|nuestr[oa]s?\s+(?:sitio|p[aá]gina)|sitio\s+web|p[aá]gina\s+web|www\.',
+    re.IGNORECASE,
+)
+
+
+def _sanitize_web_visit_mention(text: str, business_url: str, fallback: str) -> str:
+    """Si no hay business_url y el texto invita a visitar un sitio web, lo
+    reemplaza por un fallback seguro — evita prometer un sitio que no existe."""
+    if not business_url and _WEB_VISIT_PATTERN.search(text):
+        return fallback
+    return text
+
+
 class ImageGenerator:
     def __init__(self, bucket_name: str):
         self._bucket = bucket_name
 
-    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2) -> str:
+    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2, business_url: str = '') -> str:
         try:
             # job_id (sin el sufijo "-dayN") como seed de fuente — asi las 7 imagenes
             # de una semana comparten tipografia, incluso si se regenera un solo post.
             font_seed = filename.rsplit('-day', 1)[0] if '-day' in filename else filename
-            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description, audience=audience, product_image_bytes=product_image_bytes, max_qc_retries=max_qc_retries, font_seed=font_seed)
+            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description, audience=audience, product_image_bytes=product_image_bytes, max_qc_retries=max_qc_retries, font_seed=font_seed, business_url=business_url)
             return self._upload_to_storage(image_bytes, filename)
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")
             return ''
 
-    def generate_carousel(self, caption: str, colors: list[str], tone: str, filename_prefix: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2, num_slides: int = 4) -> list[str]:
+    def generate_carousel(self, caption: str, colors: list[str], tone: str, filename_prefix: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2, num_slides: int = 4, business_url: str = '') -> list[str]:
         """Genera un carrusel de `num_slides` (H20 + roadmap #5). Reutiliza UN solo
         fondo (misma llamada a Imagen 3/BGSWAP que un post normal) y superpone
         contenido de texto DISTINTO por slide — evita multiplicar el costo de
@@ -205,7 +219,7 @@ class ImageGenerator:
                 background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
                 svg_overlay = ''
 
-            slides_content = self._generate_carousel_slides_content(caption, brand_ctx, num_slides=num_slides)
+            slides_content = self._generate_carousel_slides_content(caption, brand_ctx, num_slides=num_slides, business_url=business_url)
 
             urls = []
             for i, slide_content in enumerate(slides_content, start=1):
@@ -220,14 +234,14 @@ class ImageGenerator:
     # Layered pipeline
     # ------------------------------------------------------------------
 
-    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2, font_seed: str = '') -> bytes:
+    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2, font_seed: str = '', business_url: str = '') -> bytes:
         if product_image_bytes:
             kw_str = ', '.join((keywords or [])[:3])
             brand_context = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
             background_bytes, svg_overlay = self._generate_product_scene(
                 product_image_bytes, caption, colors, tone, max_qc_retries=max_qc_retries
             )
-            content = self._generate_post_content(caption, product_image_bytes=product_image_bytes, brand_context=brand_context)
+            content = self._generate_post_content(caption, product_image_bytes=product_image_bytes, brand_context=brand_context, business_url=business_url)
             result = self._render_html_template(background_bytes, content, colors, svg_overlay=svg_overlay, font_seed=font_seed)
             if max_qc_retries > 0 and svg_overlay and not self._validate_final_image(result):
                 logger.warning("Final QC falló — reintentando sin SVG overlay")
@@ -237,7 +251,7 @@ class ImageGenerator:
             background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
             kw_str = ', '.join((keywords or [])[:4])
             brand_ctx = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
-            content = self._generate_post_content(caption, product_image_bytes=None, brand_context=brand_ctx)
+            content = self._generate_post_content(caption, product_image_bytes=None, brand_context=brand_ctx, business_url=business_url)
             svg_overlay = ''
         return self._render_html_template(background_bytes, content, colors, svg_overlay=svg_overlay, font_seed=font_seed)
 
@@ -627,7 +641,7 @@ class ImageGenerator:
             selected.pop()
         return ' '.join(selected) or clean[:25]
 
-    def _generate_post_content(self, caption: str, product_image_bytes: bytes = None, brand_context: str = '') -> dict:
+    def _generate_post_content(self, caption: str, product_image_bytes: bytes = None, brand_context: str = '', business_url: str = '') -> dict:
         """Gemini generates {headline, subtitle, cta, tag}. Multimodal if product_image_bytes provided."""
         _FALLBACK = {
             'headline': self._extract_headline(caption),
@@ -702,16 +716,25 @@ class ImageGenerator:
             if match:
                 data = json.loads(match.group())
                 return {
-                    'headline': str(data.get('headline', '')).strip() or _FALLBACK['headline'],
-                    'subtitle': str(data.get('subtitle', '')).strip() or _FALLBACK['subtitle'],
-                    'cta': str(data.get('cta', '')).strip() or _FALLBACK['cta'],
+                    'headline': _sanitize_web_visit_mention(
+                        str(data.get('headline', '')).strip() or _FALLBACK['headline'],
+                        business_url, self._extract_headline(caption),
+                    ),
+                    'subtitle': _sanitize_web_visit_mention(
+                        str(data.get('subtitle', '')).strip() or _FALLBACK['subtitle'],
+                        business_url, _truncate_at_word_boundary(caption.strip()) if caption else '',
+                    ),
+                    'cta': _sanitize_web_visit_mention(
+                        str(data.get('cta', '')).strip() or _FALLBACK['cta'],
+                        business_url, 'Contáctanos hoy',
+                    ),
                     'tag': str(data.get('tag', '')).strip().upper() or _FALLBACK['tag'],
                 }
         except Exception as e:
             logger.warning(f"Post content generation failed, using fallback: {e}")
         return _FALLBACK
 
-    def _generate_carousel_slides_content(self, caption: str, brand_context: str = '', num_slides: int = 4) -> list[dict]:
+    def _generate_carousel_slides_content(self, caption: str, brand_context: str = '', num_slides: int = 4, business_url: str = '') -> list[dict]:
         """Gemini genera {headline, subtitle, cta, tag} para cada slide de un carrusel,
         como una sola llamada que mantiene coherencia narrativa entre slides (ej. problema
         -> solucion -> resultado -> CTA), en vez de N llamadas independientes de _generate_post_content."""
@@ -781,9 +804,18 @@ class ImageGenerator:
                 for i in range(num_slides):
                     item = data[i] if i < len(data) else {}
                     slides.append({
-                        'headline': str(item.get('headline', '')).strip() or fallback[i]['headline'],
-                        'subtitle': str(item.get('subtitle', '')).strip() or fallback[i]['subtitle'],
-                        'cta': str(item.get('cta', '')).strip() or fallback[i]['cta'],
+                        'headline': _sanitize_web_visit_mention(
+                            str(item.get('headline', '')).strip() or fallback[i]['headline'],
+                            business_url, fallback[i]['headline'],
+                        ),
+                        'subtitle': _sanitize_web_visit_mention(
+                            str(item.get('subtitle', '')).strip() or fallback[i]['subtitle'],
+                            business_url, fallback[i]['subtitle'],
+                        ),
+                        'cta': _sanitize_web_visit_mention(
+                            str(item.get('cta', '')).strip() or fallback[i]['cta'],
+                            business_url, fallback[i]['cta'],
+                        ),
                         'tag': str(item.get('tag', '')).strip().upper() or fallback[i]['tag'],
                     })
                 return slides

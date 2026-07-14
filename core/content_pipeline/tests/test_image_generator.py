@@ -216,6 +216,36 @@ class TestGeneratePostContent:
             result = gen._generate_post_content('Caption corto')
         assert result['subtitle'] == 'Caption corto'
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_sanitizes_cta_when_no_business_url(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"headline":"H","subtitle":"S","cta":"Visita nuestra web","tag":"T"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._generate_post_content('Caption de prueba', business_url='')
+        assert result['cta'] == 'Contáctanos hoy'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_keeps_cta_when_business_url_present(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"headline":"H","subtitle":"S","cta":"Visita nuestra web","tag":"T"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._generate_post_content('Caption de prueba', business_url='https://ejemplo.com')
+        assert result['cta'] == 'Visita nuestra web'
+
 
 class TestRenderHtmlTemplate:
     def _make_mock_playwright(self, screenshot_bytes: bytes):
@@ -729,7 +759,7 @@ class TestLayeredPipelineWithProduct:
             gen._layered_pipeline('Caption', ['#1a1a2e'], 'profesional', product_image_bytes=None)
 
         mock_bg.assert_called_once()
-        mock_content.assert_called_once_with('Caption', product_image_bytes=None, brand_context='Tono: profesional.')
+        mock_content.assert_called_once_with('Caption', product_image_bytes=None, brand_context='Tono: profesional.', business_url='')
 
 
 class TestGenerateProductScene:
@@ -1134,6 +1164,36 @@ class TestGenerateCarouselSlidesContent:
         assert long_caption.startswith(without_ellipsis)
         assert long_caption[len(without_ellipsis)] == ' '
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_sanitizes_cta_when_no_business_url(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '[{"headline":"H","subtitle":"S","cta":"Visita nuestra pagina web","tag":"T"}]'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            slides = gen._generate_carousel_slides_content('Caption', num_slides=1, business_url='')
+        assert slides[0]['cta'] == 'Contáctanos hoy'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_keeps_cta_when_business_url_present(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '[{"headline":"H","subtitle":"S","cta":"Visita nuestra pagina web","tag":"T"}]'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            slides = gen._generate_carousel_slides_content('Caption', num_slides=1, business_url='https://ejemplo.com')
+        assert slides[0]['cta'] == 'Visita nuestra pagina web'
+
 
 class TestGenerateCarousel:
     @override_settings(
@@ -1234,3 +1294,21 @@ class TestGenerateCarousel:
              patch.object(gen, '_upload_to_storage', return_value='https://storage.test/slide.png'):
             gen.generate_carousel('Caption', ['#1a1a2e'], 'profesional', 'job-abc-day3', num_slides=1)
         assert mock_render.call_args.kwargs['font_seed'] == 'job-abc'
+
+
+class TestSanitizeWebVisitMention:
+    def test_no_url_and_mentions_website_returns_fallback(self):
+        from core.content_pipeline.generators.image_generator import _sanitize_web_visit_mention
+        result = _sanitize_web_visit_mention('Visita nuestra web hoy', '', 'Contáctanos hoy')
+        assert result == 'Contáctanos hoy'
+
+    def test_no_url_and_no_mention_returns_original(self):
+        from core.content_pipeline.generators.image_generator import _sanitize_web_visit_mention
+        result = _sanitize_web_visit_mention('Compra ahora', '', 'Contáctanos hoy')
+        assert result == 'Compra ahora'
+
+    def test_has_url_and_mentions_website_returns_original(self):
+        from core.content_pipeline.generators.image_generator import _sanitize_web_visit_mention
+        result = _sanitize_web_visit_mention('Visita nuestra web hoy', 'https://ejemplo.com', 'Contáctanos hoy')
+        assert result == 'Visita nuestra web hoy'
+
