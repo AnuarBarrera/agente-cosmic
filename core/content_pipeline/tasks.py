@@ -81,21 +81,6 @@ def _disable_carousel_if_full_product_week(posts_data: list[dict], product_image
             post['format'] = ContentPost.FORMAT_SINGLE
 
 
-def _disable_reel_and_carousel_for_tester_preference(posts_data: list[dict], user) -> None:
-    """Si el usuario es tester/admin y desactivo reels o carrusel en su perfil,
-    esos dias caen a 'single' — mismo patron que _disable_carousel_if_full_product_week."""
-    if user is None:
-        return
-    if not user.groups.filter(name__in=['tester', 'admin']).exists():
-        return
-    for post in posts_data:
-        fmt = post.get('format')
-        if fmt == ContentPost.FORMAT_REEL and not user.reels_enabled:
-            post['format'] = ContentPost.FORMAT_SINGLE
-        elif fmt == ContentPost.FORMAT_CAROUSEL and not user.carousel_enabled:
-            post['format'] = ContentPost.FORMAT_SINGLE
-
-
 def content_generation_task(job_id: str) -> None:
     job = AnalysisJob.objects.get(id=job_id)
     brand_dna = job.brand_dna
@@ -122,7 +107,6 @@ def content_generation_task(job_id: str) -> None:
         # Cargar imágenes de producto (hasta 7, una por día)
         product_images_bytes = _load_product_images(calendar.active_product_images)
         _disable_carousel_if_full_product_week(posts_data, product_images_bytes)
-        _disable_reel_and_carousel_for_tester_preference(posts_data, job.user)
         if _product_image_for_day(1, product_images_bytes) is not None:
             posts_data[0]['format'] = ContentPost.FORMAT_SINGLE
 
@@ -266,7 +250,6 @@ def generate_next_week(calendar_id: str, week_number: int) -> None:
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
         product_images_bytes = _load_product_images(calendar.active_product_images)
         _disable_carousel_if_full_product_week(posts_data, product_images_bytes)
-        _disable_reel_and_carousel_for_tester_preference(posts_data, brand_dna.job.user)
         if _product_image_for_day(1, product_images_bytes) is not None:
             posts_data[0]['format'] = ContentPost.FORMAT_SINGLE
 
