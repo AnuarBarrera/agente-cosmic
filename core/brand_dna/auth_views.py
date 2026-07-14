@@ -539,6 +539,18 @@ def apply_code_view(request):
 
 
 @login_required
+def update_tester_preferences_view(request):
+    if request.method != 'POST':
+        return redirect('dashboard')
+    if not request.user.groups.filter(name__in=['tester', 'admin']).exists():
+        return redirect('dashboard')
+    request.user.reels_enabled = 'reels_enabled' in request.POST
+    request.user.carousel_enabled = 'carousel_enabled' in request.POST
+    request.user.save(update_fields=['reels_enabled', 'carousel_enabled'])
+    return redirect('dashboard')
+
+
+@login_required
 def deactivate_account_view(request):
     if request.method != 'POST':
         return redirect('dashboard')

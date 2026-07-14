@@ -190,3 +190,63 @@ class TestApplyCodeView:
         resp = client.post('/dashboard/apply-code/', {'code': 'COSMIC-AAAAAA'})
         assert resp.status_code == 302
         assert '/auth/login/' in resp.url
+
+
+@pytest.mark.django_db
+class TestUpdateTesterPreferencesView:
+    def test_tester_can_update_preferences(self, client, setup_plans_and_groups):
+        user = User.objects.create_user(
+            email='pref@test.com', password=_TEST_PWD, username='pref@test.com'
+        )
+        _make_tenant(user)
+        user.groups.add(Group.objects.get(name='tester'))
+        client.force_login(user)
+
+        resp = client.post('/dashboard/tester-preferences/', {
+            'reels_enabled': 'on', 'carousel_enabled': 'on',
+        })
+        assert resp.status_code == 302
+        user.refresh_from_db()
+        assert user.reels_enabled is True
+        assert user.carousel_enabled is True
+
+        resp = client.post('/dashboard/tester-preferences/', {})
+        assert resp.status_code == 302
+        user.refresh_from_db()
+        assert user.reels_enabled is False
+        assert user.carousel_enabled is False
+
+    def test_non_tester_cannot_update_preferences(self, client, setup_plans_and_groups):
+        user = User.objects.create_user(
+            email='normal2@test.com', password=_TEST_PWD, username='normal2@test.com'
+        )
+        _make_tenant(user)
+        user.groups.add(Group.objects.get(name='user'))
+        user.reels_enabled = False
+        user.carousel_enabled = False
+        user.save(update_fields=['reels_enabled', 'carousel_enabled'])
+        client.force_login(user)
+
+        resp = client.post('/dashboard/tester-preferences/', {
+            'reels_enabled': 'on', 'carousel_enabled': 'on',
+        })
+        assert resp.status_code == 302
+        user.refresh_from_db()
+        assert user.reels_enabled is False
+        assert user.carousel_enabled is False
+
+    def test_requires_login(self, client, setup_plans_and_groups):
+        resp = client.post('/dashboard/tester-preferences/', {'reels_enabled': 'on'})
+        assert resp.status_code == 302
+        assert '/auth/login/' in resp.url
+
+    def test_get_redirects_without_changes(self, client, setup_plans_and_groups):
+        user = User.objects.create_user(
+            email='getuser@test.com', password=_TEST_PWD, username='getuser@test.com'
+        )
+        _make_tenant(user)
+        user.groups.add(Group.objects.get(name='tester'))
+        client.force_login(user)
+        resp = client.get('/dashboard/tester-preferences/')
+        assert resp.status_code == 302
+
