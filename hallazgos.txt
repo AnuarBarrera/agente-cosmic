@@ -2739,3 +2739,126 @@ Fix (mitigación, no resuelve la causa raíz — fuera de nuestro control, es un
 
 Severidad: Media (degrada con gracia, el reel se genera igual sin música).
 Prioridad: Baja — reevaluar si Lyria 3 Clip sale de preview.
+
+=================================================================
+HALLAZGO 58 — Reintroducción de Playwright para overlay de hook/CTA de
+  reels, detrás de flag con fallback automático a drawtext
+Categoría: Feature / pipeline de reels / experimento de calidad visual
+Estado: ✅ IMPLEMENTADO y ACTIVO en producción — 2026-07-14
+=================================================================
+Surfaceado por: pedido explícito de Anuar (ver HALLAZGO 53) de reintentar
+  Playwright ahora que se conocía la causa raíz real del desborde de texto
+  (HALLAZGO 54, resolución real de Veo). Brainstorm + spec + plan completos
+  antes de implementar (docs/superpowers/specs/2026-07-14-*, docs/superpowers/
+  plans/2026-07-14-*).
+
+Diseño: setting `REEL_TEXT_OVERLAY_ENGINE` (`drawtext` default / `playwright`
+  experimental) en `saas_chatbot/settings.py`. Con el flag en `playwright`,
+  `ReelGenerator._render_text_overlay_playwright()` renderiza hook y CTA vía
+  Chromium headless (templates `reel_hook.html`/`reel_cta.html` restaurados
+  con todas las mitigaciones ya probadas: fuente embebida base64,
+  `position:absolute` con dimensiones fijas). Verifica desborde
+  (`scrollWidth` vs `clientWidth`), reintenta una vez con browser fresco, y
+  si sigue fallando (o lanza excepción) devuelve `None` + registra
+  `record_playwright_overlay_fallback(element)` — `_assemble_reel` cae a
+  `drawtext` **solo para ese elemento** (fallback por elemento, no por reel
+  completo). El PNG se escala al ancho real de Veo detectado por
+  `_probe_video_width()` (mismo mecanismo del fix de HALLAZGO 54).
+
+Implementación: 3 tareas ejecutadas vía agentes externos (`agy`/Antigravity
+  CLI, modelo Gemini 3.5 Flash, proyecto Vertex AI `agente-cosmic` — ver
+  skill `delegating-to-external-agents`), cada una verificada con evidencia
+  propia (git diff línea por línea + tests corridos directamente, no solo el
+  reporte del agente). 44 tests nuevos/existentes, todos en verde.
+
+Verificación real: 2 corridas completas en producción real (Veo+Lyria+TTS
+  corriendo, la condición exacta que hacía fallar a Playwright la primera
+  vez) — **0 fallbacks a drawtext en ambas**. Primera corrida: reel de Anuar
+  Barrera (Pilar Olivares Marketing), verificado visualmente frame por frame.
+  Segunda corrida: onboarding real de un tester ("el perro rebelde",
+  concurrente con la primera prueba — ver HALLAZGO 60), también exitosa.
+
+Estado del flag: dejado ACTIVO globalmente por pedido explícito de Anuar tras
+  ver el primer resultado. 2 muestras no son concluyentes para decidir
+  reemplazar `drawtext` por completo, pero no hay señal de regresión.
+
+Severidad: — (mejora de calidad opcional, con red de seguridad).
+Prioridad: Media — seguir recolectando `reel_playwright_fallback_hook_total`/
+  `_cta_total` en Redis; decidir con más muestras si Playwright reemplaza a
+  drawtext como default o se mantiene como experimento indefinido.
+
+=================================================================
+HALLAZGO 59 — Polling de operación de larga duración (LRO) de Veo sin
+  límite de tiempo — podía esperar indefinidamente
+Categoría: Bug / pipeline de reels / resiliencia
+Estado: ✅ RESUELTO — 2026-07-14
+=================================================================
+Surfaceado por: observación directa durante la verificación de HALLAZGO 58 —
+  un clip de Veo tardó 24 minutos en completar (contra ~1 min de los otros
+  2 clips del mismo reel) sin devolver error, solo `done=False` repetido.
+  Anuar pegó una recomendación externa (diagnóstico de "LRO huérfana en la
+  cola de Google") con un parche sugerido (`operation.result(timeout=300)`).
+
+Causa raíz (real, distinta a la sugerida externamente): `_generate_single_clip`
+  hacía `while not operation.done: time.sleep(10)` sin ningún límite de
+  tiempo — si Veo tarda mucho (no huérfano, solo lento; confirmado que
+  `fetchPredictOperation` seguía devolviendo `200 OK` cada 10s durante los 24
+  min, nunca 404/error), el código esperaba para siempre. El parche externo
+  sugerido no aplicaba al código real: usa polling manual con
+  `client.operations.get()`, no `operation.result()` (ese método no existe
+  en este patrón del SDK `google-genai`).
+
+Fix: límite duro de 30 minutos (`_VEO_POLL_TIMEOUT_SECONDS`), NO los 5 min
+  sugeridos externamente — evidencia real (el clip de 24 min que sí completó
+  con éxito) muestra que un límite de 5 min habría descartado una generación
+  legítima, forzando un reintento innecesario. Al vencer el límite, devuelve
+  `None`, lo que dispara el reintento ya existente en `_generate_video_clips`.
+
+Severidad: Media (nunca bloqueó al usuario final — el pipeline corre async
+  vía RQ — pero sí ataba un rqworker indefinidamente por un solo clip).
+Prioridad: — (resuelto). 4 tests nuevos (timeout excedido, keeps-polling
+  bajo el límite, ambos verificando la interacción con `track_external_api`
+  que comparte el mismo módulo `time`).
+
+=================================================================
+HALLAZGO 60 — `docker compose up --force-recreate` en rqworker mató un job
+  real en vuelo, dejando un ContentCalendar huérfano que bloqueaba reintento
+Categoría: Incidente de producción / infraestructura / RQ
+Estado: ✅ RECUPERADO — 2026-07-14 (causa raíz sin fix automático, ver
+  riesgo latente)
+=================================================================
+Surfaceado por: Anuar preguntó explícitamente si "el análisis que ejecuté"
+  se había quedado atorado, mientras se recreaban contenedores para
+  desplegar el fix de HALLAZGO 59.
+
+Causa raíz: al hacer `--force-recreate --no-deps --scale rqworker=3 backend
+  rqworker` para desplegar el fix, un `content_generation_task` real de un
+  tester ("el perro rebelde") estaba generando el reel del día 1 en ese
+  momento — mismo cuello de botella de Veo que motivó el fix. El worker que
+  lo procesaba murió a medio proceso. RQ lo detectó como `AbandonedJobError`
+  (`StartedJobRegistry` → `FailedJobRegistry`), pero el `AnalysisJob.status`
+  en la base de datos quedó en `processing` para siempre — nadie llamó
+  `job.mark_failed()` porque el proceso murió antes de poder capturar la
+  excepción. Además quedó un `ContentCalendar` huérfano con 0 posts (creado
+  antes del loop de generación) que bloqueaba cualquier reintento por su
+  relación `OneToOneField` con `BrandDNA`.
+
+Fix aplicado (recuperación manual, no automática): diagnóstico vía
+  `StartedJobRegistry`/`FailedJobRegistry` de RQ + correlación del job de RQ
+  fallido con el `AnalysisJob` afectado, borrado del `ContentCalendar`
+  huérfano (seguro, 0 posts), reencolado manual de `content_generation_task`
+  vía `django_rq.enqueue()`. Segunda corrida completó los 7 posts sin
+  problema (ya con el fix de HALLAZGO 59 activo).
+
+Riesgo latente pendiente (no resuelto): no existe ningún guard automático
+  que detecte `AnalysisJob` con `status=processing` estancado — la detección
+  fue 100% manual porque el usuario preguntó directamente. Ver memoria
+  `project_rq_orphaned_job_2026_07_14.md` para el diagnóstico reutilizable y
+  el fix recomendado (job periódico que marque `mark_failed()` jobs
+  estancados por más de ~40 min).
+
+Severidad: Alta (un negocio real se quedó sin su calendario, sin ningún
+  error visible, hasta que alguien preguntó por casualidad).
+Prioridad: Media — implementar el guard de staleness antes de la migración
+  a GCP (producción corre continuamente, este tipo de recreate será más
+  frecuente que en dev).
