@@ -707,11 +707,11 @@ class ImageGenerator:
             'headline': self._extract_headline(caption),
             'subtitle': (caption[:120] if caption else '').strip(),
             'cta': 'Contáctanos hoy',
-            'tag': 'TESTIMONIO',
+            'tag': 'TRANSFORMACION',
         }
         fallback = [
             {
-                'headline': _fallback_single['headline'] if i == num_slides - 1 else f"Testimonio {i + 1}",
+                'headline': _fallback_single['headline'] if i == num_slides - 1 else f"Antes y despues {i + 1}",
                 'subtitle': _fallback_single['subtitle'],
                 'cta': _fallback_single['cta'] if i == num_slides - 1 else 'Desliza para ver más',
                 'tag': _fallback_single['tag'],
@@ -723,10 +723,11 @@ class ImageGenerator:
             ctx_line = f"ADN de marca: {brand_context}\n" if brand_context else ""
             prompt = (
                 f"{ctx_line}"
-                f"Caption del post (pilar de prueba social/testimonio): \"{caption[:300]}\"\n\n"
+                f"Caption del post (pilar antes y despues): \"{caption[:300]}\"\n\n"
                 f"Genera el contenido para un CARRUSEL de Instagram de exactamente {num_slides} slides "
-                "que cuenten una historia de prueba social en secuencia (ej: problema -> solucion -> "
-                "resultado -> cierre). Cada slide tiene 4 elementos:\n"
+                "que cuenten una transformacion en secuencia, narrada desde la marca (NO desde la voz "
+                "de un cliente): el problema que enfrenta la audiencia -> como tu producto/servicio "
+                "ayuda -> el beneficio que obtiene -> cierre. Cada slide tiene 4 elementos:\n"
                 "1. headline: 3-6 palabras. Frase gancho para ese momento de la historia.\n"
                 "2. subtitle: 6-14 palabras. Amplia el headline. Español correcto.\n"
                 "3. cta: 2-4 palabras. En las slides intermedias usa una invitacion a seguir "
@@ -734,8 +735,9 @@ class ImageGenerator:
                 "accion real conectada al negocio (ej. 'Contáctanos hoy').\n"
                 "4. tag: 1-3 palabras EN MAYUSCULAS. Igual en todas las slides, categoria del sector.\n\n"
                 "REGLAS: Español impecable. Sin inventar palabras. No inventes datos verificables "
-                "falsos (cifras exactas, nombres reales) — usa lenguaje representativo tipo "
-                "'un cliente nos comento...'.\n"
+                "falsos (cifras exactas, nombres de clientes reales, resultados especificos) — "
+                "mantente en lenguaje ilustrativo y general sobre el problema/beneficio, nunca "
+                "atribuido a un cliente especifico.\n"
                 f"Responde UNICAMENTE con un array JSON de {num_slides} objetos, EN ORDEN NARRATIVO, "
                 "sin markdown:\n"
                 '[{"headline":"...","subtitle":"...","cta":"...","tag":"..."}]'

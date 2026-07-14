@@ -679,7 +679,7 @@ class TestLayeredPipelineWithProduct:
             gen._layered_pipeline('Caption', ['#1a1a2e'], 'profesional', product_image_bytes=None)
 
         mock_bg.assert_called_once()
-        mock_content.assert_called_once_with('Caption', product_image_bytes=None)
+        mock_content.assert_called_once_with('Caption', product_image_bytes=None, brand_context='Tono: profesional.')
 
 
 class TestGenerateProductScene:
@@ -1011,6 +1011,42 @@ class TestGenerateCarouselSlidesContent:
             slides = gen._generate_carousel_slides_content('Caption', num_slides=4)
         assert len(slides) == 4
         assert slides[0]['headline'] == 'Unica slide'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_fallback_uses_transformacion_tag_and_headlines(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            slides = gen._generate_carousel_slides_content('Nuestro servicio ayuda a resolver X', num_slides=3)
+        assert all(s['tag'] == 'TRANSFORMACION' for s in slides)
+        assert slides[0]['headline'] == 'Antes y despues 1'
+        assert slides[1]['headline'] == 'Antes y despues 2'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_prompt_does_not_mention_prueba_social_or_testimonio(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '[{"headline":"H","subtitle":"S","cta":"Desliza","tag":"TAG"}]'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            gen._generate_carousel_slides_content('Caption', num_slides=1)
+        prompt_sent = mock_vc.return_value.models.generate_content.call_args.kwargs['contents'].lower()
+        assert 'prueba social' not in prompt_sent
+        assert 'testimonio' not in prompt_sent
+        assert 'un cliente nos comento' not in prompt_sent
+        assert 'problema' in prompt_sent
+        assert 'beneficio' in prompt_sent
+
 
 
 class TestGenerateCarousel:
