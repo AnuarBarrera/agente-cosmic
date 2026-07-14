@@ -166,6 +166,56 @@ class TestGeneratePostContent:
             result = gen._generate_post_content('Marketing digital que convierte')
         assert result['tag'] == 'MARKETING DIGITAL'
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_retries_on_429_and_succeeds(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_resp = MagicMock()
+        mock_resp.text = '{"headline":"H","subtitle":"S","cta":"C","tag":"T"}'
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc, \
+             patch('core.shared.rate_limiter.time.sleep'):
+            mock_vc.return_value.models.generate_content.side_effect = [
+                Exception('429 Resource exhausted'), mock_resp,
+            ]
+            result = gen._generate_post_content('Caption de prueba')
+        assert result['headline'] == 'H'
+        assert mock_vc.return_value.models.generate_content.call_count == 2
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_fallback_subtitle_truncates_at_word_boundary(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        long_caption = 'palabra ' * 20
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            result = gen._generate_post_content(long_caption)
+        subtitle = result['subtitle']
+        assert subtitle.endswith('…')
+        without_ellipsis = subtitle[:-1]
+        assert long_caption.startswith(without_ellipsis)
+        assert long_caption[len(without_ellipsis)] == ' '
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_fallback_subtitle_not_truncated_when_short(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            result = gen._generate_post_content('Caption corto')
+        assert result['subtitle'] == 'Caption corto'
+
 
 class TestRenderHtmlTemplate:
     def _make_mock_playwright(self, screenshot_bytes: bytes):
@@ -1047,6 +1097,42 @@ class TestGenerateCarouselSlidesContent:
         assert 'problema' in prompt_sent
         assert 'beneficio' in prompt_sent
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_retries_on_429_and_succeeds(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_resp = MagicMock()
+        mock_resp.text = '[{"headline":"H","subtitle":"S","cta":"Desliza","tag":"TAG"}]'
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc, \
+             patch('core.shared.rate_limiter.time.sleep'):
+            mock_vc.return_value.models.generate_content.side_effect = [
+                Exception('429 Resource exhausted'), mock_resp,
+            ]
+            slides = gen._generate_carousel_slides_content('Caption', num_slides=1)
+        assert slides[0]['headline'] == 'H'
+        assert mock_vc.return_value.models.generate_content.call_count == 2
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_fallback_subtitle_truncates_at_word_boundary(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        long_caption = 'palabra ' * 20
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            slides = gen._generate_carousel_slides_content(long_caption, num_slides=1)
+        subtitle = slides[0]['subtitle']
+        assert subtitle.endswith('…')
+        without_ellipsis = subtitle[:-1]
+        assert long_caption.startswith(without_ellipsis)
+        assert long_caption[len(without_ellipsis)] == ' '
 
 
 class TestGenerateCarousel:

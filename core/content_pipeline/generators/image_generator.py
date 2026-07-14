@@ -162,6 +162,16 @@ def _vertex_client():
     )
 
 
+def _truncate_at_word_boundary(text: str, max_len: int = 120) -> str:
+    """Fallback de subtitle: recorta en el limite de palabra completa mas cercano
+    (nunca a media palabra) cuando el caption no cabe en el cuadro de texto de la
+    imagen."""
+    if len(text) <= max_len:
+        return text
+    truncated = text[:max_len].rsplit(' ', 1)[0].rstrip('.,;:!¡¿?')
+    return truncated + '…'
+
+
 class ImageGenerator:
     def __init__(self, bucket_name: str):
         self._bucket = bucket_name
@@ -621,7 +631,7 @@ class ImageGenerator:
         """Gemini generates {headline, subtitle, cta, tag}. Multimodal if product_image_bytes provided."""
         _FALLBACK = {
             'headline': self._extract_headline(caption),
-            'subtitle': (caption[:120] if caption else '').strip(),
+            'subtitle': _truncate_at_word_boundary(caption.strip()) if caption else '',
             'cta': 'Contáctanos hoy',
             'tag': 'DESTACADO',
         }
@@ -663,25 +673,27 @@ class ImageGenerator:
                     "{\"headline\":\"...\",\"subtitle\":\"...\",\"cta\":\"...\",\"tag\":\"...\"}"
                 )
                 contents = prompt
-            with track_external_api('gemini', operation='post_content'):
-                resp = client.models.generate_content(
-                    model=settings.VERTEX_TEXT_MODEL,
-                    contents=contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=(
-                            "Eres 'Cosmic', Director Creativo de Agente Cosmic. "
-                            "Generas contenido de marketing para redes sociales. "
-                            "Español impecable. Cero errores ortográficos. Nunca inventes palabras. "
-                            "Frases para imagen: cortas, impactantes, máximo 5 palabras. "
-                            "Regla de seguridad (siempre aplica): si la marca pertenece a un nicho "
-                            "sensible (niños, salud, medicina, finanzas, crédito, temas legales), usa "
-                            "tono neutro-positivo, evita promesas absolutas y evita lenguaje retador "
-                            "o de urgencia con audiencias vulnerables. PROHIBIDO usar las palabras/frases: "
-                            "'garantizado', 'garantizamos', 'asegurar', 'aseguramos', 'asegurando', "
-                            "'resultados 100% seguros', 'nunca falla', 'sin riesgo'."
+            def _call():
+                with track_external_api('gemini', operation='post_content'):
+                    return client.models.generate_content(
+                        model=settings.VERTEX_TEXT_MODEL,
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            system_instruction=(
+                                "Eres 'Cosmic', Director Creativo de Agente Cosmic. "
+                                "Generas contenido de marketing para redes sociales. "
+                                "Español impecable. Cero errores ortográficos. Nunca inventes palabras. "
+                                "Frases para imagen: cortas, impactantes, máximo 5 palabras. "
+                                "Regla de seguridad (siempre aplica): si la marca pertenece a un nicho "
+                                "sensible (niños, salud, medicina, finanzas, crédito, temas legales), usa "
+                                "tono neutro-positivo, evita promesas absolutas y evita lenguaje retador "
+                                "o de urgencia con audiencias vulnerables. PROHIBIDO usar las palabras/frases: "
+                                "'garantizado', 'garantizamos', 'asegurar', 'aseguramos', 'asegurando', "
+                                "'resultados 100% seguros', 'nunca falla', 'sin riesgo'."
+                            ),
                         ),
-                    ),
-                )
+                    )
+            resp = call_with_429_retry(_call, settings.VERTEX_TEXT_MODEL)
             record_tokens(resp, operation='post_content',
                           prompt_preview=prompt[:500],
                           response_preview=resp.text[:500] if resp.text else '')
@@ -705,7 +717,7 @@ class ImageGenerator:
         -> solucion -> resultado -> CTA), en vez de N llamadas independientes de _generate_post_content."""
         _fallback_single = {
             'headline': self._extract_headline(caption),
-            'subtitle': (caption[:120] if caption else '').strip(),
+            'subtitle': _truncate_at_word_boundary(caption.strip()) if caption else '',
             'cta': 'Contáctanos hoy',
             'tag': 'TRANSFORMACION',
         }
@@ -742,18 +754,20 @@ class ImageGenerator:
                 "sin markdown:\n"
                 '[{"headline":"...","subtitle":"...","cta":"...","tag":"..."}]'
             )
-            with track_external_api('gemini', operation='carousel_content'):
-                resp = client.models.generate_content(
-                    model=settings.VERTEX_TEXT_MODEL,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=(
-                            "Eres 'Cosmic', Director Creativo de Agente Cosmic. "
-                            "Generas contenido de marketing para redes sociales. "
-                            "Español impecable. Cero errores ortográficos. Nunca inventes palabras."
+            def _call():
+                with track_external_api('gemini', operation='carousel_content'):
+                    return client.models.generate_content(
+                        model=settings.VERTEX_TEXT_MODEL,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            system_instruction=(
+                                "Eres 'Cosmic', Director Creativo de Agente Cosmic. "
+                                "Generas contenido de marketing para redes sociales. "
+                                "Español impecable. Cero errores ortográficos. Nunca inventes palabras."
+                            ),
                         ),
-                    ),
-                )
+                    )
+            resp = call_with_429_retry(_call, settings.VERTEX_TEXT_MODEL)
             record_tokens(resp, operation='carousel_content',
                           prompt_preview=prompt[:500],
                           response_preview=resp.text[:500] if resp.text else '')
