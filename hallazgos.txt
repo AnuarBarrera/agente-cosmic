@@ -3132,6 +3132,10 @@ Pendiente (no implementado, evaluado y diferido por el propio reporte):
   ya tiene margen (29GB, ~14GB libres tras el deploy de hoy) — no es
   urgente. Ver `reporte.txt` sección 6 (opciones B/C) si se retoma.
 
+Severidad: Medium (CVE conocido en dependencia, explotabilidad depende
+  del vector específico de PYSEC-2026-2132 en el proyecto).
+Prioridad: Cerrado (fix A del reporte). Fix B/C explícitamente diferidos.
+
 =================================================================
 HALLAZGO 68 — Escenas híbridas Imagen+zoompan/Veo en reels: reduce
   alucinación de manos/herramientas y costo ~63%
@@ -3198,6 +3202,41 @@ Prioridad: Cerrado. Pendiente: monitorear en producción real varias
   (explícitamente fuera de alcance por ahora — Anuar pidió mantener 1
   escena de video real).
 
-Severidad: Medium (CVE conocido en dependencia, explotabilidad depende
-  del vector específico de PYSEC-2026-2132 en el proyecto).
-Prioridad: Cerrado (fix A del reporte). Fix B/C explícitamente diferidos.
+=================================================================
+HALLAZGO 69 — Texto del hook/CTA invisible cuando el color primario de
+  la marca coincide con el fontcolor hardcodeado
+Categoría: Bug visual
+Estado: ✅ CORREGIDO — 2026-07-15
+=================================================================
+Contexto: al revisar el reel generado en la verificación real de HALLAZGO
+  68, Anuar notó que la palabra resaltada del hook ("Resultados") y todo
+  el texto del CTA no se veían — sin contraste contra su propio fondo.
+
+Causa raíz: `_build_hook_filter_parts` y `_build_cta_filter_parts` (en
+  `reel_generator.py`) pintaban el texto resaltado/CTA con
+  `fontcolor=0x1a1a2e` **hardcodeado**, sobre una caja cuyo color es el
+  `primary_color` de la marca. La marca de prueba usada en la
+  verificación de HALLAZGO 68 no tenía `primary_colors` configurado, así
+  que cayó en el fallback `['#1a1a2e']` — literalmente el mismo color que
+  el fontcolor hardcodeado. Texto oscuro sobre caja del mismo oscuro =
+  invisible. Cualquier marca real con un color primario oscuro similar
+  tendría el mismo problema (no es exclusivo del fallback de prueba).
+
+Fix: `_readable_text_color(hex_color)` calcula el brillo percibido del
+  color de fondo (fórmula YIQ: `0.299*R + 0.587*G + 0.114*B`) y devuelve
+  `'white'` o `'black'` según contraste real, en vez de asumir que el
+  color de marca siempre es oscuro. Aplicado en las 2 llamadas que antes
+  usaban el hardcode.
+
+Verificación: 4 tests nuevos (`TestReadableTextColor` + 1 caso de color
+  claro en `TestBuildCtaFilterParts`), 2 tests existentes reforzados con
+  aserción explícita de `fontcolor=white` para el color oscuro de prueba
+  (`#002951`). 59/59 tests de `test_reel_generator.py`. No se regeneró un
+  reel real pagado para esta verificación — el mecanismo del bug (colisión
+  exacta de dos constantes de color) y el fix (cálculo de contraste) son
+  deterministas y quedaron cubiertos por unit tests directos sobre la
+  función nueva.
+
+Severidad: Medium (afecta legibilidad real del hook/CTA — el mensaje
+  principal del reel — para cualquier marca con paleta oscura).
+Prioridad: Cerrado.
