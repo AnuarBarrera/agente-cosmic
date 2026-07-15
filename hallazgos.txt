@@ -3132,6 +3132,72 @@ Pendiente (no implementado, evaluado y diferido por el propio reporte):
   ya tiene margen (29GB, ~14GB libres tras el deploy de hoy) — no es
   urgente. Ver `reporte.txt` sección 6 (opciones B/C) si se retoma.
 
+=================================================================
+HALLAZGO 68 — Escenas híbridas Imagen+zoompan/Veo en reels: reduce
+  alucinación de manos/herramientas y costo ~63%
+Categoría: Calidad de contenido / costo
+Estado: ✅ CONSTRUIDO Y VERIFICADO EN REAL — 2026-07-15
+=================================================================
+Contexto: Anuar reportó alucinación real en un reel (capturas de pantalla) —
+  el video mostraba manos "atornillando" un cable sin pelar, con movimiento
+  físicamente incoherente. El negocio del reel SÍ era de electricidad (el
+  tema tenía sentido), la ejecución no — patrón conocido de los modelos de
+  video generativo actuales: fallan sistemáticamente en manipulación fina
+  de objetos con las manos. Causa raíz en el código: el prompt de
+  `reel_script_generator.py` pedía explícitamente que las 3 escenas
+  "prefirieran manos trabajando" — empujaba directo hacia el tipo de toma
+  que más falla en Veo.
+
+Decisión (brainstorm completo, ver
+  `docs/superpowers/specs/2026-07-15-reels-imagen-veo-hybrid-design.md`):
+  de las 3 escenas de un reel, solo la escena 0 se sigue generando con Veo
+  (video real, plano amplio/ambiente, sin manos de precisión). Las escenas
+  1 y 2 pasan a ser una imagen fija generada con Imagen — que SÍ puede
+  tener detalle de precisión (manos, herramientas, texturas de cerca)
+  porque no necesita coherencia física entre frames — animada con el
+  filtro `zoompan` nativo de ffmpeg (efecto Ken Burns), sin agregar
+  HyperFrames ni Playwright al pipeline (evaluado y descartado: no reduce
+  costo, sí agrega carga de cómputo al mismo servidor compartido, mismo
+  riesgo que ya se vivió con Playwright en este pipeline).
+
+Implementación: 3 tareas vía agentes externos (agy, Gemini 3.5 Flash),
+  cada una verificada con evidencia propia (diff línea por línea contra el
+  plan + tests corridos directamente):
+  1. `reel_script_generator.py`: prompt diferenciado por índice de escena.
+  2. `reel_generator.py`: `_generate_scene_still` (Imagen), `_animate_still_to_clip`
+     (zoompan), `_probe_video_dimensions` (extiende `_probe_video_width`).
+  3. `_generate_video_clips` reescrito: Veo para escena 0 → mide resolución
+     real vía ffprobe → Imagen+zoompan para escenas 1-2 normalizadas
+     exactamente a esa resolución/fps (para que el `concat -c copy`
+     existente siguiera funcionando sin tocarlo). Con fallback: si Veo
+     falla del todo, la escena 0 también se genera vía Imagen+zoompan.
+  Commits `b638e96`, `5175dc1`, `f430c48`, `0e8a489`. 438/438 tests de la
+  suite completa.
+
+Verificación real end-to-end (Tarea 4, ejecutada directamente, no
+  delegada — gasta cuota real de Veo/Imagen): guion real generado con el
+  rol correcto por escena (escena 0: "sweeping drone shot over a modern
+  tech campus"; escenas 1-2: "robotic hands... circuit board" y "hand...
+  holographic projection" — precisamente el tipo de detalle que antes
+  alucinaba, ahora en imagen fija). MP4 resultante verificado con
+  `ffprobe`: 1 solo stream de video uniforme 720x1280 @24fps en los 24s
+  completos (sin mezcla de resoluciones entre el clip de Veo y los 2 de
+  Imagen+zoompan). 6 frames extraídos y revisados visualmente por
+  Claude: la escena de Veo (dron) fluida y sin artefactos, las 2 escenas
+  de Imagen+zoompan (manos robóticas con circuito, mano sobre holograma)
+  nítidas y anatómicamente correctas — sin los dedos de más/movimiento
+  incoherente que causaba el hallazgo original. Sin errores en logs.
+
+Costo estimado por reel: ~$2.40 (3 clips Veo) → ~$0.88 (1 Veo + 2
+  Imagen), ~63% de reducción, además de eliminar 2/3 del riesgo de
+  alucinación de movimiento.
+
+Severidad: — (mejora de calidad/costo, no un bug).
+Prioridad: Cerrado. Pendiente: monitorear en producción real varias
+  generaciones más antes de considerar eliminar el clip de Veo restante
+  (explícitamente fuera de alcance por ahora — Anuar pidió mantener 1
+  escena de video real).
+
 Severidad: Medium (CVE conocido en dependencia, explotabilidad depende
   del vector específico de PYSEC-2026-2132 en el proyecto).
 Prioridad: Cerrado (fix A del reporte). Fix B/C explícitamente diferidos.
