@@ -205,6 +205,7 @@ class TestGenerateVideoClips:
         assert result == fake_video
         mock_sleep.assert_called_once_with(10)
 
+
 class TestProbeVideoDimensions:
     def test_returns_width_height_fps(self):
         from core.content_pipeline.generators.reel_generator import _probe_video_dimensions
