@@ -149,48 +149,6 @@ def test_content_generation_uses_carousel_for_carousel_day(job_with_dna):
     assert all(p.format == 'single' and p.image_urls == [] for p in non_carousel_posts)
 
 
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
-def test_content_generation_disables_carousel_when_7_product_images(job_with_dna):
-    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.EmailSender'), \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'), \
-         patch('core.content_pipeline.tasks._load_product_images', return_value=[b'img'] * 7):
-        MockText.return_value.generate.return_value = [dict(p) for p in _MOCK_POSTS_WITH_CAROUSEL]
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
-        MockImage.return_value.generate_carousel.return_value = ['https://storage.googleapis.com/test/slide1.jpg']
-
-        from core.content_pipeline.tasks import content_generation_task
-        content_generation_task(str(job_with_dna.id))
-
-    MockImage.return_value.generate_carousel.assert_not_called()
-    assert MockImage.return_value.generate.call_count == 7
-    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna)
-    assert all(p.format == 'single' for p in posts)
-
-
-def test_disable_carousel_if_full_product_week_forces_single():
-    from core.content_pipeline.tasks import _disable_carousel_if_full_product_week
-    posts_data = [{'format': 'single'}] * 6 + [{'format': 'carousel'}]
-    _disable_carousel_if_full_product_week(posts_data, [b'img'] * 7)
-    assert all(p['format'] == 'single' for p in posts_data)
-
-
-def test_disable_carousel_if_full_product_week_noop_with_fewer_than_7():
-    from core.content_pipeline.tasks import _disable_carousel_if_full_product_week
-    posts_data = [{'format': 'single'}] * 6 + [{'format': 'carousel'}]
-    _disable_carousel_if_full_product_week(posts_data, [b'img'] * 3)
-    assert posts_data[-1]['format'] == 'carousel'
-
-
 _MOCK_POSTS_WITH_REEL = [
     {'caption': f'Post {i}', 'hashtags': ['#test'], 'suggested_time': '19:00',
      'format': 'reel' if i == 1 else 'single'}
@@ -260,84 +218,6 @@ def test_content_generation_falls_back_to_image_when_reel_generation_fails(job_w
     assert day1.format == 'reel'
     assert day1.video_url == ''
     assert day1.image_url == 'https://storage.googleapis.com/test/fallback.jpg'
-
-
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
-def test_content_generation_skips_reel_when_day1_has_product_photo(job_with_dna):
-    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel, \
-         patch('core.content_pipeline.tasks.EmailSender'), \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'), \
-         patch('core.content_pipeline.tasks._load_product_images', return_value=[b'foto-dia-1']):
-        MockText.return_value.generate.return_value = [dict(p) for p in _MOCK_POSTS_WITH_REEL]
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
-
-        from core.content_pipeline.tasks import content_generation_task
-        content_generation_task(str(job_with_dna.id))
-
-    MockReel.return_value.generate.assert_not_called()
-    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna)
-    assert posts.get(day_number=1).format == 'single'
-
-
-@patch('core.content_pipeline.tasks.upload_exists', return_value=True)
-@patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-image-bytes')
-@patch('core.content_pipeline.tasks.normalize_image', side_effect=lambda x: x)
-def test_load_product_images_takes_paths_list(mock_normalize, mock_read, mock_exists, tmp_path, settings):
-    from core.content_pipeline.tasks import _load_product_images
-    result = _load_product_images(['uploads/product.webp'])
-    assert result == [b'fake-image-bytes']
-
-
-def test_product_image_for_day_maps_day_in_week():
-    from core.content_pipeline.tasks import _product_image_for_day
-    images = [b'img1', b'img2', b'img3']
-
-    # Semana 1: day_in_week == day_number
-    assert _product_image_for_day(1, images) == b'img1'
-    assert _product_image_for_day(3, images) == b'img3'
-    assert _product_image_for_day(4, images) is None
-
-    # Semana 2, día 8 -> day_in_week 1 (mismo resultado que día 1 de semana 1)
-    day_in_week = ((8 - 1) % 7) + 1
-    assert day_in_week == 1
-    assert _product_image_for_day(day_in_week, images) == _product_image_for_day(1, images)
-
-
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
-def test_content_generation_sets_active_product_images(job_with_dna):
-    job_with_dna.product_image_paths = ['uploads/p1.jpg', 'uploads/p2.jpg']
-    job_with_dna.save(update_fields=['product_image_paths'])
-
-    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.EmailSender'), \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
-        MockText.return_value.generate.return_value = _MOCK_POSTS
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
-
-        from core.content_pipeline.tasks import content_generation_task
-        content_generation_task(str(job_with_dna.id))
-
-    calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
-    assert calendar.active_product_images == ['uploads/p1.jpg', 'uploads/p2.jpg']
 
 
 @pytest.fixture

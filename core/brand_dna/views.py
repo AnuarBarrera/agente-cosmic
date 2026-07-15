@@ -15,7 +15,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 from core.brand_dna.models import AnalysisJob, BrandDNA
 from core.shared.metrics import POST_ACTIONS
-from core.shared.gcs_uploads import save_upload, read_upload, upload_exists
+from core.shared.gcs_uploads import save_upload
 
 logger = logging.getLogger(__name__)
 
@@ -431,11 +431,6 @@ def post_action_api(request, post_id):
             brand_dna = post.calendar.brand_dna
             job_id = str(brand_dna.job.id)
             image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
-            product_image_bytes = None
-            if brand_dna.job.product_image_path:
-                gcs_path = brand_dna.job.product_image_path
-                if upload_exists(gcs_path):
-                    product_image_bytes = read_upload(gcs_path)
             generated_url, generated_urls, _ = _generate_post_media(
                 image_gen,
                 None,  # reel_script_gen
@@ -449,7 +444,6 @@ def post_action_api(request, post_id):
                 keywords=brand_dna.keywords,
                 description=brand_dna.description,
                 audience=brand_dna.audience,
-                product_image_bytes=product_image_bytes,
                 max_qc_retries=0,  # regen es síncrono — sin reintentos QC para evitar timeout
             )
             if generated_url:
@@ -693,9 +687,6 @@ def regenerate_calendar_api(request, job_id):
     if day1 and day1.image_url:
         try:
             image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
-            product_image_bytes = None
-            if job.product_image_path and upload_exists(job.product_image_path):
-                product_image_bytes = read_upload(job.product_image_path)
             new_image_url = image_gen.generate(
                 caption=day1.caption,
                 colors=brand_dna.primary_colors,
@@ -705,7 +696,6 @@ def regenerate_calendar_api(request, job_id):
                 keywords=brand_dna.keywords,
                 description=brand_dna.description,
                 audience=brand_dna.audience,
-                product_image_bytes=product_image_bytes,
                 max_qc_retries=0,
             )
             if new_image_url:
