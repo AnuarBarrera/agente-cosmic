@@ -322,16 +322,52 @@ class ReelGenerator:
         record_playwright_overlay_fallback(style)
         return None
 
+    def _probe_clip_dimensions(self, video_bytes: bytes) -> tuple[int, int, float]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'probe.mp4')
+            with open(path, 'wb') as f:
+                f.write(video_bytes)
+            return _probe_video_dimensions(path)
+
+    def _generate_still_scene_clip(self, prompt: str, width: int, height: int, fps: float) -> bytes | None:
+        still = self._generate_scene_still(prompt)
+        if still is None:
+            still = self._generate_scene_still(prompt)  # 1 reintento
+        if still is None:
+            return None
+        return self._animate_still_to_clip(still, width, height, fps)
+
     def _generate_video_clips(self, scene_prompts: list[str]) -> list[bytes]:
+        # scene_prompts[0] va a Veo (video real). scene_prompts[1] y [2] se generan
+        # como imagen fija (Imagen) + animacion zoompan de ffmpeg — reduce el uso de
+        # Veo de 3 a 1 clip por reel (costo ~$2.40 -> ~$0.88, y elimina 2/3 del riesgo
+        # de alucinacion de movimiento). Ver docs/superpowers/specs/2026-07-15-reels-imagen-veo-hybrid-design.md
         clips = []
-        for prompt in scene_prompts:
-            clip = self._generate_single_clip(prompt)
-            if clip is None:
-                clip = self._generate_single_clip(prompt)  # 1 reintento
-            if clip is not None:
-                clips.append(clip)
+
+        veo_clip = self._generate_single_clip(scene_prompts[0])
+        if veo_clip is None:
+            veo_clip = self._generate_single_clip(scene_prompts[0])  # 1 reintento
+
+        if veo_clip is not None:
+            clips.append(veo_clip)
+            width, height, fps = self._probe_clip_dimensions(veo_clip)
+        else:
+            logger.warning(
+                f"Clip de Veo fallido tras reintento, escena 0 tambien se genera via "
+                f"Imagen: {scene_prompts[0][:80]}"
+            )
+            width, height, fps = _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS
+            still_clip = self._generate_still_scene_clip(scene_prompts[0], width, height, fps)
+            if still_clip is not None:
+                clips.append(still_clip)
+
+        for prompt in scene_prompts[1:]:
+            still_clip = self._generate_still_scene_clip(prompt, width, height, fps)
+            if still_clip is not None:
+                clips.append(still_clip)
             else:
-                logger.warning(f"Clip de Veo fallido tras reintento, se omite: {prompt[:80]}")
+                logger.warning(f"Escena de Imagen fallida tras reintento, se omite: {prompt[:80]}")
+
         return clips
 
     def _generate_single_clip(self, prompt: str) -> bytes | None:

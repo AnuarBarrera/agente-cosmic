@@ -1,4 +1,4 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 from django.test import override_settings
 
 from core.content_pipeline.generators.reel_generator import (
@@ -111,38 +111,62 @@ class TestGenerateVideoClips:
         GOOGLE_CLOUD_LOCATION='us-central1',
         VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
     )
-    def test_returns_one_clip_per_scene_prompt(self):
+    def test_first_scene_via_veo_rest_via_imagen_zoompan(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        fake_video = b'fake-video-bytes'
-        mock_video = MagicMock()
-        mock_video.video_bytes = fake_video
-        mock_generated = MagicMock()
-        mock_generated.video = mock_video
-        mock_op = MagicMock()
-        mock_op.done = True
-        mock_op.error = None
-        mock_op.result.generated_videos = [mock_generated]
-        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
-            mock_vc.return_value.models.generate_videos.return_value = mock_op
+        with patch.object(gen, '_generate_single_clip', return_value=b'veo-clip') as mock_veo, \
+             patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)) as mock_probe, \
+             patch.object(gen, '_generate_scene_still', return_value=b'still-bytes') as mock_still, \
+             patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
             clips = gen._generate_video_clips(['scene 1', 'scene 2', 'scene 3'])
-        assert clips == [fake_video, fake_video, fake_video]
-        sent_prompt = mock_vc.return_value.models.generate_videos.call_args_list[0].kwargs['prompt']
-        assert sent_prompt.startswith('scene 1')
-        assert 'Absolutely NO text' in sent_prompt
+
+        assert clips == [b'veo-clip', b'animated-clip', b'animated-clip']
+        mock_veo.assert_called_once_with('scene 1')
+        mock_probe.assert_called_once_with(b'veo-clip')
+        assert mock_still.call_args_list == [call('scene 2'), call('scene 3')]
+        assert mock_animate.call_args_list == [
+            call(b'still-bytes', 720, 1280, 24.0),
+            call(b'still-bytes', 720, 1280, 24.0),
+        ]
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
         GOOGLE_CLOUD_LOCATION='us-central1',
         VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
     )
-    def test_skips_clip_that_fails_after_retry(self):
+    def test_falls_back_to_imagen_when_veo_scene_fails_completely(self):
+        from core.content_pipeline.generators.reel_generator import (
+            ReelGenerator, _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS,
+        )
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_single_clip', return_value=None) as mock_veo, \
+             patch.object(gen, '_probe_clip_dimensions') as mock_probe, \
+             patch.object(gen, '_generate_scene_still', return_value=b'still-bytes'), \
+             patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
+            clips = gen._generate_video_clips(['scene 1', 'scene 2', 'scene 3'])
+
+        assert mock_veo.call_count == 2  # 1 intento + 1 reintento, ambos fallan
+        mock_probe.assert_not_called()
+        assert clips == [b'animated-clip', b'animated-clip', b'animated-clip']
+        assert mock_animate.call_args_list[0] == call(b'still-bytes', _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS)
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
+    )
+    def test_skips_imagen_scene_that_fails_completely(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
-            mock_vc.return_value.models.generate_videos.side_effect = Exception('rejected')
-            clips = gen._generate_video_clips(['scene 1'])
-        assert clips == []
+        with patch.object(gen, '_generate_single_clip', return_value=b'veo-clip'), \
+             patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
+             patch.object(gen, '_generate_scene_still', return_value=None) as mock_still, \
+             patch.object(gen, '_animate_still_to_clip') as mock_animate:
+            clips = gen._generate_video_clips(['scene 1', 'scene 2', 'scene 3'])
+
+        assert clips == [b'veo-clip']
+        assert mock_still.call_count == 4  # 2 escenas x (1 intento + 1 reintento)
+        mock_animate.assert_not_called()
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
@@ -321,6 +345,25 @@ class TestAnimateStillToClip:
 
         cmd = mock_run.call_args.args[0]
         assert cmd[cmd.index('-t') + 1] == '8'
+
+
+class TestProbeClipDimensions:
+    def test_writes_bytes_to_temp_file_and_probes(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        captured = {}
+
+        def fake_probe(path):
+            with open(path, 'rb') as f:
+                captured['content'] = f.read()
+            return (720, 1280, 24.0)
+
+        with patch('core.content_pipeline.generators.reel_generator._probe_video_dimensions',
+                    side_effect=fake_probe):
+            result = gen._probe_clip_dimensions(b'fake-video-bytes')
+
+        assert result == (720, 1280, 24.0)
+        assert captured['content'] == b'fake-video-bytes'
 
 
 class TestGenerateMusic:
