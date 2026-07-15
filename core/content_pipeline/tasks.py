@@ -14,7 +14,6 @@ from core.content_pipeline.generators.reel_generator import ReelGenerator
 from core.content_pipeline.email_sender import EmailSender
 from core.content_pipeline.scheduler import schedule_daily_emails
 from core.content_pipeline.smart_scheduler import smart_schedule_dates
-
 from core.shared.metrics import CONTENT_GENERATION_DURATION, CALENDARS_CREATED
 
 logger = logging.getLogger(__name__)
