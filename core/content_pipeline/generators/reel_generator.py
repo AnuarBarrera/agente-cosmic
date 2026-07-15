@@ -16,7 +16,7 @@ from core.shared.metrics import GCS_OPERATIONS
 from core.shared.metrics_utils import (
     track_external_api, record_tokens, record_veo_generation,
     record_lyria_generation, record_tts_generation,
-    record_playwright_overlay_fallback,
+    record_playwright_overlay_fallback, record_imagen_generation,
 )
 from core.shared.rate_limiter import call_with_429_retry
 from core.content_pipeline.generators.subtitle_generator import SubtitleGenerator
@@ -46,6 +46,8 @@ _DRAWTEXT_FONT_PATH = os.path.normpath(os.path.join(
 ))
 
 _VIDEO_HEIGHT = 1920  # alto fijo del canvas de Playwright (viewport 1080x1920)
+
+_DEFAULT_CLIP_FPS = 24.0  # usado solo cuando no hay clip real de Veo del cual medir fps
 
 _OVERLAY_TEMPLATE_MAP = {'hook': 'reel_hook.html', 'cta': 'reel_cta.html'}
 
@@ -142,6 +144,22 @@ def _probe_video_width(video_path: str) -> int:
         check=True, capture_output=True, text=True,
     )
     return int(result.stdout.strip())
+
+
+def _probe_video_dimensions(video_path: str) -> tuple[int, int, float]:
+    # Extiende _probe_video_width (que solo mide ancho, para el centrado del hook)
+    # con alto y fps reales — necesarios para normalizar los clips de Imagen+zoompan
+    # exactamente al mismo formato que produjo Veo, para que el concat -c copy de
+    # _assemble_reel siga funcionando sin cambios.
+    result = subprocess.run(
+        ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+         '-show_entries', 'stream=width,height,r_frame_rate', '-of', 'csv=p=0', video_path],
+        check=True, capture_output=True, text=True,
+    )
+    width_str, height_str, fps_str = result.stdout.strip().split(',')
+    num, den = fps_str.split('/')
+    fps = float(num) / float(den) if float(den) != 0 else float(num)
+    return int(width_str), int(height_str), fps
 
 
 def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color: str,
@@ -353,6 +371,47 @@ class ReelGenerator:
         except Exception as e:
             logger.warning(f"Veo clip generation failed: {e}")
             return None
+
+    def _generate_scene_still(self, prompt: str) -> bytes | None:
+        try:
+            client = _vertex_client()
+            with track_external_api('imagen3', operation='image_generate'):
+                resp = client.models.generate_images(
+                    model=settings.VERTEX_IMAGE_MODEL,
+                    prompt=prompt + self._VEO_SAFE_CONSTRAINTS,
+                    config=types.GenerateImagesConfig(
+                        number_of_images=1,
+                        aspect_ratio='9:16',
+                    ),
+                )
+            if resp.generated_images:
+                record_imagen_generation('reel_scene')
+                return resp.generated_images[0].image.image_bytes
+            return None
+        except Exception as e:
+            logger.warning(f"Imagen scene generation failed: {e}")
+            return None
+
+    def _animate_still_to_clip(self, image_bytes: bytes, width: int, height: int,
+                                fps: float, duration: float = _VEO_CLIP_DURATION_SECONDS) -> bytes:
+        with tempfile.TemporaryDirectory() as tmp:
+            image_path = os.path.join(tmp, 'still.png')
+            with open(image_path, 'wb') as f:
+                f.write(image_bytes)
+            output_path = os.path.join(tmp, 'animated.mp4')
+            subprocess.run(
+                ['ffmpeg', '-y', '-loop', '1', '-i', image_path, '-t', str(duration),
+                 '-vf', (
+                     "scale=8000:-1,"
+                     "zoompan=z='min(zoom+0.0015,1.08)':d=1:"
+                     "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                     f"s={width}x{height}:fps={fps}"
+                 ),
+                 '-c:v', 'libx264', '-pix_fmt', 'yuv420p', output_path],
+                check=True, capture_output=True,
+            )
+            with open(output_path, 'rb') as f:
+                return f.read()
 
     def _generate_music(self, music_mood: str) -> bytes | None:
         # El filtro de contenido de Lyria 3 Clip (preview) es no-determinista —

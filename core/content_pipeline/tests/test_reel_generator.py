@@ -205,6 +205,122 @@ class TestGenerateVideoClips:
         assert result == fake_video
         mock_sleep.assert_called_once_with(10)
 
+class TestProbeVideoDimensions:
+    def test_returns_width_height_fps(self):
+        from core.content_pipeline.generators.reel_generator import _probe_video_dimensions
+        fake_result = MagicMock()
+        fake_result.stdout = '720,1280,24/1\n'
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    return_value=fake_result) as mock_run:
+            width, height, fps = _probe_video_dimensions('/fake/path.mp4')
+        assert (width, height, fps) == (720, 1280, 24.0)
+        cmd = mock_run.call_args.args[0]
+        assert cmd[0] == 'ffprobe'
+        assert '/fake/path.mp4' in cmd
+
+    def test_handles_non_integer_frame_rate(self):
+        from core.content_pipeline.generators.reel_generator import _probe_video_dimensions
+        fake_result = MagicMock()
+        fake_result.stdout = '1080,1920,25000/1001\n'
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    return_value=fake_result):
+            _, _, fps = _probe_video_dimensions('/fake/path.mp4')
+        assert round(fps, 3) == round(25000 / 1001, 3)
+
+
+class TestGenerateSceneStill:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+    )
+    def test_returns_image_bytes_on_success(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_image = b'fake-image-bytes'
+        mock_generated = MagicMock()
+        mock_generated.image.image_bytes = fake_image
+        mock_resp = MagicMock()
+        mock_resp.generated_images = [mock_generated]
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc, \
+             patch('core.content_pipeline.generators.reel_generator.record_imagen_generation') as mock_record:
+            mock_vc.return_value.models.generate_images.return_value = mock_resp
+            result = gen._generate_scene_still('a workshop scene')
+        assert result == fake_image
+        mock_record.assert_called_once_with('reel_scene')
+        call_kwargs = mock_vc.return_value.models.generate_images.call_args.kwargs
+        assert call_kwargs['model'] == 'imagen-3.0-generate-001'
+        assert call_kwargs['config'].aspect_ratio == '9:16'
+        assert call_kwargs['prompt'].startswith('a workshop scene')
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+    )
+    def test_returns_none_on_api_error(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_images.side_effect = Exception('rejected')
+            result = gen._generate_scene_still('a workshop scene')
+        assert result is None
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+    )
+    def test_returns_none_when_no_images_generated(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        mock_resp = MagicMock()
+        mock_resp.generated_images = []
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_images.return_value = mock_resp
+            result = gen._generate_scene_still('a workshop scene')
+        assert result is None
+
+
+class TestAnimateStillToClip:
+    def test_builds_zoompan_command_with_exact_dimensions(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-animated-mp4-bytes'
+
+        def fake_run(cmd, *args, **kwargs):
+            with open(cmd[-1], 'wb') as f:
+                f.write(fake_output)
+            return MagicMock(returncode=0)
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=fake_run) as mock_run:
+            result = gen._animate_still_to_clip(b'fake-image-bytes', width=720, height=1280, fps=24.0, duration=8)
+
+        assert result == fake_output
+        cmd = mock_run.call_args.args[0]
+        assert cmd[0] == 'ffmpeg'
+        assert cmd[cmd.index('-t') + 1] == '8'
+        vf_idx = cmd.index('-vf')
+        assert 's=720x1280:fps=24.0' in cmd[vf_idx + 1]
+        assert 'zoompan' in cmd[vf_idx + 1]
+
+    def test_uses_default_duration_of_8_seconds(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+
+        def fake_run(cmd, *args, **kwargs):
+            with open(cmd[-1], 'wb') as f:
+                f.write(b'out')
+            return MagicMock(returncode=0)
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=fake_run) as mock_run:
+            gen._animate_still_to_clip(b'fake-image-bytes', width=1080, height=1920, fps=24.0)
+
+        cmd = mock_run.call_args.args[0]
+        assert cmd[cmd.index('-t') + 1] == '8'
+
 
 class TestGenerateMusic:
     @override_settings(
