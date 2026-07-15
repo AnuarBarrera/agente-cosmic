@@ -40,7 +40,7 @@ def test_generate_returns_fallback_on_api_error(brand_dna):
         'hook_text', 'highlight_word', 'tag_cta', 'narration_script',
         'scene_prompts', 'music_mood',
     }
-    assert len(result['scene_prompts']) == 3
+    assert len(result['scene_prompts']) == 6
     assert len(result['hook_text']) > 0
 
 
@@ -57,7 +57,10 @@ def test_generate_parses_valid_gemini_response(brand_dna):
         '"tag_cta":"Compra ahora","narration_script":"Cada bolso es unico, hecho a mano con materiales de la mas alta calidad.",'
         '"scene_prompts":["scene1, no text, no logos, no people speaking to camera.",'
         '"scene2, no text, no logos, no people speaking to camera.",'
-        '"scene3, no text, no logos, no people speaking to camera."],'
+        '"scene3, no text, no logos, no people speaking to camera.",'
+        '"scene4, no text, no logos, no people speaking to camera.",'
+        '"scene5, no text, no logos, no people speaking to camera.",'
+        '"scene6, no text, no logos, no people speaking to camera."],'
         '"music_mood":"warm acoustic, artisanal feel"}'
     )
     with patch('core.content_pipeline.generators.reel_script_generator._vertex_client') as mock_vc:
@@ -67,7 +70,7 @@ def test_generate_parses_valid_gemini_response(brand_dna):
     assert result['hook_text'] == 'Bolsos que cuentan tu historia'
     assert result['highlight_word'] == 'historia'
     assert result['tag_cta'] == 'Compra ahora'
-    assert len(result['scene_prompts']) == 3
+    assert len(result['scene_prompts']) == 6
 
 
 @override_settings(
@@ -86,7 +89,7 @@ def test_generate_uses_fallback_scenes_when_gemini_returns_wrong_count(brand_dna
         mock_vc.return_value = _mock_vertex_client(response_json)
         result = ReelScriptGenerator().generate(post_data, brand_dna)
 
-    assert len(result['scene_prompts']) == 3
+    assert len(result['scene_prompts']) == 6
 
 
 @pytest.fixture
@@ -132,7 +135,7 @@ def test_prompt_differentiates_veo_scene_from_imagen_scenes(brand_dna):
     post_data = {'caption': 'Bolsos artesanales hechos a mano'}
     response_json = (
         '{"hook_text":"H","highlight_word":"H","tag_cta":"C","narration_script":"N",'
-        '"scene_prompts":["s1","s2","s3"],"music_mood":"M"}'
+        '"scene_prompts":["s1","s2","s3","s4","s5","s6"],"music_mood":"M"}'
     )
     with patch('core.content_pipeline.generators.reel_script_generator._vertex_client') as mock_vc:
         mock_vc.return_value = _mock_vertex_client(response_json)
@@ -141,7 +144,8 @@ def test_prompt_differentiates_veo_scene_from_imagen_scenes(brand_dna):
     sent_prompt = mock_vc.return_value.models.generate_content.call_args.kwargs['contents']
     assert 'scene_prompts[0]' in sent_prompt
     assert 'GENERADOR DE VIDEO' in sent_prompt
-    assert 'scene_prompts[1]' in sent_prompt and 'scene_prompts[2]' in sent_prompt
+    assert 'scene_prompts[1] a scene_prompts[5]' in sent_prompt
     assert 'GENERADOR DE IMAGEN FIJA' in sent_prompt
+    assert '5 shots' in sent_prompt
     assert 'NO debe incluir manipulacion precisa' in sent_prompt
 

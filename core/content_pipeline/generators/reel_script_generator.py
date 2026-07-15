@@ -13,12 +13,16 @@ logger = logging.getLogger(__name__)
 _FALLBACK_SCENES = [
     "Overhead flat lay of the product on a clean surface with soft natural light, slow push-in camera movement, no people, no text, no logos.",
     "Close-up detail shot of the product with shallow depth of field, gentle rotation, warm bokeh background, no text, no logos.",
-    "Product displayed in a lifestyle setting with soft ambient light, subtle camera pan, no people, no text, no logos.",
+    "Product displayed in a lifestyle setting with soft ambient light, no people, no text, no logos.",
+    "Macro shot of texture and materials up close, soft directional light, shallow depth of field, no text, no logos.",
+    "Hands arranging or presenting the product on a clean surface, natural light, no text, no logos.",
+    "Wide clean studio shot of the product centered with soft shadow, minimal background, no text, no logos.",
 ]
 
 _PROMPT = (
     "Eres un guionista de reels para redes sociales. Genera el guion completo para un "
-    "reel de ~24 segundos (3 escenas de Veo) sobre este negocio, basado en este post:\n\n"
+    "reel de ~18 segundos (1 escena de video + 5 shots de imagen) sobre este negocio, "
+    "basado en este post:\n\n"
     "MARCA: {business_name}\n"
     "CAPTION DEL POST: {caption}\n"
     "TONO: {tone}\n"
@@ -29,18 +33,21 @@ _PROMPT = (
     "3. tag_cta: 2-4 palabras, llamada a la accion de cierre (aparece en los ultimos 3s).\n"
     "4. narration_script: guion de voz en off en espanol, ~15-20 segundos hablados "
     "(unas 40-50 palabras), tono conversacional, sin leer literalmente el hook ni el CTA.\n"
-    "5. scene_prompts: exactamente 3 prompts EN INGLES describiendo 3 escenas visuales "
-    "secuenciales relacionadas al negocio, con roles DISTINTOS por posicion:\n"
+    "5. scene_prompts: exactamente 6 prompts EN INGLES describiendo 6 escenas visuales "
+    "relacionadas al negocio, con roles DISTINTOS por posicion:\n"
     "   - scene_prompts[0]: para un GENERADOR DE VIDEO. Debe ser un plano amplio o de "
     "ambiente con movimiento de camara (push-in, pan lento, rotacion suave). NO debe "
     "incluir manipulacion precisa de objetos con las manos (atornillar, cablear, cortar, "
     "ensamblar, escribir a mano en primer plano) porque el generador de video falla en "
     "coherencia fisica de manos con herramientas entre frames.\n"
-    "   - scene_prompts[1] y scene_prompts[2]: para un GENERADOR DE IMAGEN FIJA. Aqui SI "
-    "se prefiere el detalle de precision: manos trabajando con herramientas, texturas de "
-    "cerca, el oficio en accion — porque es una imagen fija y no necesita coherencia "
-    "fisica en el tiempo.\n"
-    "   Las 3 evitan describir pantallas, laptops, monitores o interfaces con contenido — "
+    "   - scene_prompts[1] a scene_prompts[5]: para un GENERADOR DE IMAGEN FIJA, 5 shots "
+    "cortos e independientes (~2 segundos cada uno en el reel final) — como una rafaga "
+    "de tomas distintas en un comercial: detalles del producto/servicio, manos "
+    "trabajando, texturas, ambiente, resultados. Los 5 deben mostrar variedad visual "
+    "real entre si, no la misma composicion repetida. Aqui SI se prefiere el detalle de "
+    "precision (manos, herramientas, texturas de cerca) porque cada uno es una imagen "
+    "fija y no necesita coherencia fisica en el tiempo.\n"
+    "   Las 6 evitan describir pantallas, laptops, monitores o interfaces con contenido — "
     "el generador alucina texto falso/ilegible cuando la escena implica una pantalla con "
     "informacion. Cada prompt debe terminar con: 'no text, no logos, no people speaking "
     "to camera.'\n"
@@ -50,7 +57,8 @@ _PROMPT = (
     "sin promesas absolutas ('garantizado', 'aseguramos', '100%').\n\n"
     "Responde UNICAMENTE con este JSON (sin markdown):\n"
     '{{"hook_text":"...","highlight_word":"...","tag_cta":"...",'
-    '"narration_script":"...","scene_prompts":["...","...","..."],"music_mood":"..."}}'
+    '"narration_script":"...","scene_prompts":["...","...","...","...","...","..."],'
+    '"music_mood":"..."}}'
 )
 
 
@@ -97,7 +105,7 @@ class ReelScriptGenerator:
                 return fallback
             data = json.loads(match.group())
             scene_prompts = data.get('scene_prompts') or []
-            if len(scene_prompts) != 3:
+            if len(scene_prompts) != 6:
                 scene_prompts = list(_FALLBACK_SCENES)
             result = {
                 'hook_text': str(data.get('hook_text', '')).strip() or fallback['hook_text'],
