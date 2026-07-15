@@ -20,12 +20,16 @@ class SecurityHeadersMiddleware(MiddlewareMixin):
         # Content Security Policy
         csp_policy = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net "
+            "https://www.googletagmanager.com https://static.cloudflareinsights.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
             "img-src 'self' data: https:; "
             "media-src 'self' https://storage.googleapis.com; "
-            "connect-src 'self' https://api.gemini.com https://generativelanguage.googleapis.com; "
+            "connect-src 'self' https://api.gemini.com https://generativelanguage.googleapis.com "
+            "https://www.googletagmanager.com https://www.google-analytics.com "
+            "https://*.google-analytics.com https://*.analytics.google.com "
+            "https://cloudflareinsights.com; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
             "form-action 'self';"
