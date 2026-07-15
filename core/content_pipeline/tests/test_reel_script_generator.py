@@ -120,3 +120,28 @@ def test_generate_rejects_banned_language_in_sensitive_niche(sensitive_brand_dna
         result = ReelScriptGenerator().generate(post_data, sensitive_brand_dna)
 
     assert result['hook_text'] != 'Garantizamos tu salud'
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_prompt_differentiates_veo_scene_from_imagen_scenes(brand_dna):
+    from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
+    post_data = {'caption': 'Bolsos artesanales hechos a mano'}
+    response_json = (
+        '{"hook_text":"H","highlight_word":"H","tag_cta":"C","narration_script":"N",'
+        '"scene_prompts":["s1","s2","s3"],"music_mood":"M"}'
+    )
+    with patch('core.content_pipeline.generators.reel_script_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(response_json)
+        ReelScriptGenerator().generate(post_data, brand_dna)
+
+    sent_prompt = mock_vc.return_value.models.generate_content.call_args.kwargs['contents']
+    assert 'scene_prompts[0]' in sent_prompt
+    assert 'GENERADOR DE VIDEO' in sent_prompt
+    assert 'scene_prompts[1]' in sent_prompt and 'scene_prompts[2]' in sent_prompt
+    assert 'GENERADOR DE IMAGEN FIJA' in sent_prompt
+    assert 'NO debe incluir manipulacion precisa' in sent_prompt
+
