@@ -190,40 +190,34 @@ class ImageGenerator:
     def __init__(self, bucket_name: str):
         self._bucket = bucket_name
 
-    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2, business_url: str = '') -> str:
+    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, business_url: str = '') -> str:
         try:
             # job_id (sin el sufijo "-dayN") como seed de fuente — asi las 7 imagenes
             # de una semana comparten tipografia, incluso si se regenera un solo post.
             font_seed = filename.rsplit('-day', 1)[0] if '-day' in filename else filename
-            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description, audience=audience, product_image_bytes=product_image_bytes, max_qc_retries=max_qc_retries, font_seed=font_seed, business_url=business_url)
+            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries, font_seed=font_seed, business_url=business_url)
             return self._upload_to_storage(image_bytes, filename)
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")
             return ''
 
-    def generate_carousel(self, caption: str, colors: list[str], tone: str, filename_prefix: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2, num_slides: int = 4, business_url: str = '') -> list[str]:
+    def generate_carousel(self, caption: str, colors: list[str], tone: str, filename_prefix: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, num_slides: int = 4, business_url: str = '') -> list[str]:
         """Genera un carrusel de `num_slides` (H20 + roadmap #5). Reutiliza UN solo
-        fondo (misma llamada a Imagen 3/BGSWAP que un post normal) y superpone
-        contenido de texto DISTINTO por slide — evita multiplicar el costo de
-        generacion de imagen por N mientras mantiene coherencia visual entre slides."""
+        fondo (misma llamada a Imagen 3) y superpone contenido de texto DISTINTO por
+        slide — evita multiplicar el costo de generacion de imagen por N mientras
+        mantiene coherencia visual entre slides."""
         try:
             font_seed = filename_prefix.rsplit('-day', 1)[0] if '-day' in filename_prefix else filename_prefix
             kw_str = ', '.join((keywords or [])[:4])
             brand_ctx = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
 
-            if product_image_bytes:
-                background_bytes, svg_overlay = self._generate_product_scene(
-                    product_image_bytes, caption, colors, tone, max_qc_retries=max_qc_retries
-                )
-            else:
-                background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
-                svg_overlay = ''
+            background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
 
             slides_content = self._generate_carousel_slides_content(caption, brand_ctx, num_slides=num_slides, business_url=business_url)
 
             urls = []
             for i, slide_content in enumerate(slides_content, start=1):
-                image_bytes = self._render_html_template(background_bytes, slide_content, colors, svg_overlay=svg_overlay, font_seed=font_seed)
+                image_bytes = self._render_html_template(background_bytes, slide_content, colors, svg_overlay='', font_seed=font_seed)
                 urls.append(self._upload_to_storage(image_bytes, f"{filename_prefix}-slide{i}"))
             return urls
         except Exception as e:
@@ -234,167 +228,14 @@ class ImageGenerator:
     # Layered pipeline
     # ------------------------------------------------------------------
 
-    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', product_image_bytes: bytes = None, max_qc_retries: int = 2, font_seed: str = '', business_url: str = '') -> bytes:
-        if product_image_bytes:
-            kw_str = ', '.join((keywords or [])[:3])
-            brand_context = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
-            background_bytes, svg_overlay = self._generate_product_scene(
-                product_image_bytes, caption, colors, tone, max_qc_retries=max_qc_retries
-            )
-            content = self._generate_post_content(caption, product_image_bytes=product_image_bytes, brand_context=brand_context, business_url=business_url)
-            result = self._render_html_template(background_bytes, content, colors, svg_overlay=svg_overlay, font_seed=font_seed)
-            if max_qc_retries > 0 and svg_overlay and not self._validate_final_image(result):
-                logger.warning("Final QC falló — reintentando sin SVG overlay")
-                result = self._render_html_template(background_bytes, content, colors, svg_overlay='', font_seed=font_seed)
-            return result
-        else:
-            background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
-            kw_str = ', '.join((keywords or [])[:4])
-            brand_ctx = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
-            content = self._generate_post_content(caption, product_image_bytes=None, brand_context=brand_ctx, business_url=business_url)
-            svg_overlay = ''
-        return self._render_html_template(background_bytes, content, colors, svg_overlay=svg_overlay, font_seed=font_seed)
+    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, font_seed: str = '', business_url: str = '') -> bytes:
+        background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
+        kw_str = ', '.join((keywords or [])[:4])
+        brand_ctx = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
+        content = self._generate_post_content(caption, brand_context=brand_ctx, business_url=business_url)
+        return self._render_html_template(background_bytes, content, colors, svg_overlay='', font_seed=font_seed)
 
-    def _generate_product_scene(self, product_image_bytes: bytes, caption: str, colors: list[str], tone: str, max_qc_retries: int = 2) -> tuple[bytes, str]:
-        """Pipeline agéntico de 3 pasos con QC en la escena generada:
-        1. Gemini Director de Arte → prompt de entorno premium específico para este producto
-        2. Imagen 3 BGSWAP → producto pixel-perfect sobre ese entorno (con reintento si QC falla)
-        3. Gemini Iluminador → SVG overlay de sombra/luz para armonizar (solo si BGSWAP tuvo éxito)
-        """
-        env_prompt = self._analyze_product_style(product_image_bytes, caption, colors, tone)
-        total_attempts = max_qc_retries + 1
-        scene_bytes, bgswap_ok = product_image_bytes, False
-        for attempt in range(total_attempts):
-            candidate_bytes, candidate_ok = self._bgswap_product(product_image_bytes, env_prompt)
-            if not candidate_ok:
-                scene_bytes, bgswap_ok = product_image_bytes, False
-                break
-            if max_qc_retries == 0 or self._validate_background(candidate_bytes):
-                scene_bytes, bgswap_ok = candidate_bytes, True
-                break
-            if attempt < max_qc_retries:
-                logger.warning(f"Scene QC falló (intento {attempt + 1}/{total_attempts}), reintentando BGSWAP...")
-            else:
-                logger.warning("Scene QC: reintentos agotados, usando última escena generada")
-                scene_bytes, bgswap_ok = candidate_bytes, True
-        svg_overlay = self._generate_svg_overlay(scene_bytes, colors) if bgswap_ok else ''
-        return scene_bytes, svg_overlay
 
-    def _analyze_product_style(self, product_image_bytes: bytes, caption: str, colors: list[str], tone: str) -> str:
-        """Gemini Director de Arte: analiza el producto y genera prompt de entorno premium para Imagen 3."""
-        color_str = ', '.join(colors[:3]) if colors else 'warm neutrals'
-        _FALLBACK = (
-            f"Professional editorial product photography background. "
-            f"Elegant real-world environment: wooden surface, marble, or lifestyle context. "
-            f"Natural lighting, shallow depth of field, warm bokeh. Mood: {tone}. "
-            f"NOT white background. NOT abstract. NOT 3D render. Absolutely NO text, NO logos."
-        )
-        try:
-            client = _vertex_client()
-            mime = _detect_mime(product_image_bytes)
-            image_part = types.Part.from_bytes(data=product_image_bytes, mime_type=mime)
-            prompt = (
-                f"You are an Art Director for premium brand advertising.\n"
-                f"Analyze this product image and generate a specific Imagen 3 prompt (max 100 words) "
-                f"for the BACKGROUND ENVIRONMENT ONLY — where this product would look spectacular.\n"
-                f"Brand context: {caption[:80]}. Color palette: {color_str}. Mood: {tone}.\n\n"
-                f"Describe: surface/pedestal/setting, lighting style, atmosphere, complementary textures.\n"
-                f"Do NOT mention the product itself — only the environment that showcases it.\n"
-                f"End with: 'NOT abstract. NOT 3D render. Absolutely NO text, NO logos.'\n"
-                f"Return ONLY the prompt text, no explanations."
-            )
-            with track_external_api('gemini', operation='image_product'):
-                resp = client.models.generate_content(
-                    model=settings.VERTEX_TEXT_MODEL,
-                    contents=[image_part, prompt],
-                )
-            record_tokens(resp, operation='image_product',
-                          prompt_preview=prompt[:500],
-                          response_preview=resp.text[:500] if resp.text else '')
-            result = resp.text.strip().strip('"').strip("'")
-            if result:
-                logger.info(f"Art Director env prompt: {result[:100]}...")
-                return result
-        except Exception as e:
-            logger.warning(f"Product style analysis failed (using fallback): {e}")
-        return _FALLBACK
-
-    def _bgswap_product(self, product_image_bytes: bytes, environment_prompt: str) -> tuple[bytes, bool]:
-        """Imagen 3 BGSWAP: mantiene el producto exacto y reemplaza el fondo con el entorno del Director de Arte.
-        Retorna (image_bytes, success). MASK_MODE_BACKGROUND para que Imagen 3 detecte el fondo automáticamente.
-        """
-        mime = _detect_mime(product_image_bytes)
-
-        def _call_edit_image():
-            client = _vertex_client()
-            with track_external_api('imagen3', operation='bgswap'):
-                return client.models.edit_image(
-                    model=settings.VERTEX_IMAGE_EDIT_MODEL,
-                    prompt=environment_prompt,
-                    reference_images=[
-                        types.RawReferenceImage(
-                            reference_image=types.Image(image_bytes=product_image_bytes, mime_type=mime),
-                            reference_id=1,
-                        ),
-                        types.MaskReferenceImage(
-                            reference_id=2,
-                            config=types.MaskReferenceConfig(
-                                mask_mode=types.MaskReferenceMode.MASK_MODE_BACKGROUND,
-                            ),
-                        ),
-                    ],
-                    config=types.EditImageConfig(
-                        edit_mode=types.EditMode.EDIT_MODE_BGSWAP,
-                        number_of_images=1,
-                        aspect_ratio='1:1',
-                    ),
-                )
-
-        try:
-            resp = call_with_429_retry(_call_edit_image, settings.VERTEX_IMAGE_EDIT_MODEL)
-            if resp.generated_images:
-                record_imagen_generation('bgswap')
-                logger.info("BGSWAP exitoso — producto sobre entorno premium")
-                return resp.generated_images[0].image.image_bytes, True
-            logger.warning("BGSWAP sin imágenes, usando foto original")
-        except Exception as e:
-            logger.warning(f"BGSWAP fallido (usando foto original): {e}")
-        return product_image_bytes, False
-
-    def _generate_svg_overlay(self, image_bytes: bytes, colors: list[str]) -> str:
-        """Gemini Iluminador: genera SVG de sombra/luz para armonizar el producto con el nuevo fondo."""
-        try:
-            client = _vertex_client()
-            mime = _detect_mime(image_bytes)
-            image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime)
-            primary = colors[0] if colors else '#ffffff'
-            prompt = (
-                f"Analyze this product advertising image. Generate an SVG transparent overlay (1080x1080) that:\n"
-                f"1. Adds ONLY a gentle ambient light gradient matching the scene's dominant light direction\n"
-                f"2. Applies a very soft color wash using {primary} at opacity 0.04-0.06 to harmonize\n\n"
-                f"Rules:\n"
-                f"- Use ONLY: <defs>, <rect>, <radialGradient>, <linearGradient> elements\n"
-                f"- NO shadow ellipses, NO dark blobs, NO ellipse elements\n"
-                f"- All fills must use opacity 0.10 or lower — barely visible, purely atmospheric\n"
-                f"- No solid opaque fills. SVG root has no background-color.\n"
-                f"- Return ONLY valid SVG starting with <svg and ending with </svg>. No markdown."
-            )
-            with track_external_api('gemini', operation='svg_overlay'):
-                resp = client.models.generate_content(
-                    model=settings.VERTEX_TEXT_MODEL,
-                    contents=[image_part, prompt],
-                )
-            record_tokens(resp, operation='svg_overlay',
-                          prompt_preview=prompt[:500],
-                          response_preview=resp.text[:500] if resp.text else '')
-            raw = resp.text.strip()
-            svg_match = re.search(r'<svg[\s\S]*?</svg>', raw, re.DOTALL)
-            if svg_match:
-                logger.info("SVG lighting overlay generado")
-                return svg_match.group()
-        except Exception as e:
-            logger.warning(f"SVG overlay fallido (omitiendo): {e}")
-        return ''
 
     _SCENE_FALLBACKS = [
         "warm coffee shop interior, wooden tables, ambient light, steam from cups, cozy atmosphere — no signs, no text",
@@ -641,8 +482,8 @@ class ImageGenerator:
             selected.pop()
         return ' '.join(selected) or clean[:25]
 
-    def _generate_post_content(self, caption: str, product_image_bytes: bytes = None, brand_context: str = '', business_url: str = '') -> dict:
-        """Gemini generates {headline, subtitle, cta, tag}. Multimodal if product_image_bytes provided."""
+    def _generate_post_content(self, caption: str, brand_context: str = '', business_url: str = '') -> dict:
+        """Gemini generates {headline, subtitle, cta, tag}."""
         _FALLBACK = {
             'headline': self._extract_headline(caption),
             'subtitle': _truncate_at_word_boundary(caption.strip()) if caption else '',
@@ -651,47 +492,24 @@ class ImageGenerator:
         }
         try:
             client = _vertex_client()
-            if product_image_bytes:
-                mime = _detect_mime(product_image_bytes)
-                image_part = types.Part.from_bytes(data=product_image_bytes, mime_type=mime)
-                prompt = (
-                    f"ADN de marca: {brand_context}\n"
-                    f"Caption del post (refleja la propuesta de la marca): \"{caption[:200]}\"\n\n"
-                    "Hay una imagen adjunta que se usará como FONDO VISUAL del post.\n"
-                    "Tu tarea: genera copy que comunique la propuesta de valor DE LA MARCA,\n"
-                    "usando la imagen como contexto o punto de conexión — NO como tema principal.\n"
-                    "Si la imagen conecta naturalmente con la marca, úsala. Si no, el copy habla de la marca\n"
-                    "y el visual simplemente acompaña.\n\n"
-                    "Genera 4 elementos:\n"
-                    "1. headline: 3-5 palabras. Frase gancho que represente la marca. Sin nombres de marca.\n"
-                    "2. subtitle: 8-15 palabras. Beneficio clave o propuesta de valor de la marca.\n"
-                    "3. cta: 2-4 palabras. Llamada a la acción acorde a la marca.\n"
-                    "4. tag: 1-3 palabras EN MAYÚSCULAS. Sector o categoría de la marca.\n\n"
-                    "REGLAS: Español impecable. Sin inventar palabras.\n"
-                    "Responde ÚNICAMENTE este JSON (sin markdown):\n"
-                    "{\"headline\":\"...\",\"subtitle\":\"...\",\"cta\":\"...\",\"tag\":\"...\"}"
-                )
-                contents = [image_part, prompt]
-            else:
-                ctx_line = f"ADN de marca: {brand_context}\n" if brand_context else ""
-                prompt = (
-                    f"{ctx_line}"
-                    f"Caption del post: \"{caption[:300]}\"\n\n"
-                    "Genera el contenido para un post de Instagram con estos 4 elementos:\n"
-                    "1. headline: 3-5 palabras. Frase gancho, memorable. Sin nombres de marca, URLs, hashtags.\n"
-                    "2. subtitle: 8-15 palabras. Amplía el headline con el beneficio clave. Español correcto.\n"
-                    "3. cta: 2-4 palabras. Llamada a la acción directa. (Ej: 'Empieza hoy', 'Solicita tu demo')\n"
-                    "4. tag: 1-3 palabras EN MAYÚSCULAS. Categoría del sector. (Ej: 'DISEÑO WEB', 'NUTRICIÓN')\n\n"
-                    "REGLAS: Español impecable. Sin inventar palabras. Sin duplicar letras.\n"
-                    "Responde ÚNICAMENTE este JSON (sin markdown):\n"
-                    "{\"headline\":\"...\",\"subtitle\":\"...\",\"cta\":\"...\",\"tag\":\"...\"}"
-                )
-                contents = prompt
+            ctx_line = f"ADN de marca: {brand_context}\n" if brand_context else ""
+            prompt = (
+                f"{ctx_line}"
+                f"Caption del post: \"{caption[:300]}\"\n\n"
+                "Genera el contenido para un post de Instagram con estos 4 elementos:\n"
+                "1. headline: 3-5 palabras. Frase gancho, memorable. Sin nombres de marca, URLs, hashtags.\n"
+                "2. subtitle: 8-15 palabras. Amplía el headline con el beneficio clave. Español correcto.\n"
+                "3. cta: 2-4 palabras. Llamada a la acción directa. (Ej: 'Empieza hoy', 'Solicita tu demo')\n"
+                "4. tag: 1-3 palabras EN MAYÚSCULAS. Categoría del sector. (Ej: 'DISEÑO WEB', 'NUTRICIÓN')\n\n"
+                "REGLAS: Español impecable. Sin inventar palabras. Sin duplicar letras.\n"
+                "Responde ÚNICAMENTE este JSON (sin markdown):\n"
+                "{\"headline\":\"...\",\"subtitle\":\"...\",\"cta\":\"...\",\"tag\":\"...\"}"
+            )
             def _call():
                 with track_external_api('gemini', operation='post_content'):
                     return client.models.generate_content(
                         model=settings.VERTEX_TEXT_MODEL,
-                        contents=contents,
+                        contents=prompt,
                         config=types.GenerateContentConfig(
                             system_instruction=(
                                 "Eres 'Cosmic', Director Creativo de Agente Cosmic. "
