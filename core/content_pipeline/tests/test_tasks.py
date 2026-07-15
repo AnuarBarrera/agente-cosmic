@@ -339,7 +339,7 @@ def test_backfill_image_task_skips_deleted_calendar(calendar_with_dna):
 )
 def test_generate_next_week_creates_posts_for_week_2(job_with_dna):
     calendar = ContentCalendar.objects.create(
-        brand_dna=job_with_dna.brand_dna, active_product_images=[], next_week_generating=True,
+        brand_dna=job_with_dna.brand_dna, next_week_generating=True,
     )
 
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
@@ -371,7 +371,7 @@ def test_generate_next_week_creates_posts_for_week_2(job_with_dna):
 def test_generate_next_week_does_not_collide_with_last_post_date(job_with_dna):
     from core.content_pipeline.tasks import MEXICO_TZ
     calendar = ContentCalendar.objects.create(
-        brand_dna=job_with_dna.brand_dna, active_product_images=[], next_week_generating=True,
+        brand_dna=job_with_dna.brand_dna, next_week_generating=True,
     )
     now_mexico = timezone.now().astimezone(MEXICO_TZ)
     # Simula que el dia 7 se programo "hoy" — igual que cuando el usuario responde
@@ -403,7 +403,7 @@ def test_generate_next_week_does_not_collide_with_last_post_date(job_with_dna):
 )
 def test_generate_next_week_resets_flag_even_on_failure(job_with_dna):
     calendar = ContentCalendar.objects.create(
-        brand_dna=job_with_dna.brand_dna, active_product_images=[], next_week_generating=True,
+        brand_dna=job_with_dna.brand_dna, next_week_generating=True,
     )
 
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText:

@@ -52,12 +52,6 @@ def test_calendar_has_7_posts(brand_dna):
         )
     assert calendar.posts.count() == 7
 
-
-def test_content_calendar_active_product_images_default(brand_dna):
-    calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
-    assert calendar.active_product_images == []
-
-
 def test_weekly_feedback_defaults(brand_dna):
     calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
     feedback = WeeklyFeedback.objects.create(calendar=calendar, week_number=1)

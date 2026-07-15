@@ -51,7 +51,6 @@ def test_cleanup_deletes_old_user_images(deactivated_user_old):
         email=deactivated_user_old.email, business_url='https://test.com',
         user=deactivated_user_old, status='done',
         logo_file_path='uploads/logo_test.jpg',
-        product_image_paths=['uploads/p1.jpg', 'uploads/p2.jpg'],
     )
 
     mock_bucket = MagicMock()
@@ -64,7 +63,6 @@ def test_cleanup_deletes_old_user_images(deactivated_user_old):
 
     job.refresh_from_db()
     assert job.logo_file_path == ''
-    assert job.product_image_paths == []
 
 
 def test_cleanup_skips_recent_deactivation(deactivated_user_recent):
@@ -72,7 +70,6 @@ def test_cleanup_skips_recent_deactivation(deactivated_user_recent):
         email=deactivated_user_recent.email, business_url='https://test.com',
         user=deactivated_user_recent, status='done',
         logo_file_path='uploads/logo_test.jpg',
-        product_image_paths=['uploads/p1.jpg'],
     )
 
     with patch('core.tenant_management.management.commands.cleanup_deactivated_images.storage.Client'):
@@ -80,4 +77,3 @@ def test_cleanup_skips_recent_deactivation(deactivated_user_recent):
 
     job.refresh_from_db()
     assert job.logo_file_path == 'uploads/logo_test.jpg'
-    assert job.product_image_paths == ['uploads/p1.jpg']

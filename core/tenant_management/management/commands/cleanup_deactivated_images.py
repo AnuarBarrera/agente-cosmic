@@ -41,31 +41,19 @@ class Command(BaseCommand):
                     blob.delete()
                     total_blobs += 1
 
-                for path_field in ('logo_file_path', 'product_image_path'):
-                    path = getattr(job, path_field)
-                    if path:
-                        full = os.path.join(settings.MEDIA_ROOT, path)
-                        if os.path.exists(full):
-                            os.remove(full)
+                if job.logo_file_path:
+                    full = os.path.join(settings.MEDIA_ROOT, job.logo_file_path)
+                    if os.path.exists(full):
+                        os.remove(full)
 
                 for path in (job.post_images_paths or []):
                     full = os.path.join(settings.MEDIA_ROOT, path)
                     if os.path.exists(full):
                         os.remove(full)
 
-                for path in (job.product_image_paths or []):
-                    full = os.path.join(settings.MEDIA_ROOT, path)
-                    if os.path.exists(full):
-                        os.remove(full)
-
                 job.logo_file_path = ''
-                job.product_image_path = ''
                 job.post_images_paths = []
-                job.product_image_paths = []
-                job.save(update_fields=[
-                    'logo_file_path', 'product_image_path',
-                    'post_images_paths', 'product_image_paths',
-                ])
+                job.save(update_fields=['logo_file_path', 'post_images_paths'])
                 total_jobs += 1
 
             logger.info(f'Cleaned images for user {user.email}')
