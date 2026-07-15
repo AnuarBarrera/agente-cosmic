@@ -3056,3 +3056,82 @@ Severidad: — (no es un bug, es una decisión de simplificación basada en
 Prioridad: — (cerrado). Ver memoria `project_quality_roadmap_ideas.md` para
   las próximas ideas de calidad que Anuar quiere explorar (reducir
   alucinación en reels, evaluar upgrade a Imagen 4).
+
+=================================================================
+HALLAZGO 66 — SSRF de segundo orden en download_post_image (B310)
+Categoría: Seguridad
+Estado: ✅ CORREGIDO — 2026-07-15
+=================================================================
+Contexto: 6ª ronda de análisis de seguridad (reporte externo, ver
+  `analisis.txt`) detectó vía Bandit (B310) que `download_post_image`
+  (`core/brand_dna/views.py`) llamaba `urllib.request.urlopen()` directo
+  sobre `post.image_url`/`post.video_url`/`post.image_urls` sin validar
+  esquema ni host. Estos campos hoy solo los llena el pipeline de
+  generación (Imagen/Veo → GCS), nunca input directo de usuario — pero
+  una segunda capa de defensa es barata y evita que un futuro cambio (o
+  una fila de BD comprometida) abra un SSRF/lectura de archivo local
+  (`file:///etc/passwd`) a través de un endpoint que hoy es de solo
+  proxy-descarga.
+
+Fix: `_is_gcs_url()` en `views.py` — exige `scheme == 'https'` y
+  `netloc == 'storage.googleapis.com'` (coincide exacto con
+  `blob.public_url` del SDK de GCS que usa Cosmic para subir imágenes/
+  reels/carruseles) antes de las 3 llamadas a `urlopen()`. URL fuera del
+  bucket → 404 (o se omite la slide, en el caso del carrusel).
+
+Verificación: 3 tests existentes actualizados a URLs realistas de GCS +
+  1 test nuevo (`test_download_post_image_blocks_non_gcs_url`) que
+  confirma 404 y que `urlopen` nunca se llama con una URL `file://`.
+  428/428 tests de la suite completa. Commit `294efce`.
+
+Severidad: High (según el reporte externo, por el impacto potencial de
+  SSRF en entornos cloud — explotabilidad real baja hoy, ver contexto).
+Prioridad: Cerrado.
+
+=================================================================
+HALLAZGO 67 — Dependencias muertas (moviepy, gtts) bloqueaban fix de CVE en click
+Categoría: Seguridad / infraestructura
+Estado: ✅ CORREGIDO — 2026-07-15
+=================================================================
+Contexto: Mismo reporte externo (ver `analisis.txt`) detectó `click==8.1.6`
+  vulnerable (`PYSEC-2026-2132`), recomendando subir a `>=8.3.3`. El
+  `requirements.txt` tenía un techo manual `click>=8.1.2,<8.2` que lo
+  impedía. Al intentar levantar ese techo, `pip install` falló:
+  `gtts 2.5.4 depends on click<8.2 and >=7.1` — era `gtts`, no `celery`
+  (que también está en requirements.txt pero tampoco se usa en el
+  código), quien forzaba el techo.
+
+Investigación (ver también `reporte.txt`, análisis independiente de por
+  qué las imágenes Docker de backend/rqworker pasaron de ~900MB a 3.7GB
+  cada una con el pipeline de Reels): `grep -rn "moviepy" core/` y
+  `grep -rn "gtts" core/` — CERO imports de ambos en todo el código.
+  `reel_generator.py` llama a ffmpeg directo por `subprocess.run()`, no
+  por moviepy; la narración de voz usa `gemini-2.5-flash-tts` de Vertex
+  AI, no gTTS. `moviepy` arrastraba además su propio binario de ffmpeg
+  redundante vía `imageio_ffmpeg` (77MB, nunca ejecutado) — el mismo
+  archivo que aparecía en los errores de "no space left on device"
+  durante el deploy del 2026-07-15 que forzó crecer el disco de la VM.
+
+Fix: se quitaron `moviepy==1.0.3` y `gtts==2.5.4` de `requirements.txt`,
+  y `click` subió a `>=8.3.3,<9.0` (quedó instalada `8.4.2`). `celery`
+  se dejó intacto — es otra dependencia sin uso real pero no estaba
+  bloqueando nada, no se tocó (fuera de alcance de este hallazgo).
+
+Resultado medido (no solo estimado): imágenes `agente-cosmic-backend` y
+  `agente-cosmic-rqworker` bajaron de 3.7GB a **2.64GB** cada una tras
+  rebuild — más ahorro del ~78MB/imagen estimado en `reporte.txt`,
+  probablemente por las dependencias transitivas de `gtts` además de
+  `moviepy`. 428/428 tests. Commit `d3bd00f`.
+
+Pendiente (no implementado, evaluado y diferido por el propio reporte):
+  separar `Dockerfile`/`Dockerfile.worker` para que backend no cargue
+  ffmpeg+códecs (731MB) ni `google-cloud-speech`, ya que backend nunca
+  ejecuta el pipeline de Reels (solo Playwright para renderizar posts).
+  Ahorro adicional estimado ~731MB solo en backend. Se difiere: agrega
+  mantenimiento (2 Dockerfiles que pueden divergir) y el disco de la VM
+  ya tiene margen (29GB, ~14GB libres tras el deploy de hoy) — no es
+  urgente. Ver `reporte.txt` sección 6 (opciones B/C) si se retoma.
+
+Severidad: Medium (CVE conocido en dependencia, explotabilidad depende
+  del vector específico de PYSEC-2026-2132 en el proyecto).
+Prioridad: Cerrado (fix A del reporte). Fix B/C explícitamente diferidos.
