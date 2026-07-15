@@ -128,23 +128,6 @@ def test_analyze_submit_enqueues_task(user):
     mock_rq.enqueue.assert_called_once()
 
 
-def test_analyze_submit_rejects_more_than_7_product_images(user):
-    from django.core.files.uploadedfile import SimpleUploadedFile
-    c = Client()
-    c.force_login(user)
-    images = [SimpleUploadedFile(f'p{i}.jpg', b'fake-bytes', content_type='image/jpeg') for i in range(8)]
-    with patch('core.brand_dna.views.django_rq') as mock_rq:
-        response = c.post('/analizar/', {
-            'business_name': 'Tu Web MX',
-            'business_description': 'Agencia digital que hace sitios web.',
-            'product_images': images,
-        })
-    assert response.status_code == 200
-    assert b'm\xc3\xa1ximo es 7' in response.content
-    mock_rq.enqueue.assert_not_called()
-    assert not AnalysisJob.objects.filter(user=user).exists()
-
-
 def test_status_api_returns_progress(user):
     c = Client()
     c.force_login(user)
@@ -442,13 +425,11 @@ def test_calendar_feedback_api_no_decision_does_not_generate(client, user, job_w
 def test_calendar_feedback_api_yes_triggers_generate_next_week(client, user, job_with_calendar):
     calendar = job_with_calendar.brand_dna.calendar
     client.force_login(user)
-    with patch('core.brand_dna.views.django_rq') as mock_rq, \
-         patch('core.brand_dna.views._update_active_product_images') as mock_update:
+    with patch('core.brand_dna.views.django_rq') as mock_rq:
         response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
             'rating': '5',
             'comment': '',
             'continue_decision': 'yes',
-            'image_choice': 'reuse',
         })
     assert response.status_code == 200
     data = response.json()
@@ -456,7 +437,6 @@ def test_calendar_feedback_api_yes_triggers_generate_next_week(client, user, job
 
     feedback = calendar.feedback_entries.get(week_number=1)
     assert feedback.continue_decision == WeeklyFeedback.CONTINUE_YES
-    mock_update.assert_called_once()
     mock_rq.enqueue.assert_called_once()
     enqueue_args = mock_rq.enqueue.call_args[0]
     assert enqueue_args[1] == str(calendar.id)
@@ -518,102 +498,6 @@ def test_calendar_feedback_api_invalid_continue_decision_returns_400(client, use
     assert feedback.continue_decision == WeeklyFeedback.CONTINUE_PENDING
     mock_gen.assert_not_called()
 
-
-def test_calendar_feedback_api_rejects_more_than_7_new_images(client, user, job_with_calendar):
-    from django.core.files.uploadedfile import SimpleUploadedFile
-    calendar = job_with_calendar.brand_dna.calendar
-    client.force_login(user)
-    images = [SimpleUploadedFile(f'p{i}.jpg', b'fake-bytes', content_type='image/jpeg') for i in range(8)]
-    with patch('core.brand_dna.views.django_rq') as mock_rq:
-        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
-            'rating': '5',
-            'comment': '',
-            'continue_decision': 'yes',
-            'image_choice': 'new',
-            'product_images': images,
-        })
-    assert response.status_code == 400
-    data = response.json()
-    assert 'máximo es 7' in data['error']
-    mock_rq.enqueue.assert_not_called()
-
-    feedback = calendar.feedback_entries.get(week_number=1)
-    assert feedback.continue_decision == WeeklyFeedback.CONTINUE_PENDING
-
-
-def test_update_active_product_images_reuse_pool_le_7(job_with_calendar):
-    from core.brand_dna.views import _update_active_product_images
-    from django.test import RequestFactory
-
-    job = job_with_calendar
-    job.product_image_paths = ['uploads/p1.jpg', 'uploads/p2.jpg']
-    job.save(update_fields=['product_image_paths'])
-    calendar = job.brand_dna.calendar
-    calendar.active_product_images = ['uploads/p1.jpg', 'uploads/p2.jpg']
-    calendar.save(update_fields=['active_product_images'])
-
-    request = RequestFactory().post('/', {'image_choice': 'reuse'})
-    _update_active_product_images(calendar, job, request, next_week=2)
-
-    calendar.refresh_from_db()
-    assert calendar.active_product_images == ['uploads/p1.jpg', 'uploads/p2.jpg']
-
-
-def test_update_active_product_images_reuse_pool_gt_7_with_selection(job_with_calendar):
-    from core.brand_dna.views import _update_active_product_images
-    from django.test import RequestFactory
-
-    job = job_with_calendar
-    pool = [f'uploads/p{i}.jpg' for i in range(1, 9)]  # 8 imágenes
-    job.product_image_paths = pool
-    job.save(update_fields=['product_image_paths'])
-    calendar = job.brand_dna.calendar
-
-    selected = pool[:5]
-    request = RequestFactory().post('/', {
-        'image_choice': 'reuse',
-        'selected_images': selected,
-    })
-    _update_active_product_images(calendar, job, request, next_week=2)
-
-    calendar.refresh_from_db()
-    assert calendar.active_product_images == selected
-
-
-def test_update_active_product_images_new_uploads(job_with_calendar, tmp_path, settings):
-    from core.brand_dna.views import _update_active_product_images
-    from django.test import RequestFactory
-    from django.core.files.uploadedfile import SimpleUploadedFile
-
-    settings.MEDIA_ROOT = str(tmp_path)
-    job = job_with_calendar
-    calendar = job.brand_dna.calendar
-
-    image1 = SimpleUploadedFile('product1.jpg', b'fake-bytes-1', content_type='image/jpeg')
-    image2 = SimpleUploadedFile('product2.png', b'fake-bytes-2', content_type='image/png')
-
-    request = RequestFactory().post('/', {
-        'image_choice': 'new',
-        'product_images': [image1, image2],
-    })
-    def mock_save_upload(file_bytes, path):
-        full_path = os.path.join(settings.MEDIA_ROOT, path)
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, 'wb') as f:
-            f.write(file_bytes)
-
-    with patch('core.brand_dna.views._validate_image_bytes', return_value=True), \
-         patch('core.brand_dna.views.save_upload', side_effect=mock_save_upload):
-        _update_active_product_images(calendar, job, request, next_week=2)
-
-    job.refresh_from_db()
-    calendar.refresh_from_db()
-
-    assert len(job.product_image_paths) == 2
-    assert calendar.active_product_images == job.product_image_paths
-    for path in calendar.active_product_images:
-        full = os.path.join(settings.MEDIA_ROOT, path)
-        assert os.path.exists(full)
 
 
 def test_privacy_policy_accessible_without_login():

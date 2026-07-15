@@ -165,33 +165,6 @@
     <h2 style="font-size:1.1rem;margin-bottom:4px;">¡Tu semana terminó! 🎉</h2>
     <p style="color:#aaa;font-size:0.85rem;margin-bottom:16px;">Genera tu contenido nuevo para la próxima semana. Tardamos unos minutos — te avisamos por correo cuando esté listo.</p>
 
-    <div style="margin-bottom:16px;">
-      <div style="font-size:0.85rem;color:#ccc;margin-bottom:10px;">Imágenes de producto para tu próxima semana <span style="color:#666;font-weight:400;">(opcional)</span></div>
-
-      <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;margin-bottom:8px;cursor:pointer;">
-        <input type="radio" name="image_choice" value="reuse" checked onchange="toggleImageMode()"> Reutilizar mis imágenes
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;margin-bottom:12px;cursor:pointer;">
-        <input type="radio" name="image_choice" value="new" onchange="toggleImageMode()"> Subir nuevas imágenes
-      </label>
-
-      {% if product_pool|length > 7 %}
-      <div id="image-gallery" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:8px;margin-bottom:12px;">
-        {% for img in product_pool %}
-        <label style="position:relative;cursor:pointer;">
-          <input type="checkbox" class="gallery-checkbox" value="{{ img }}" style="position:absolute;top:4px;left:4px;z-index:1;">
-          <img src="/media/{{ img }}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:2px solid transparent;" loading="lazy">
-        </label>
-        {% endfor %}
-      </div>
-      {% endif %}
-
-      <div id="image-upload-section" style="display:none;">
-        <input type="file" id="product-images-input" multiple accept="image/jpeg,image/png" style="font-size:0.82rem;color:#ccc;">
-        <p style="font-size:0.75rem;color:#666;margin-top:6px;">Hasta 7 imágenes.</p>
-      </div>
-    </div>
-
     <button onclick="submitFeedback('yes', this)" style="width:100%;padding:14px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:1rem;cursor:pointer;">Generar nueva semana →</button>
   </div>
   {% endif %}
@@ -448,45 +421,9 @@
 
 
 
-  function toggleImageMode() {
-    const mode = document.querySelector('input[name="image_choice"]:checked').value;
-    const gallery = document.getElementById('image-gallery');
-    const upload = document.getElementById('image-upload-section');
-    if (mode === 'new') {
-      if (gallery) gallery.style.display = 'none';
-      upload.style.display = 'block';
-    } else {
-      if (gallery) gallery.style.display = 'grid';
-      upload.style.display = 'none';
-    }
-  }
-
-  document.querySelectorAll('.gallery-checkbox').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const checked = document.querySelectorAll('.gallery-checkbox:checked');
-      if (checked.length > 7) {
-        cb.checked = false;
-        showToast('Máximo 7 imágenes', '#f0c040');
-      }
-    });
-  });
-
   async function submitFeedback(decision, btn) {
     const formData = new FormData();
     formData.append('continue_decision', decision);
-
-    const mode = document.querySelector('input[name="image_choice"]:checked').value;
-    formData.append('image_choice', mode);
-    if (mode === 'reuse') {
-      document.querySelectorAll('.gallery-checkbox:checked').forEach(cb => {
-        formData.append('selected_images', cb.value);
-      });
-    } else if (mode === 'new') {
-      const files = document.getElementById('product-images-input').files;
-      for (let i = 0; i < Math.min(files.length, 7); i++) {
-        formData.append('product_images', files[i]);
-      }
-    }
 
     const banner = document.getElementById('feedback-banner');
     const buttons = banner.querySelectorAll('button');

@@ -102,23 +102,6 @@
         <input type="file" name="logo" accept="image/*">
       </div>
 
-      <details class="extra-info">
-        <summary>
-          <span class="arrow">&#9654;</span>
-          ¿Quieres mejorar el resultado? Agrega más info
-          <span class="optional-badge">opcional</span>
-        </summary>
-        <div class="extra-body">
-          <div class="section-title" style="margin-top:16px;">Fotos de tu producto</div>
-          <div class="form-group">
-            <label>Sube hasta 7 fotos de tu producto <span style="color:#666;font-weight:400;">(cada dia usa una diferente)</span></label>
-            <input type="file" name="product_images" accept="image/*" multiple>
-            <small style="color:#666;font-size:0.8rem;margin-top:4px;display:block;">Ej: collar de plata, platillo del menu, prenda de ropa. Con 1 imagen se usa 2 dias; con 3-7 imagenes, una distinta por dia.</small>
-            <small style="color:#555;font-size:0.78rem;margin-top:2px;display:block;">Sube imágenes sin texto ni marcas de agua para mejores resultados.</small>
-          </div>
-        </div>
-      </details>
-
       <p style="text-align:center;color:#888;font-size:0.85rem;margin-top:20px;margin-bottom:4px;">Vamos a crear tu plan de contenido de siete días basado en tu marca.</p>
 
       <button type="submit" class="btn" id="submitBtn">
@@ -174,11 +157,9 @@
       text.textContent = 'Comprimiendo imagenes...';
 
       var logoInput = form.querySelector('[name="logo"]');
-      var prodInput = form.querySelector('[name="product_images"]');
 
       Promise.all([
         logoInput.files.length ? compressAll(logoInput.files) : Promise.resolve([]),
-        prodInput.files.length ? compressAll(prodInput.files) : Promise.resolve([]),
       ]).then(function(results) {
         var fd = new FormData();
         fd.append('csrfmiddlewaretoken', form.querySelector('[name="csrfmiddlewaretoken"]').value);
@@ -190,7 +171,6 @@
         });
 
         results[0].forEach(function(f) { fd.append('logo', f); });
-        results[1].forEach(function(f) { fd.append('product_images', f); });
 
         text.textContent = 'Analizando...';
 

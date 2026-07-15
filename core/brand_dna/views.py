@@ -105,12 +105,6 @@ def analyze_submit(request):
             'error': 'Ingresa el nombre y la descripción de tu negocio.',
         })
 
-    prod_files = request.FILES.getlist('product_images')
-    if len(prod_files) > 7:
-        return render(request, 'brand_dna/new_analysis.html', {
-            'error': f'Subiste {len(prod_files)} fotos de producto — el máximo es 7. Quita algunas e intenta de nuevo.',
-        })
-
     from core.brand_dna.moderation import check_business_legitimacy
     is_legit, _reason = check_business_legitimacy(business_name, business_description)
     if not is_legit:
@@ -137,21 +131,6 @@ def analyze_submit(request):
         save_upload(logo_bytes, logo_path)
         job.logo_file_path = logo_path
         job.save(update_fields=['logo_file_path'])
-
-    if prod_files:
-        prod_paths = []
-        for idx, prod_file in enumerate(prod_files):
-            prod_bytes = prod_file.read()
-            if not _validate_image_bytes(prod_bytes):
-                continue
-            ext = _safe_extension(prod_file.name)
-            prod_path = f'uploads/product_{job.id}_{idx}.{ext}'
-            save_upload(prod_bytes, prod_path)
-            prod_paths.append(prod_path)
-        if prod_paths:
-            job.product_image_paths = prod_paths
-            job.product_image_path = prod_paths[0]
-            job.save(update_fields=['product_image_path', 'product_image_paths'])
 
     from core.brand_dna.tasks import analyze_brand_task
     django_rq.enqueue(analyze_brand_task, str(job.id))
@@ -268,7 +247,6 @@ def calendar_review_view(request, job_id):
         'total_edits': total_edits,
         'can_create_calendar': can_create,
         'pending_feedback': pending_feedback,
-        'product_pool': job.product_image_paths,
     })
 
 
@@ -524,13 +502,6 @@ def calendar_feedback_api(request, job_id):
     if continue_decision not in (WeeklyFeedback.CONTINUE_YES, WeeklyFeedback.CONTINUE_NO):
         return JsonResponse({'error': 'Decisión inválida'}, status=400)
 
-    if continue_decision == WeeklyFeedback.CONTINUE_YES and request.POST.get('image_choice') == 'new':
-        prod_files = request.FILES.getlist('product_images')
-        if len(prod_files) > 7:
-            return JsonResponse({
-                'error': f'Subiste {len(prod_files)} fotos de producto — el máximo es 7. Quita algunas e intenta de nuevo.',
-            }, status=400)
-
     feedback.rating = rating
     feedback.comment = request.POST.get('comment', '')
     feedback.continue_decision = continue_decision
@@ -539,40 +510,11 @@ def calendar_feedback_api(request, job_id):
 
     if feedback.continue_decision == WeeklyFeedback.CONTINUE_YES:
         next_week = feedback.week_number + 1
-        _update_active_product_images(calendar, job, request, next_week)
         calendar.next_week_generating = True
         calendar.save(update_fields=['next_week_generating'])
         django_rq.enqueue(generate_next_week, str(calendar.id), next_week, job_timeout=2400)
 
     return JsonResponse({'status': 'ok', 'continue_decision': feedback.continue_decision})
-
-
-def _update_active_product_images(calendar, job, request, next_week):
-    choice = request.POST.get('image_choice', 'reuse')
-    if choice == 'new':
-        files = request.FILES.getlist('product_images')[:7]
-        new_paths = []
-        for idx, f in enumerate(files):
-            file_bytes = f.read()
-            if not _validate_image_bytes(file_bytes):
-                continue
-            ext = f.name.rsplit('.', 1)[-1].lower() if '.' in f.name else 'jpg'
-            path = f'uploads/product_{job.id}_w{next_week}_{idx}.{ext}'
-            save_upload(file_bytes, path)
-            new_paths.append(path)
-        if new_paths:
-            job.product_image_paths = job.product_image_paths + new_paths
-            job.save(update_fields=['product_image_paths'])
-            calendar.active_product_images = new_paths
-            calendar.save(update_fields=['active_product_images'])
-    elif choice == 'reuse':
-        pool = job.product_image_paths
-        if len(pool) > 7:
-            selected = request.POST.getlist('selected_images')[:7]
-            valid = [p for p in selected if p in pool]
-            if valid:
-                calendar.active_product_images = valid
-                calendar.save(update_fields=['active_product_images'])
 
 
 def _regenerate_caption(post, feedback: str) -> str:
