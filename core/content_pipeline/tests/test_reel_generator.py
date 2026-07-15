@@ -4,6 +4,7 @@ from django.test import override_settings
 from core.content_pipeline.generators.reel_generator import (
     _escape_drawtext, _wrap_text, _hex_to_ffmpeg_color, _measure_text_width,
     _build_hook_filter_parts, _build_cta_filter_parts, _CTA_FONTSIZE,
+    _readable_text_color,
 )
 
 
@@ -37,6 +38,20 @@ class TestHexToFfmpegColor:
 
     def test_handles_missing_hash(self):
         assert _hex_to_ffmpeg_color('002951') == '0x002951'
+
+
+class TestReadableTextColor:
+    def test_dark_background_gets_white_text(self):
+        # #1a1a2e es el fallback usado cuando una marca no tiene primary_colors —
+        # el mismo color que antes estaba hardcodeado como fontcolor, causando
+        # texto invisible sobre su propia caja cuando el color primario coincidia.
+        assert _readable_text_color('#1a1a2e') == 'white'
+
+    def test_light_background_gets_black_text(self):
+        assert _readable_text_color('#f5f5f5') == 'black'
+
+    def test_handles_hash_and_no_hash_prefix(self):
+        assert _readable_text_color('#1a1a2e') == _readable_text_color('1a1a2e')
 
 
 class TestMeasureTextWidth:
@@ -73,6 +88,7 @@ class TestBuildHookFilterParts:
         assert len(highlight_parts) == 1
         assert 'box=1' in highlight_parts[0]
         assert 'boxcolor=0x002951@1.0' in highlight_parts[0]
+        assert 'fontcolor=white' in highlight_parts[0]  # #002951 es oscuro, texto blanco para contraste
         assert last_label == 'hook0b'
 
     def test_wraps_long_hook_into_multiple_lines(self):
@@ -95,8 +111,13 @@ class TestBuildCtaFilterParts:
         assert "text='Compra ahora'" in parts[0]
         assert 'box=1' in parts[0]
         assert 'boxcolor=0x002951@1.0' in parts[0]
+        assert 'fontcolor=white' in parts[0]  # #002951 es oscuro, texto blanco para contraste
         assert "enable='between(t,21.0,24.0)'" in parts[0]
         assert last_label == 'cta0'
+
+    def test_light_primary_color_gets_black_text(self):
+        parts, _ = _build_cta_filter_parts('Compra ahora', '#f5f5f5', '0:v', 21.0, 24.0)
+        assert 'fontcolor=black' in parts[0]
 
     def test_scale_shrinks_fontsize_and_box_border(self):
         parts_full, _ = _build_cta_filter_parts('Compra ahora', '#002951', '0:v', 21.0, 24.0, scale=1.0)

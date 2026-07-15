@@ -116,6 +116,18 @@ def _hex_to_ffmpeg_color(hex_color: str) -> str:
     return '0x' + hex_color.lstrip('#')
 
 
+def _readable_text_color(hex_color: str) -> str:
+    # El texto resaltado del hook y el CTA se pintan sobre una caja del color
+    # primario de la marca — un fontcolor fijo asume que ese color siempre es
+    # oscuro (o siempre claro), lo cual no es cierto para marcas con paleta
+    # clara. Se calcula el brillo percibido (formula YIQ) del color de fondo
+    # y se elige texto blanco o negro segun contraste real.
+    hex_color = hex_color.lstrip('#')
+    r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    brightness = (r * 299 + g * 587 + b * 114) / 1000
+    return 'black' if brightness > 150 else 'white'
+
+
 def _write_tmp_png(tmp_dir: str, filename: str, data: bytes) -> str:
     path = os.path.join(tmp_dir, filename)
     with open(path, 'wb') as f:
@@ -166,6 +178,7 @@ def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color:
                               source_label: str, video_width: int = _VIDEO_WIDTH,
                               scale: float = 1.0) -> tuple[list[str], str]:
     box_color = _hex_to_ffmpeg_color(primary_color)
+    highlight_fontcolor = _readable_text_color(primary_color)
     fontsize = max(1, int(_HOOK_FONTSIZE * scale))
     line_height = int(_HOOK_LINE_HEIGHT * scale)
     top_y = int(_HOOK_TOP_Y * scale)
@@ -212,7 +225,7 @@ def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color:
         next_label = f'hook{i}b'
         filter_parts.append(
             f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{_escape_drawtext(highlight)}':"
-            f"fontsize={fontsize}:fontcolor=0x1a1a2e:box=1:boxcolor={box_color}@1.0:"
+            f"fontsize={fontsize}:fontcolor={highlight_fontcolor}:box=1:boxcolor={box_color}@1.0:"
             f"boxborderw={box_borderw}:x={cursor + box_borderw}:y={y}:"
             f"enable='{enable}'[{next_label}]"
         )
@@ -234,13 +247,14 @@ def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color:
 def _build_cta_filter_parts(cta_text: str, primary_color: str, source_label: str,
                              cta_start: float, duration: float, scale: float = 1.0) -> tuple[list[str], str]:
     box_color = _hex_to_ffmpeg_color(primary_color)
+    fontcolor = _readable_text_color(primary_color)
     fontsize = max(1, int(_CTA_FONTSIZE * scale))
     box_borderw = max(1, int(_CTA_BOX_BORDERW * scale))
     text = _escape_drawtext(_wrap_text(cta_text, max_chars=_CTA_MAX_CHARS))
     next_label = 'cta0'
     filter_part = (
         f"[{source_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{text}':"
-        f"fontsize={fontsize}:fontcolor=0x1a1a2e:box=1:boxcolor={box_color}@1.0:"
+        f"fontsize={fontsize}:fontcolor={fontcolor}:box=1:boxcolor={box_color}@1.0:"
         f"boxborderw={box_borderw}:x=(w-text_w)/2:y=(h-text_h)/2:"
         f"enable='between(t,{cta_start},{duration})'[{next_label}]"
     )
