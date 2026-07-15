@@ -2862,3 +2862,197 @@ Severidad: Alta (un negocio real se quedó sin su calendario, sin ningún
 Prioridad: Media — implementar el guard de staleness antes de la migración
   a GCP (producción corre continuamente, este tipo de recreate será más
   frecuente que en dev).
+
+=================================================================
+HALLAZGO 61 — Subtítulo de imagen duplicaba/truncaba el caption a media
+  palabra tras un 429 de Gemini, en vez de usar el fallback determinista
+Categoría: Bug / generación de imágenes / manejo de rate limits
+Estado: ✅ RESUELTO — 2026-07-14
+=================================================================
+Surfaceado por: Anuar reportó 2 posts reales con el mismo texto repetido dos
+  veces en la imagen (debajo del headline), uno de ellos cortado a media
+  palabra ("nuestr" en vez de "nuestra diferencia") y otro con un hashtag
+  ("#protip") colado en el subtítulo. Confirmado con logs reales: ambos días
+  coincidían exactamente con timestamps de `429 RESOURCE_EXHAUSTED` de la
+  API de Gemini.
+
+Causa raíz: `_generate_post_content()`/`_generate_carousel_slides_content()`
+  en `image_generator.py` NO usaban `call_with_429_retry` (el wrapper
+  genérico de reintento con backoff ya usado en las llamadas de
+  Imagen/Veo) — un 429 hacía caer directo al fallback, que truncaba el
+  caption con `caption[:120]` sin respetar límite de palabra, produciendo
+  cortes a media palabra y, en el caso del carrusel, arrastrando el hashtag
+  que el caption completo sí tenía pero el subtítulo de 120 caracteres no
+  debía mostrar.
+
+Fix: (1) ambos métodos ahora envuelven la llamada a Gemini con
+  `call_with_429_retry`, igual que Imagen/Veo. (2) nuevo helper
+  `_truncate_at_word_boundary(text, max_len=120)` reemplaza el slice crudo —
+  corta en el último espacio antes del límite y agrega "…", nunca a media
+  palabra.
+
+Severidad: Media (no bloqueaba al usuario, pero el output se veía roto/poco
+  profesional en exactamente los días con más tráfico de API — carga alta
+  correlaciona con más 429s).
+Prioridad: — (resuelto). Implementado directo sin brainstorm por pedido
+  explícito de Anuar ("implementalo directo claude").
+
+=================================================================
+HALLAZGO 62 — 3 de los 7 pilares de contenido rotatorios (días 3, 4, 7)
+  pedían datos que Cosmic no recolecta ni puede inferir
+Categoría: Bug de diseño / calidad de contenido
+Estado: ✅ RESUELTO — 2026-07-14
+=================================================================
+Surfaceado por: revisión directa de `CONTENT_PILLARS` en `text_generator.py`
+  durante brainstorming — el pilar de día 3 pedía "prueba social" (testimonio
+  de cliente real, dato que Cosmic no tiene), día 4 pedía contenido "detrás
+  de cámaras" (requiere fotos/video reales del negocio) y día 7 pedía una
+  "historia de marca" con hechos específicos no capturados en el Brand DNA.
+  El prompt de carrusel del día 3 estaba además hardcodeado a "prueba
+  social/testimonio", generando contenido inventado (riesgo de alucinación
+  de datos falsos: nombres de clientes, cifras) para llenar el vacío.
+
+Causa raíz: los pilares se diseñaron pensando en un negocio con historial
+  de redes sociales real, pero Cosmic genera desde cero solo con la
+  descripción que el usuario da al registrarse — no hay testimonios,
+  fotos de "detrás de cámaras" ni hechos de historia de marca disponibles
+  sin pedirle más información al usuario (explícitamente fuera de alcance:
+  "sin pedir más info a los usuarios").
+
+Fix: los 3 pilares se reemplazaron por ángulos que SÍ rinden con la
+  información ya disponible: "Antes y después" (día 3), "Beneficio en
+  profundidad" (día 4), "Conexión emocional" (día 7). El prompt del
+  carrusel se generalizó de "prueba social/testimonio" a una transformación
+  narrada desde la voz de la marca (nunca desde un cliente inventado),
+  con instrucción explícita de no inventar cifras/nombres verificables.
+
+Severidad: Media (contenido genérico o con riesgo de alucinación de datos,
+  no un fallo funcional).
+Prioridad: — (resuelto).
+
+=================================================================
+HALLAZGO 63 — Toggle de tester para reels/carrusel: construido y revertido
+  el mismo día tras evidencia de que ya no era necesario
+Categoría: Decisión de producto / deuda de código evitada
+Estado: ✅ REVERTIDO POR COMPLETO — 2026-07-14
+=================================================================
+Contexto: la mañana del 2026-07-14 el pipeline de reels/carrusel tenía bugs
+  reales activos (timeout de Veo sin límite — HALLAZGO 59 — fallback de
+  subtítulo roto — HALLAZGO 61 — prompt de carrusel atado a "prueba social"
+  — HALLAZGO 62). Se construyó un toggle self-service
+  (`User.reels_enabled`/`carousel_enabled`, vista, UI en el dashboard) para
+  que testers pudieran apagar reels/carrusel individualmente como freno de
+  emergencia mientras esos bugs se arreglaban.
+
+Qué cambió: los 3 bugs que motivaron el toggle se arreglaron ESE MISMO DÍA
+  (HALLAZGOS 59, 61, 62), y Anuar probó el pipeline ya arreglado con
+  resultados mucho mejores ("reel casi tipo comercial", contenido menos
+  genérico). Con la causa raíz resuelta, el toggle dejó de tener propósito:
+  la diferenciación entre tipos de usuario no necesitaba ser por feature
+  flag, podía volver a ser por límite de uso (`Plan.max_calendars_per_week`,
+  sistema ya existente y sin tocar).
+
+Decisión: reversión COMPLETA, no solo desactivación — se eliminó la UI
+  (vista, URL, sección del dashboard), la lógica de negocio en `tasks.py`
+  (`_disable_reel_and_carousel_for_tester_preference` y sus 2 call sites), Y
+  los campos de modelo (`reels_enabled`/`carousel_enabled` en `User`) con su
+  migración de `RemoveField`. Decisión explícita de Anuar de no dejar
+  esquema muerto "por si se necesita después" — los códigos de invitación
+  (`COSMIC-XXXXXX`) para asignar el grupo `tester` NO se tocaron, eso sigue
+  igual.
+
+Severidad: — (no es un bug, es disciplina de no acumular código sin
+  propósito).
+Prioridad: — (cerrado). Lección para el roadmap: antes de construir un
+  freno de emergencia por un bug activo, vale la pena preguntar si arreglar
+  la causa raíz elimina la necesidad del freno.
+
+=================================================================
+HALLAZGO 64 — CTA/headline/subtítulo y caption podían invitar a "visitar
+  nuestro sitio web" cuando el negocio no tiene sitio web registrado
+Categoría: Bug / seguridad de contenido / confianza del usuario final
+Estado: ✅ RESUELTO — 2026-07-14
+=================================================================
+Surfaceado por: brainstorming preventivo (no un reporte de Anuar) al revisar
+  el flujo de generación de copy — `business_url` es opcional en el
+  formulario de alta, pero ni `image_generator.py` ni `text_generator.py`
+  verificaban su presencia antes de dejar que Gemini generara CTAs tipo
+  "Visita nuestra página" o menciones de "nuestro sitio web".
+
+Causa raíz: el copy se genera sin contexto de si `business_url` está vacío
+  o no — Gemini, sin instrucción explícita, tiende a usar frases genéricas
+  de marketing que asumen que todo negocio tiene sitio web.
+
+Fix: (1) `_WEB_VISIT_PATTERN` (regex determinista) +
+  `_sanitize_web_visit_mention(text, business_url, fallback)` en
+  `image_generator.py` — si no hay `business_url` y el texto generado
+  menciona visitar un sitio, se reemplaza por un fallback seguro. Aplicado
+  a CTA, headline y subtítulo de posts y de cada slide de carrusel. (2) el
+  QC de seguridad de captions ya existente en `text_generator.py`
+  (`_SAFETY_QC_PROMPT`/`_validate_caption_safety`, antes solo activo para
+  nichos sensibles) se extendió con un flag `has_website_mention` y ahora
+  también se dispara cuando `business_url` está vacío, sin importar el
+  nicho — la decisión de si es un problema se computa en Python
+  (`ok = False si not business_url and has_website_mention`), no se deja
+  a criterio del LLM.
+
+Severidad: Media (prometer un sitio web que no existe rompe la confianza del
+  cliente final del negocio, no solo un detalle cosmético).
+Prioridad: — (resuelto).
+
+=================================================================
+HALLAZGO 65 — Carga de fotos de producto (BGSWAP de Imagen 3): eliminada
+  por completo tras evidencia real de baja calidad y fricción
+Categoría: Decisión de producto / calidad de contenido
+Estado: ✅ ELIMINADO POR COMPLETO — 2026-07-15
+=================================================================
+Contexto: Cosmic permitía subir hasta 7 fotos de producto para que Imagen 3
+  BGSWAP compusiera el producto real sobre un fondo generado por IA
+  (pipeline agéntico de 3 pasos: Director de Arte → BGSWAP → Iluminador SVG
+  — ver historial en memoria `project_cosmic_v2_features.md`, sección ya
+  marcada como eliminada).
+
+Evidencia que motivó la eliminación: (1) baja tasa de éxito real — un caso
+  concreto ("el perro rebelde") tuvo solo 2 de 7 resultados aceptables. (2)
+  un usuario ("Jorge") subió fotos con marca de agua/watermark que se filtró
+  hacia las imágenes generadas por BGSWAP, y desistió por completo de la
+  feature tras verlo. (3) un bug de rotación EXIF sin corregir (HALLAZGO 52,
+  ya arreglado antes) mostraba que la feature seguía siendo frágil incluso
+  después de fixes. (4) la feature agregaba fricción real al formulario de
+  alta ("¿Quieres mejorar el resultado? Agrega más info") prometiendo
+  "mejores resultados" que en la práctica no entregaba de forma confiable.
+
+Decisión de Anuar: eliminar por completo (no solo ocultar/desactivar) hasta
+  que exista una forma confiable de insertar el producto real dentro del
+  post generado — textualmente: "si un día logramos hacer que el producto
+  sea usado por el sujeto dentro del post entonces sí valdría la pena,
+  mientras creo que es mejor quitarlo".
+
+Alcance de la eliminación (4 tareas, spec+plan+implementación vía agentes
+  externos, cada una verificada con evidencia propia): formulario y JS de
+  subida (`new_analysis.html`, `calendar_review.html`), vistas de intake
+  (`analyze_submit`, `calendar_feedback_api`, `_update_active_product_images`
+  — eliminada por completo), lógica de mapeo por día en `tasks.py`
+  (`_load_product_images`, `_product_image_for_day`,
+  `_disable_carousel_if_full_product_week` — las 3 eliminadas), el pipeline
+  BGSWAP completo en `image_generator.py` (`_generate_product_scene`,
+  `_analyze_product_style`, `_bgswap_product`, `_generate_svg_overlay` — los
+  4 métodos eliminados), campos de BD (`AnalysisJob.product_image_path`/
+  `product_image_paths`, `ContentCalendar.active_product_images`, con sus
+  migraciones `RemoveField`), el comando `cleanup_deactivated_images.py`, y
+  el copy de `privacy.html`. El logo de marca (`logo_file_path`) NO se tocó
+  — feature separada, sigue activa. Los archivos ya subidos por usuarios
+  quedan huérfanos en storage sin borrarse (decisión explícita: no es una
+  acción destructiva urgente).
+
+Verificación: 427/427 tests de la suite completa del proyecto en verde tras
+  las 4 tareas, `makemigrations --check --dry-run` limpio, sin ninguna
+  referencia residual a `product_image_path`/`product_image_paths`/
+  `active_product_images`/`product_images` en todo el codebase fuera de
+  migraciones históricas.
+
+Severidad: — (no es un bug, es una decisión de simplificación basada en
+  evidencia de uso real).
+Prioridad: — (cerrado). Ver memoria `project_quality_roadmap_ideas.md` para
+  las próximas ideas de calidad que Anuar quiere explorar (reducir
+  alucinación en reels, evaluar upgrade a Imagen 4).
