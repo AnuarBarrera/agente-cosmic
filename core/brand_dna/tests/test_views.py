@@ -256,6 +256,8 @@ def test_mark_published_is_idempotent(client, user, job_with_calendar):
 
 def test_download_post_image_returns_attachment(client, user, job_with_calendar):
     post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
+    post.image_url = 'https://storage.googleapis.com/agente-cosmic-assets/img.jpg'
+    post.save(update_fields=['image_url'])
     client.force_login(user)
     fake_response = MagicMock()
     fake_response.read.return_value = b'fake-image-bytes'
@@ -268,11 +270,25 @@ def test_download_post_image_returns_attachment(client, user, job_with_calendar)
     assert response.content == b'fake-image-bytes'
 
 
+def test_download_post_image_blocks_non_gcs_url(client, user, job_with_calendar):
+    post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
+    post.image_url = 'file:///etc/passwd'
+    post.save(update_fields=['image_url'])
+    client.force_login(user)
+    with patch('urllib.request.urlopen') as mock_urlopen:
+        response = client.get(f'/api/post/{post.id}/download/')
+    assert response.status_code == 404
+    mock_urlopen.assert_not_called()
+
+
 def test_download_post_image_returns_zip_for_carousel(client, user, job_with_calendar):
     import zipfile
     post = job_with_calendar.brand_dna.calendar.posts.get(day_number=3)
     post.format = 'carousel'
-    post.image_urls = ['https://example.com/slide1.png', 'https://example.com/slide2.png']
+    post.image_urls = [
+        'https://storage.googleapis.com/agente-cosmic-assets/slide1.png',
+        'https://storage.googleapis.com/agente-cosmic-assets/slide2.png',
+    ]
     post.save(update_fields=['format', 'image_urls'])
     client.force_login(user)
 
@@ -530,7 +546,7 @@ def test_ga4_tag_absent_when_measurement_id_empty(settings):
 def test_download_post_image_returns_mp4_for_reel(client, user, job_with_calendar):
     post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
     post.format = 'reel'
-    post.video_url = 'https://example.com/reel.mp4'
+    post.video_url = 'https://storage.googleapis.com/agente-cosmic-assets/reel.mp4'
     post.save(update_fields=['format', 'video_url'])
     client.force_login(user)
     fake_response = MagicMock()

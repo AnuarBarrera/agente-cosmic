@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time as _time
+from urllib.parse import urlparse
 import django_rq
 import google.genai as genai
 from PIL import Image
@@ -24,6 +25,13 @@ _ALLOWED_TONES = ('formal', 'casual', 'inspiracional', 'urgente', 'profesional',
 _BRAND_DNA_EDITABLE_FIELDS = {'description', 'audience', 'tone', 'keywords', 'primary_colors'}
 _BRAND_DNA_REANALYZABLE_FIELDS = {'description', 'audience', 'keywords', 'primary_colors'}
 _HEX_COLOR_RE = re.compile(r'^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$')
+
+
+def _is_gcs_url(url: str) -> bool:
+    if not url:
+        return False
+    parsed = urlparse(url)
+    return parsed.scheme == 'https' and parsed.netloc == 'storage.googleapis.com'
 
 
 def _safe_extension(filename: str) -> str:
@@ -300,6 +308,8 @@ def download_post_image(request, post_id):
         raise Http404
 
     if post.format == ContentPost.FORMAT_REEL and post.video_url:
+        if not _is_gcs_url(post.video_url):
+            raise Http404
         try:
             with urllib.request.urlopen(post.video_url, timeout=30) as resp:
                 data = resp.read()
@@ -315,6 +325,8 @@ def download_post_image(request, post_id):
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
             for i, slide_url in enumerate(post.image_urls, start=1):
+                if not _is_gcs_url(slide_url):
+                    continue
                 try:
                     with urllib.request.urlopen(slide_url, timeout=15) as resp:
                         zf.writestr(f'slide-{i}.png', resp.read())
@@ -326,6 +338,8 @@ def download_post_image(request, post_id):
         response['Content-Disposition'] = f'attachment; filename="post-dia-{post.day_number}-carrusel.zip"'
         return response
 
+    if not _is_gcs_url(post.image_url):
+        raise Http404
     try:
         with urllib.request.urlopen(post.image_url, timeout=15) as resp:
             data = resp.read()
