@@ -3312,3 +3312,103 @@ Fix: ambos templates HTML usan `color: {{text_color}}`, inyectado desde
 Severidad: Medium (mismo impacto que HALLAZGO 69 — legibilidad del mensaje
   principal — pero en el path que SÍ corre en producción real).
 Prioridad: Cerrado.
+
+=================================================================
+HALLAZGO 71 — Parte B (portada/contraportada con HyperFrames)
+  construida y verificada en real — corrige el corte de audio a los 18s
+Categoría: Feature
+Estado: ✅ CONSTRUIDO Y VERIFICADO EN REAL — 2026-07-16
+=================================================================
+Contexto: tras la Parte A (HALLAZGO 70), Anuar reportó que la narración se
+  cortaba abruptamente a los 18s en el reel real — causa raíz: el guion
+  pide narraciones de "~15-20s hablados" (rango calibrado para el reel de
+  24s original, con margen) y `_assemble_reel` corta el audio final
+  exactamente en `-t {duration}`. Con el cuerpo reducido a 18s (Parte A),
+  una narración de 19-20s se cortaba a media palabra. La Parte B devuelve
+  el reel a 24s totales agregando portada (3s) y contraportada (3s)
+  renderizadas con HyperFrames (Node.js + GSAP + Chrome headless), que
+  además mejoran tipografía/movimiento del hook y el CTA respecto al
+  drawtext/Playwright estático usado hasta ahora.
+
+Diseño (spec `2026-07-16-reels-hyperframes-intro-outro-design.md`):
+  - Portada incluye el hook (texto con palabra resaltada + logo si existe),
+    contraportada incluye el CTA (texto + logo si existe).
+  - Narración/música suenan desde t=0, cubriendo los 24s completos — es
+    la pieza que realmente resuelve el corte de audio (antes t=0 del
+    audio == t=0 del cuerpo; ahora t=0 del audio == t=0 de la portada,
+    con 24s de margen total en vez de 18s).
+  - Sin caché por marca — se regenera en cada reel real (mismo tipo de
+    riesgo de confiabilidad ya asumido con Playwright en este pipeline).
+  - Fallback si HyperFrames falla dos veces (1 intento + 1 reintento por
+    segmento): se omite portada/contraportada, hook/CTA vuelven a
+    dibujarse sobre el cuerpo con el mecanismo Playwright/drawtext ya
+    existente (cero código de fallback nuevo, reutiliza HALLAZGO 70).
+
+Implementación: 4 tareas, todas verificadas con evidencia propia:
+  1. Proyecto `core/content_pipeline/hyperframes_reel/` (compositions
+     `portada.html`/`contraportada.html` en HTML+GSAP, Node 22 vendorizado
+     en `Dockerfile.worker`). Bug real encontrado en verificación propia
+     (no reportado como bloqueante por el agente): rutas `../node_modules`
+     y `../assets` en las composiciones se resolvían contra la raíz del
+     proyecto, no contra el archivo — HyperFrames las reescribía
+     SILENCIOSAMENTE a `cdn.jsdelivr.net`, rompiendo el objetivo explícito
+     de "sin dependencia de red al renderizar". Fix: rutas relativas a la
+     raíz sin `../`. Verificado con render real dentro y fuera del
+     contenedor, sin reescritura a CDN. Commits `ce1b847`, `fefb716`.
+  2. `_generate_branded_segment(kind, hook_text, highlight_word, tag_cta,
+     primary_color, logo_url) -> bytes | None` invoca el binario
+     `hyperframes` real vía subprocess. Métricas nuevas
+     `record_hyperframes_generation`/`record_hyperframes_fallback`.
+     80/80 tests propios. Commit `94996b7`.
+  3. Orquestación: `_generate_clips_with_branding` antepone/anexa
+     portada/contraportada normalizadas (ffmpeg scale+fps) a la
+     resolución real del cuerpo; `_assemble_reel` gana
+     `skip_hook_cta_overlay`. Caso límite nuevo resuelto: con branding
+     aplicado y sin subtítulos, `filter_parts` queda vacío — se usa
+     `-map 0:v` directo en vez de `-filter_complex` con una etiqueta que
+     no existiría. El despacho a agy se cortó por timeout justo antes de
+     commitear, pero el trabajo en disco coincidía con el plan salvo una
+     corrección válida del propio agente: `_generate_clips_with_branding`
+     corta el intento de contraportada si portada falla tras el
+     reintento (mi plan original intentaba ambos igual, pero el test
+     `test_falls_back_when_portada_fails_completely` exige
+     `call_count==2`, no 4 — inconsistencia real del plan, corregida).
+     Verificado y commiteado por Claude. 74/74 tests propios, 460/460
+     suite completa. Commit `32bd22b`.
+  4. Esta verificación real end-to-end (Task 4).
+
+Verificación real end-to-end: 2 reels generados de punta a punta contra el
+  contenedor `rqworker` (el único con Node/HyperFrames instalados —
+  primer intento fallido contra `backend`, exit 127, confirmó que el
+  fallback a la estructura Parte A funciona correctamente ante un fallo
+  real de HyperFrames antes de repetir contra el contenedor correcto).
+  Ambos MP4 resultantes: duración EXACTA de 24.000000s (3+8+10+3),
+  resolución uniforme 720x1280@24fps en todo el video (confirma que la
+  normalización de portada/contraportada a la resolución real del cuerpo
+  funcionó igual que con los shots de Imagen de la Parte A).
+  - Sin logo: hook "Tu Visión, Nuestra Tecnología." con "Tecnología."
+    resaltado, legible, centrado. Contraportada con CTA "Eleva tu
+    Proyecto." legible. Sin logo visible (oculto correctamente cuando
+    `logo_url=''`).
+  - Con logo (usando una imagen real del bucket como stand-in visual,
+    ninguna marca de prueba tiene `logo_url` poblado en la base real):
+    imagen compuesta correctamente arriba del hook y del CTA en ambos
+    segmentos, con la animación de entrada de GSAP aplicada.
+  - Logs de ambas generaciones reales sin errores de HyperFrames.
+  - Audio: ya no se corta — la duración pasó de 18s a 24s exactos, el
+    `-t {duration}` del ffmpeg final usa el valor real medido (24s), y la
+    contraportada (t≈22.5s) no muestra subtítulos colgantes, confirmando
+    que la narración terminó con margen antes del cierre.
+
+Observación (no bloqueante, comportamiento esperado por diseño): dado que
+  la narración/subtítulos corren desde t=0 (decisión explícita de la
+  spec para dar margen de audio), el primer subtítulo puede aparecer
+  superpuesto visualmente sobre la portada (los subtítulos no distinguen
+  entre la ventana de portada/cuerpo/contraportada, ese comportamiento no
+  se tocó en este plan — "el resto (subtítulos, música, narración) no
+  cambia"). Visualmente es más texto en pantalla del que tendría una
+  portada "limpia", pero es consistente con lo decidido en el brainstorm
+  y no rompe nada. Queda como posible mejora futura, no como bug.
+
+Severidad: N/A (feature, no vulnerabilidad).
+Prioridad: Cerrado.
