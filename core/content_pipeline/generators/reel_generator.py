@@ -1,5 +1,6 @@
 import base64
 import html as _html
+import json
 import logging
 import os
 import re
@@ -17,6 +18,7 @@ from core.shared.metrics_utils import (
     track_external_api, record_tokens, record_veo_generation,
     record_lyria_generation, record_tts_generation,
     record_playwright_overlay_fallback, record_imagen_generation,
+    record_hyperframes_generation, record_hyperframes_fallback,
 )
 from core.shared.rate_limiter import call_with_429_retry
 from core.content_pipeline.generators.subtitle_generator import SubtitleGenerator
@@ -49,6 +51,14 @@ _DRAWTEXT_FONT_PATH = os.path.normpath(os.path.join(
 _VIDEO_HEIGHT = 1920  # alto fijo del canvas de Playwright (viewport 1080x1920)
 
 _DEFAULT_CLIP_FPS = 24.0  # usado solo cuando no hay clip real de Veo del cual medir fps
+
+_BRANDED_SEGMENT_DURATION_SECONDS = 3.0
+_HYPERFRAMES_PROJECT_DIR = os.path.normpath(os.path.join(
+    os.path.dirname(__file__), '..', 'hyperframes_reel',
+))
+_HYPERFRAMES_BINARY = os.path.join(_HYPERFRAMES_PROJECT_DIR, 'node_modules', '.bin', 'hyperframes')
+_HYPERFRAMES_TIMEOUT_SECONDS = 120
+
 
 _OVERLAY_TEMPLATE_MAP = {'hook': 'reel_hook.html', 'cta': 'reel_cta.html'}
 
@@ -127,6 +137,18 @@ def _readable_text_color(hex_color: str) -> str:
     r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
     brightness = (r * 299 + g * 587 + b * 114) / 1000
     return 'black' if brightness > 150 else 'white'
+
+
+def _split_highlight(text: str, highlight_word: str) -> tuple[str, str, str]:
+    if not highlight_word:
+        return text, '', ''
+    idx = text.lower().find(highlight_word.lower())
+    if idx == -1:
+        return text, '', ''
+    before = text[:idx]
+    highlight = text[idx:idx + len(highlight_word)]
+    after = text[idx + len(highlight_word):]
+    return before, highlight, after
 
 
 def _write_tmp_png(tmp_dir: str, filename: str, data: bytes) -> str:
@@ -365,6 +387,42 @@ class ReelGenerator:
         if still is None:
             return None
         return self._animate_still_to_clip(still, width, height, fps, duration=duration)
+
+    def _generate_branded_segment(self, kind: str, hook_text: str, highlight_word: str,
+                                   tag_cta: str, primary_color: str, logo_url: str) -> bytes | None:
+        text_color = _readable_text_color(primary_color)
+        if kind == 'portada':
+            before, highlight, after = _split_highlight(hook_text, highlight_word)
+            variables = {
+                'hook_before': before, 'hook_highlight': highlight, 'hook_after': after,
+                'primary_color': primary_color, 'text_color': text_color, 'logo_url': logo_url,
+            }
+            composition = 'compositions/portada.html'
+        else:
+            variables = {
+                'cta_text': tag_cta, 'primary_color': primary_color,
+                'text_color': text_color, 'logo_url': logo_url,
+            }
+            composition = 'compositions/contraportada.html'
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vars_path = os.path.join(tmp, 'vars.json')
+            with open(vars_path, 'w') as f:
+                json.dump(variables, f)
+            output_path = os.path.join(tmp, 'output.mp4')
+            try:
+                subprocess.run(
+                    [_HYPERFRAMES_BINARY, 'render', '.', '-c', composition,
+                     '-o', output_path, '--variables-file', vars_path, '--fps', '24', '--quiet'],
+                    cwd=_HYPERFRAMES_PROJECT_DIR, check=True, capture_output=True,
+                    timeout=_HYPERFRAMES_TIMEOUT_SECONDS,
+                )
+            except Exception as e:
+                logger.warning(f"HyperFrames {kind} generation failed: {e}")
+                return None
+            record_hyperframes_generation(kind)
+            with open(output_path, 'rb') as f:
+                return f.read()
 
     def _generate_video_clips(self, scene_prompts: list[str]) -> list[bytes]:
         # scene_prompts[0] va a Veo (video real, _VEO_CLIP_DURATION_SECONDS=8s).

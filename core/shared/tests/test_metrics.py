@@ -100,3 +100,44 @@ class TestRecordPlaywrightOverlayFallback:
 
         assert increments.get('reel_playwright_fallback_cta_total', 0) == 1
 
+
+class TestRecordHyperframesGeneration:
+    def test_records_generation_for_portada(self):
+        from core.shared.metrics_utils import record_hyperframes_generation
+        increments = {}
+
+        def fake_redis_inc(key, amount=1.0):
+            increments[key] = increments.get(key, 0) + amount
+
+        with patch('core.shared.metrics_utils._redis_inc', side_effect=fake_redis_inc):
+            record_hyperframes_generation('portada')
+
+        assert increments.get('reel_hyperframes_portada_total', 0) == 1
+
+    def test_records_generation_for_contraportada(self):
+        from core.shared.metrics_utils import record_hyperframes_generation
+        increments = {}
+
+        def fake_redis_inc(key, amount=1.0):
+            increments[key] = increments.get(key, 0) + amount
+
+        with patch('core.shared.metrics_utils._redis_inc', side_effect=fake_redis_inc):
+            record_hyperframes_generation('contraportada')
+
+        assert increments.get('reel_hyperframes_contraportada_total', 0) == 1
+
+
+class TestRecordHyperframesFallback:
+    def test_records_fallback(self):
+        from core.shared.metrics_utils import record_hyperframes_fallback
+        increments = {}
+
+        def fake_redis_inc(key, amount=1.0):
+            increments[key] = increments.get(key, 0) + amount
+
+        with patch('core.shared.metrics_utils._redis_inc', side_effect=fake_redis_inc):
+            record_hyperframes_fallback()
+
+        assert increments.get('reel_hyperframes_fallback_total', 0) == 1
+
+

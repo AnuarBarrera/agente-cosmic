@@ -143,6 +143,17 @@ def record_playwright_overlay_fallback(element: str):
     _redis_inc(f'reel_playwright_fallback_{element}_total')
 
 
+def record_hyperframes_generation(kind: str):
+    """Registra una generacion exitosa de portada/contraportada via HyperFrames."""
+    _redis_inc(f'reel_hyperframes_{kind}_total')
+
+
+def record_hyperframes_fallback():
+    """Registra que portada/contraportada fallaron y el reel cayo a la estructura sin marca (Parte A)."""
+    _redis_inc('reel_hyperframes_fallback_total')
+
+
+
 def _classify_error(exc: Exception) -> str:
     msg = str(exc).lower()
     if 'timeout' in msg or 'timed out' in msg:

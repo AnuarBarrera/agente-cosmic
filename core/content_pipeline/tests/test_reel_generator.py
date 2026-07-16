@@ -1,5 +1,8 @@
 from unittest.mock import patch, MagicMock, call
 from django.test import override_settings
+import json
+import subprocess
+
 
 from core.content_pipeline.generators.reel_generator import (
     _escape_drawtext, _wrap_text, _hex_to_ffmpeg_color, _measure_text_width,
@@ -52,6 +55,34 @@ class TestReadableTextColor:
 
     def test_handles_hash_and_no_hash_prefix(self):
         assert _readable_text_color('#1a1a2e') == _readable_text_color('1a1a2e')
+
+
+class TestSplitHighlight:
+    def test_splits_around_highlight_word(self):
+        from core.content_pipeline.generators.reel_generator import _split_highlight
+        before, highlight, after = _split_highlight('Descubre algo nuevo', 'algo')
+        assert before == 'Descubre '
+        assert highlight == 'algo'
+        assert after == ' nuevo'
+
+    def test_case_insensitive_match(self):
+        from core.content_pipeline.generators.reel_generator import _split_highlight
+        before, highlight, after = _split_highlight('Descubre ALGO nuevo', 'algo')
+        assert highlight == 'ALGO'
+
+    def test_returns_full_text_as_before_when_word_not_found(self):
+        from core.content_pipeline.generators.reel_generator import _split_highlight
+        before, highlight, after = _split_highlight('Descubre algo nuevo', 'inexistente')
+        assert before == 'Descubre algo nuevo'
+        assert highlight == ''
+        assert after == ''
+
+    def test_returns_full_text_as_before_when_no_highlight_word(self):
+        from core.content_pipeline.generators.reel_generator import _split_highlight
+        before, highlight, after = _split_highlight('Descubre algo nuevo', '')
+        assert before == 'Descubre algo nuevo'
+        assert highlight == ''
+        assert after == ''
 
 
 class TestMeasureTextWidth:
@@ -399,6 +430,83 @@ class TestAnimateStillToClip:
 
         cmd = mock_run.call_args.args[0]
         assert cmd[cmd.index('-t') + 1] == '8'
+
+
+class TestGenerateBrandedSegment:
+    def test_portada_builds_variables_and_renders(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-portada-mp4'
+
+        captured = {}
+
+        def fake_run(cmd, *args, **kwargs):
+            with open(cmd[cmd.index('--variables-file') + 1]) as f:
+                captured['variables'] = json.load(f)
+            captured['cmd'] = cmd
+            captured['cwd'] = kwargs.get('cwd')
+            output_path = cmd[cmd.index('-o') + 1]
+            with open(output_path, 'wb') as f:
+                f.write(fake_output)
+            return MagicMock(returncode=0)
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=fake_run), \
+             patch('core.content_pipeline.generators.reel_generator.record_hyperframes_generation') as mock_record:
+            result = gen._generate_branded_segment(
+                'portada', 'Descubre algo nuevo', 'algo', 'Compra ahora', '#1a1a2e', '',
+            )
+
+        assert result == fake_output
+        assert captured['variables'] == {
+            'hook_before': 'Descubre ', 'hook_highlight': 'algo', 'hook_after': ' nuevo',
+            'primary_color': '#1a1a2e', 'text_color': 'white', 'logo_url': '',
+        }
+        assert '-c' in captured['cmd']
+        assert captured['cmd'][captured['cmd'].index('-c') + 1] == 'compositions/portada.html'
+        assert '--fps' in captured['cmd']
+        assert captured['cmd'][captured['cmd'].index('--fps') + 1] == '24'
+        mock_record.assert_called_once_with('portada')
+
+    def test_contraportada_builds_variables_and_renders(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-contraportada-mp4'
+
+        captured = {}
+
+        def fake_run(cmd, *args, **kwargs):
+            with open(cmd[cmd.index('--variables-file') + 1]) as f:
+                captured['variables'] = json.load(f)
+            captured['cmd'] = cmd
+            output_path = cmd[cmd.index('-o') + 1]
+            with open(output_path, 'wb') as f:
+                f.write(fake_output)
+            return MagicMock(returncode=0)
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=fake_run), \
+             patch('core.content_pipeline.generators.reel_generator.record_hyperframes_generation'):
+            result = gen._generate_branded_segment(
+                'contraportada', 'Descubre algo nuevo', 'algo', 'Compra ahora', '#1a1a2e', 'https://logo.png',
+            )
+
+        assert result == fake_output
+        assert captured['variables'] == {
+            'cta_text': 'Compra ahora', 'primary_color': '#1a1a2e',
+            'text_color': 'white', 'logo_url': 'https://logo.png',
+        }
+        assert captured['cmd'][captured['cmd'].index('-c') + 1] == 'compositions/contraportada.html'
+
+    def test_returns_none_on_subprocess_error(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=subprocess.CalledProcessError(1, 'hyperframes')):
+            result = gen._generate_branded_segment(
+                'portada', 'Descubre algo nuevo', 'algo', 'Compra ahora', '#1a1a2e', '',
+            )
+        assert result is None
 
 
 class TestProbeClipDimensions:
