@@ -3412,3 +3412,116 @@ Observación (no bloqueante, comportamiento esperado por diseño): dado que
 
 Severidad: N/A (feature, no vulnerabilidad).
 Prioridad: Cerrado.
+
+=================================================================
+HALLAZGO 72 — Catálogo de 3 templates deterministas para portada/
+  contraportada (reemplaza logo + fondo blanco, elegidos por IA)
+Categoría: Feature + fix de diseño
+Estado: ✅ CONSTRUIDO Y VERIFICADO EN REAL — 2026-07-16
+=================================================================
+Contexto: Anuar rechazó el resultado visual de la Parte B (HALLAZGO 71) —
+  "el logo no se ve bien y el fondo blanco al inicio y final tampoco, no
+  podemos dar por terminado con esos resultados... la idea era que fueran
+  dinámicas... para que pasemos de un reel genérico a casi un video de
+  agencia publicitaria". Se generaron 3 bocetos de motion design vía agy
+  (tipografía cinética, fondo dinámico, panel wipe) y se renderizaron
+  localmente (sin costo de API) para comparación real — Anuar eligió el
+  panel wipe como dirección preferida, pero pidió mezclar los 3 estilos
+  como catálogo, corrigiendo los 2 que fallaban por desborde de texto, con
+  selección del template por IA (mismo patrón que
+  `ImageGenerator._choose_template_for_image`) y tipografía compartida con
+  las imágenes de esa semana (mismo seed que `_choose_font_preset`).
+
+Diseño (spec `2026-07-16-reels-branded-segments-template-catalog-design.md`,
+  plan `2026-07-16-reels-branded-segments-template-catalog-plan.md`, 5
+  tareas):
+  - Catálogo fijo de 3 templates: `panel-wipe` (paneles sólidos que entran
+    deslizándose, estilo noticiero), `kinetic-typography` (palabras en
+    cascada + líneas decorativas sobre fondo claro), `dynamic-background`
+    (blobs de color en movimiento continuo sobre fondo oscuro).
+  - `_choose_reel_template(hook_text, tag_cta)` — Gemini elige 1 vez por
+    reel (no una vez por portada y otra por contraportada), con fallback a
+    `random.choice` si falla.
+  - `core/shared/font_presets.py` — `_FONT_PRESETS`/`_choose_font_preset`
+    movidos desde `image_generator.py` (re-exportados ahí, sin romper
+    nada), reutilizados por `_generate_clips_with_branding` con el MISMO
+    seed semanal (`filename_prefix.rsplit('-day', 1)[0]`) que las imágenes
+    — portada/contraportada del reel usan la misma fuente que el resto del
+    contenido de esa semana. 4 fuentes nuevas vendorizadas (Playfair
+    Display, Space Grotesk, Bebas Neue, DM Sans — OFL, Google Fonts) además
+    de Poppins ya existente.
+  - `logo_url` eliminado por completo de la cadena `tasks.py`→`generate()`→
+    `_generate_clips_with_branding()`→`_generate_branded_segment()` (sin
+    tocar `BrandDNA.logo_url` como campo ni otros usos en la app).
+
+Implementación: 5 tareas vía agy (Gemini 3.5 Flash), cada una verificada
+  con diff exacto contra el plan + render real propio (no solo el reporte
+  del agente):
+  - Task 1: módulo de fuentes + 4 fuentes vendorizadas. 65/65 tests. Diff
+    exacto al plan.
+  - Task 2 (panel-wipe): el agente corrigió un bug real de mi propio plan
+    — `display:flex` directo en `#hook`/`#cta` (para centrar verticalmente)
+    convertía los `<span>` de texto en flex items independientes,
+    rompiendo espacios entre palabras. Fix: envolver en un `<div
+    style="width:100%">` interno.
+  - Task 3 (dynamic-background): sin bugs, diff exacto al plan.
+  - Task 4 (kinetic-typography): diff exacto al plan, pero Claude encontró
+    un bug real en verificación propia que el agente no detectó — el
+    `join(' ')` entre `hook_before`/`hook_highlight`/`hook_after` agregaba
+    un espacio artificial antes de puntuación pegada (ej. "tecnológica ,"
+    en vez de "tecnológica,"), ya que `hook_after` de `_split_highlight`
+    en Python ya trae su propia puntuación sin espacio previo. Fix:
+    `join('')` + comparación del highlight sin puntuación pegada
+    (`bareWord`) para que "tecnológica," siga coloreándose igual que
+    "tecnológica". Verificado con render real antes/después del fix.
+  - Task 5 (orquestación Python): diff exacto byte a byte al plan, exitoso
+    al primer intento. 77/77 tests de reels, 466/466 suite completa.
+  - 3 despachos tuvieron que reintentarse por fallos transitorios del CLI
+    de agy (timeout / "no active conversation") sin dejar cambios en el
+    repo — resueltos reintentando con más timeout, sin necesidad de
+    escalar de modelo.
+
+Verificación real end-to-end (Task 6, ejecutada por Claude, no delegada):
+  3 reels reales generados de punta a punta, forzando cada template
+  (`_choose_reel_template` mockeado) con 3 marcas reales distintas de la
+  base (colores `#1a1a2e`, `#2563EB`, `#E41720`) para cubrir tanto el caso
+  por defecto como colores de marca reales. Los 3 MP4: duración EXACTA de
+  24.000000s, resolución uniforme 720x1280@24fps. Sin errores en logs
+  (aparte de un `content_blocked` de Lyria — issue previo ya documentado,
+  no relacionado).
+
+  **2 hallazgos reales de contraste encontrados en esta verificación (no
+  detectables con el texto/color sintético usado en el brainstorm),
+  corregidos antes de cerrar la tarea:**
+  1. `dynamic-background` — el CTA de la contraportada usaba
+     `color: var(--primary_color)` directo sobre los blobs de fondo
+     (también `var(--primary_color)`) — con el azul real de una marca
+     (`#2563EB`) el texto quedaba casi ilegible, fundido en el fondo. Fix:
+     texto fijo en `#ffffff` (mismo tratamiento que el hook de portada),
+     consistente y con buen contraste sin importar el color de marca.
+  2. Caso límite documentado (no bloqueante): una marca con
+     `primary_colors=['#1a1a2e']` (el mismo tono neutro usado como fondo
+     fijo de `panel-wipe`/`dynamic-background`) hace que el panel/blob se
+     funda casi por completo con el fondo — el texto sigue siendo legible
+     (blanco sobre oscuro) pero se pierde el efecto de movimiento/color
+     del panel. Ocurre solo cuando el color de marca coincide con el
+     `#1a1a2e` fijo usado como neutro — no se resolvió en este plan (fuera
+     de alcance), queda como mejora futura si se vuelve a presentar.
+
+  Confirmado visualmente en los 3: texto completo sin desbordar (el bug
+  original que motivó este plan), palabra resaltada en el color de marca
+  correcto (incluida la puntuación pegada tras el fix de Task 4), logo
+  ausente en los 3 (eliminado según lo pedido), fuente aplicada
+  consistente con el catálogo compartido.
+
+**Lección reutilizable:** el texto/color sintético usado para verificar un
+  boceto en el brainstorm (útil para comparar ESTILOS de movimiento) no
+  sustituye verificar con colores de marca REALES de la base de datos —
+  el bug de contraste de `dynamic-background` (primary_color sobre
+  primary_color) no era visible con el rojo saturado usado en las
+  comparaciones iniciales, pero sí con un azul real. Verificar templates
+  parametrizables con al menos 2-3 valores reales y distintos de la base
+  antes de dar un catálogo por cerrado.
+
+Severidad: N/A (feature, no vulnerabilidad).
+Prioridad: Cerrado.
