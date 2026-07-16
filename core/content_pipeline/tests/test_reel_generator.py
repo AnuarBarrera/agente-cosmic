@@ -910,6 +910,11 @@ class TestRenderTextOverlayPlaywright:
         assert '<span class="highlight">nuevo</span>' in html_arg
         assert '#002951' in html_arg
         assert '{{font_path}}' not in html_arg
+        assert '{{text_color}}' not in html_arg
+        # #002951 es oscuro (brillo ~33) -> texto de la palabra resaltada debe ser
+        # blanco, no el color oscuro hardcodeado que antes hacia el texto invisible
+        # cuando coincidia con el color primario (ver HALLAZGO 69).
+        assert 'color: white' in html_arg
 
     def test_retries_once_and_succeeds_on_second_attempt(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator

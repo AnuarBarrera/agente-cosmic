@@ -309,6 +309,7 @@ class ReelGenerator:
             with open(template_path) as f:
                 html = f.read()
             html = html.replace('{{primary_color}}', primary_color)
+            html = html.replace('{{text_color}}', _readable_text_color(primary_color))
             html = html.replace('{{font_path}}', _OVERLAY_FONT_DATA_URI)
 
             if style == 'hook':
