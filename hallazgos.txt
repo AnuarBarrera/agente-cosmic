@@ -3240,3 +3240,75 @@ Verificación: 4 tests nuevos (`TestReadableTextColor` + 1 caso de color
 Severidad: Medium (afecta legibilidad real del hook/CTA — el mensaje
   principal del reel — para cualquier marca con paleta oscura).
 Prioridad: Cerrado.
+
+=================================================================
+HALLAZGO 70 — Shots cortos de imagen (Parte A) construidos + CTA
+  seguía invisible en el motor Playwright REAL (activo en producción)
+Categoría: Feature + bug visual
+Estado: ✅ CONSTRUIDO Y VERIFICADO EN REAL — 2026-07-16
+=================================================================
+Contexto: Parte A del rediseño de reels — de las 3 escenas originales
+  (1 Veo + 2 Imagen de 8s), ahora son 6 (1 Veo de 8s + 5 shots de Imagen
+  de 2s cada uno), imitando el ritmo de corte rápido de publicidad real.
+  Motivación de Anuar: Imagen cuesta ~$0.04/imagen, casi gratis comparado
+  con Veo, así que conviene más variedad de tomas cortas que pocas largas.
+
+Implementación: 2 tareas vía agentes externos (agy, Gemini 3.5 Flash),
+  cada una verificada con evidencia propia:
+  1. `reel_script_generator.py`: guion pide 6 `scene_prompts` en vez de 3
+     (roles sin cambios: [0]=Veo, [1:]=Imagen, ahora 5 en vez de 2).
+  2. `reel_generator.py`: nueva constante `_IMAGE_SHOT_DURATION_SECONDS=2.0`,
+     `_generate_still_scene_clip` gana parámetro `duration`, y el cambio
+     técnico clave: `_assemble_reel` calculaba `duration = len(clips) * 8`
+     (fórmula inválida con clips de duración mixta) — ahora se mide la
+     duración REAL del video concatenado con una función nueva
+     `_probe_video_duration` (ffprobe). Sección delicada de la tarea:
+     6 ocurrencias de `mock_run.call_args_list[2]` en los tests tuvieron
+     que actualizarse a `[3]` (el nuevo probe de duración se suma al de
+     ancho ya existente) — verificado diff exacto contra el plan.
+  Commits `3d9213f`, `597f86d`. 60/60 tests propios, 443/443 suite completa.
+
+Verificación real end-to-end: guion real con 6 escenas correctas, MP4
+  resultante con duración EXACTA de 18.000000s (8+5×2), resolución
+  uniforme 720x1280@24fps sin mezcla entre el clip de Veo y los 5 de
+  Imagen+zoompan.
+
+**Hallazgo adicional durante la revisión visual de este reel real — CTA
+  seguía invisible pese al fix de HALLAZGO 69:** al revisar de cerca el
+  frame del CTA, la caja aparecía completamente vacía (sin texto), pese a
+  que HALLAZGO 69 (mismo día, antes) ya había corregido el fontcolor
+  hardcodeado. Investigación: el `filter_complex` real capturado (llamando
+  `_assemble_reel` directo con clips locales falsos, sin gastar Veo/Imagen)
+  reveló `overlay=0:0` en vez de `drawtext=` — es decir, el motor ACTIVO en
+  este entorno es `REEL_TEXT_OVERLAY_ENGINE=playwright` (`.env`), no
+  `drawtext`. El fix de HALLAZGO 69 solo tocó las funciones Python del path
+  de `drawtext` (`_build_hook_filter_parts`/`_build_cta_filter_parts`) —
+  nunca llegó a aplicarse al path que realmente renderiza en producción.
+
+Causa raíz idéntica, ubicación distinta: `reel_hook.html` (`.highlight`) y
+  `reel_cta.html` (`.cta`) tenían `color: #1a1a2e` hardcodeado en CSS, con
+  `background: {{primary_color}}` dinámico — mismo choque de color que
+  HALLAZGO 69 cuando el color primario de la marca es `#1a1a2e` (el
+  fallback usado cuando una marca no tiene `primary_colors` configurado).
+
+Fix: ambos templates HTML usan `color: {{text_color}}`, inyectado desde
+  Python vía `_readable_text_color(primary_color)` — la MISMA función de
+  HALLAZGO 69, reutilizada (no duplicada). Verificado con render real de
+  Playwright (`_render_text_overlay_playwright` llamado directo, sin
+  mocks) usando el color y texto exactos que fallaban — el CTA
+  "¡Inicia tu transformación!" y el hook "futuro" (highlight) ambos
+  legibles. Confirmado también end-to-end con una 3ª generación real
+  completa: CTA "Impulsa tu negocio" claramente visible sobre fondo
+  oscuro. 443/443 tests de la suite completa tras el fix. Commit `c1d5181`.
+
+**Lección:** verificar visualmente el resultado real de un cambio en el
+  motor ACTIVO configurado (`REEL_TEXT_OVERLAY_ENGINE`), no asumir que un
+  fix en un código relacionado (incluso si prueba correcto con unit tests)
+  cubre el path que realmente corre en producción. HALLAZGO 69 pasó todos
+  sus tests porque probaba `_build_cta_filter_parts` directamente — nunca
+  se generó un reel real con ese fix hasta esta verificación, que sí usa
+  el pipeline completo con el flag real del `.env`.
+
+Severidad: Medium (mismo impacto que HALLAZGO 69 — legibilidad del mensaje
+  principal — pero en el path que SÍ corre en producción real).
+Prioridad: Cerrado.
