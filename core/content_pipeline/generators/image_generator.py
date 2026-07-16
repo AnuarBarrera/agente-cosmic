@@ -1,5 +1,4 @@
 import base64
-import hashlib
 import html as _html
 import json
 import logging
@@ -23,29 +22,9 @@ import io
 
 logger = logging.getLogger(__name__)
 
-# Tipografías reales via Google Fonts (antes: font-family: Arial hardcodeado en los
-# 3 templates HTML). Solo varía la fuente — el color de acento/botón sigue viniendo
-# de la paleta real de la marca (primary_color/button_color), no de estos presets.
-_FONT_PRESETS = [
-    {'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins:wght@400;600;700;900'},
-    {'font_family': "'Playfair Display', serif", 'font_import': 'Playfair+Display:wght@400;600;700;900'},
-    {'font_family': "'Space Grotesk', sans-serif", 'font_import': 'Space+Grotesk:wght@400;500;600;700'},
-    {'font_family': "'Bebas Neue', sans-serif", 'font_import': 'Bebas+Neue'},
-    {'font_family': "'DM Sans', sans-serif", 'font_import': 'DM+Sans:wght@400;500;700'},
-]
-
-
-def _choose_font_preset(seed: str) -> dict:
-    """Elige una fuente de forma determinista a partir de `seed` (el job_id del
-    calendario) en vez de puramente al azar — así las 7 imagenes de una misma
-    semana usan la MISMA fuente (consistencia de marca, ver H35), incluso si el
-    usuario regenera un solo post despues (nueva instancia de ImageGenerator,
-    pero mismo seed => mismo preset)."""
-    if not seed:
-        return random.choice(_FONT_PRESETS)
-    digest = hashlib.sha256(seed.encode()).hexdigest()
-    idx = int(digest, 16) % len(_FONT_PRESETS)
-    return _FONT_PRESETS[idx]
+# Tipografías reales via Google Fonts — definidas en core/shared/font_presets.py
+# (compartido con la portada/contraportada de reels, ver reel_generator.py).
+from core.shared.font_presets import FONT_PRESETS as _FONT_PRESETS, choose_font_preset as _choose_font_preset
 
 
 def _crop_to_square(image_bytes: bytes) -> bytes:
