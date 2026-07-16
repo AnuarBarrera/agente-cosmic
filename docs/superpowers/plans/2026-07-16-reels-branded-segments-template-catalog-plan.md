@@ -505,7 +505,7 @@ Corrige el bug de desborde del boceto original (`compositions/drafts/dynamic-bac
     #cta {
       position: relative; z-index: 10;
       font-family: var(--font_family); font-weight: 900; font-size: 76px;
-      color: var(--primary_color); text-align: center; line-height: 1.3; max-width: 900px;
+      color: #ffffff; text-align: center; line-height: 1.3; max-width: 900px;
     }
   </style>
 </head>
