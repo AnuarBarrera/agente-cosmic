@@ -424,6 +424,60 @@ class ReelGenerator:
             with open(output_path, 'rb') as f:
                 return f.read()
 
+    def _normalize_branded_segment(self, segment_bytes: bytes, width: int, height: int, fps: float) -> bytes:
+        with tempfile.TemporaryDirectory() as tmp:
+            input_path = os.path.join(tmp, 'input.mp4')
+            with open(input_path, 'wb') as f:
+                f.write(segment_bytes)
+            output_path = os.path.join(tmp, 'output.mp4')
+            subprocess.run(
+                ['ffmpeg', '-y', '-i', input_path,
+                 '-vf', f'scale={width}:{height}', '-r', str(fps),
+                 '-c:v', 'libx264', '-pix_fmt', 'yuv420p', output_path],
+                check=True, capture_output=True,
+            )
+            with open(output_path, 'rb') as f:
+                return f.read()
+
+    def _generate_clips_with_branding(self, scene_prompts: list[str], hook_text: str,
+                                       highlight_word: str, tag_cta: str, primary_color: str,
+                                       logo_url: str) -> tuple[list[bytes], bool]:
+        clips = self._generate_video_clips(scene_prompts)
+        if len(clips) < 3:
+            return clips, False
+
+        width, height, fps = self._probe_clip_dimensions(clips[0])
+
+        portada = self._generate_branded_segment(
+            'portada', hook_text, highlight_word, tag_cta, primary_color, logo_url,
+        )
+        if portada is None:
+            portada = self._generate_branded_segment(
+                'portada', hook_text, highlight_word, tag_cta, primary_color, logo_url,
+            )  # 1 reintento
+
+        if portada is None:
+            logger.warning("Portada o contraportada fallaron tras reintento, reel sin marca (estructura Parte A)")
+            record_hyperframes_fallback()
+            return clips, False
+
+        contraportada = self._generate_branded_segment(
+            'contraportada', hook_text, highlight_word, tag_cta, primary_color, logo_url,
+        )
+        if contraportada is None:
+            contraportada = self._generate_branded_segment(
+                'contraportada', hook_text, highlight_word, tag_cta, primary_color, logo_url,
+            )  # 1 reintento
+
+        if contraportada is None:
+            logger.warning("Portada o contraportada fallaron tras reintento, reel sin marca (estructura Parte A)")
+            record_hyperframes_fallback()
+            return clips, False
+
+        portada_normalized = self._normalize_branded_segment(portada, width, height, fps)
+        contraportada_normalized = self._normalize_branded_segment(contraportada, width, height, fps)
+        return [portada_normalized] + clips + [contraportada_normalized], True
+
     def _generate_video_clips(self, scene_prompts: list[str]) -> list[bytes]:
         # scene_prompts[0] va a Veo (video real, _VEO_CLIP_DURATION_SECONDS=8s).
         # scene_prompts[1:] (5 shots cortos) se generan como imagen fija (Imagen) +
@@ -607,7 +661,8 @@ class ReelGenerator:
             return None
 
     def _assemble_reel(self, clips: list[bytes], music: bytes | None, narration: bytes | None,
-                        script: dict, colors: list[str], subtitles: list[dict] | None = None) -> bytes:
+                        script: dict, colors: list[str], subtitles: list[dict] | None = None,
+                        skip_hook_cta_overlay: bool = False) -> bytes:
         with tempfile.TemporaryDirectory() as tmp:
             clip_paths = []
             for i, clip_bytes in enumerate(clips):
@@ -638,49 +693,50 @@ class ReelGenerator:
             # asi que se escalan proporcionalmente al ancho real detectado.
             scale = video_width / _VIDEO_WIDTH
 
-            hook_png = cta_png = None
-            if settings.REEL_TEXT_OVERLAY_ENGINE == 'playwright':
-                hook_png = self._render_text_overlay_playwright(
-                    script['hook_text'], script['highlight_word'], 'hook', primary_color,
-                )
-                cta_png = self._render_text_overlay_playwright(
-                    '', '', 'cta', primary_color, cta_text=script['tag_cta'],
-                )
-
-            scaled_w = max(1, int(_VIDEO_WIDTH * scale))
-            scaled_h = max(1, int(_VIDEO_HEIGHT * scale))
             extra_inputs = []
             filter_parts = []
             last_label = '0:v'
 
-            if hook_png is not None:
-                extra_inputs += ['-i', _write_tmp_png(tmp, 'hook.png', hook_png)]
-                idx = len(extra_inputs) // 2
-                filter_parts.append(
-                    f"[{idx}:v]scale={scaled_w}:{scaled_h}[hookscaled];"
-                    f"[{last_label}][hookscaled]overlay=0:0:enable='between(t,0,{_HOOK_END_SECONDS})'[hookout]"
-                )
-                last_label = 'hookout'
-            else:
-                filter_parts_h, last_label = _build_hook_filter_parts(
-                    script['hook_text'], script['highlight_word'], primary_color, last_label,
-                    video_width=video_width, scale=scale,
-                )
-                filter_parts += filter_parts_h
+            if not skip_hook_cta_overlay:
+                scaled_w = max(1, int(_VIDEO_WIDTH * scale))
+                scaled_h = max(1, int(_VIDEO_HEIGHT * scale))
+                hook_png = cta_png = None
+                if settings.REEL_TEXT_OVERLAY_ENGINE == 'playwright':
+                    hook_png = self._render_text_overlay_playwright(
+                        script['hook_text'], script['highlight_word'], 'hook', primary_color,
+                    )
+                    cta_png = self._render_text_overlay_playwright(
+                        '', '', 'cta', primary_color, cta_text=script['tag_cta'],
+                    )
 
-            if cta_png is not None:
-                extra_inputs += ['-i', _write_tmp_png(tmp, 'cta.png', cta_png)]
-                idx = len(extra_inputs) // 2
-                filter_parts.append(
-                    f"[{idx}:v]scale={scaled_w}:{scaled_h}[ctascaled];"
-                    f"[{last_label}][ctascaled]overlay=0:0:enable='between(t,{cta_start},{duration})'[ctaout]"
-                )
-                last_label = 'ctaout'
-            else:
-                cta_parts, last_label = _build_cta_filter_parts(
-                    script['tag_cta'], primary_color, last_label, cta_start, duration, scale=scale,
-                )
-                filter_parts += cta_parts
+                if hook_png is not None:
+                    extra_inputs += ['-i', _write_tmp_png(tmp, 'hook.png', hook_png)]
+                    idx = len(extra_inputs) // 2
+                    filter_parts.append(
+                        f"[{idx}:v]scale={scaled_w}:{scaled_h}[hookscaled];"
+                        f"[{last_label}][hookscaled]overlay=0:0:enable='between(t,0,{_HOOK_END_SECONDS})'[hookout]"
+                    )
+                    last_label = 'hookout'
+                else:
+                    filter_parts_h, last_label = _build_hook_filter_parts(
+                        script['hook_text'], script['highlight_word'], primary_color, last_label,
+                        video_width=video_width, scale=scale,
+                    )
+                    filter_parts += filter_parts_h
+
+                if cta_png is not None:
+                    extra_inputs += ['-i', _write_tmp_png(tmp, 'cta.png', cta_png)]
+                    idx = len(extra_inputs) // 2
+                    filter_parts.append(
+                        f"[{idx}:v]scale={scaled_w}:{scaled_h}[ctascaled];"
+                        f"[{last_label}][ctascaled]overlay=0:0:enable='between(t,{cta_start},{duration})'[ctaout]"
+                    )
+                    last_label = 'ctaout'
+                else:
+                    cta_parts, last_label = _build_cta_filter_parts(
+                        script['tag_cta'], primary_color, last_label, cta_start, duration, scale=scale,
+                    )
+                    filter_parts += cta_parts
 
             subtitle_fontsize = max(1, int(_SUBTITLE_FONTSIZE * scale))
             subtitle_y_offset = int(300 * scale)
@@ -695,15 +751,26 @@ class ReelGenerator:
                 )
                 last_label = next_label
 
-            filter_complex = ';'.join(filter_parts)
             overlay_path = os.path.join(tmp, 'overlay.mp4')
-            subprocess.run(
-                ['ffmpeg', '-y', '-i', concat_path] + extra_inputs +
-                ['-filter_complex', filter_complex,
-                 '-map', f'[{last_label}]', '-t', str(duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
-                 overlay_path],
-                check=True, capture_output=True,
-            )
+            if filter_parts:
+                filter_complex = ';'.join(filter_parts)
+                overlay_cmd = (
+                    ['ffmpeg', '-y', '-i', concat_path] + extra_inputs +
+                    ['-filter_complex', filter_complex,
+                     '-map', f'[{last_label}]', '-t', str(duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+                     overlay_path]
+                )
+            else:
+                # skip_hook_cta_overlay=True y sin subtitulos: ningun filtro que
+                # aplicar. -map 0:v (sin corchetes) referencia el stream de video
+                # de entrada directo, sin depender de una etiqueta de filter_complex
+                # que no existiria.
+                overlay_cmd = (
+                    ['ffmpeg', '-y', '-i', concat_path] + extra_inputs +
+                    ['-map', '0:v', '-t', str(duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+                     overlay_path]
+                )
+            subprocess.run(overlay_cmd, check=True, capture_output=True)
 
             audio_input_flags = []
             audio_stream_count = 0
@@ -766,9 +833,14 @@ class ReelGenerator:
             with open(frame_path, 'rb') as f:
                 return f.read()
 
-    def generate(self, script: dict, colors: list[str], filename_prefix: str) -> tuple[str, str]:
+    def generate(self, script: dict, colors: list[str], filename_prefix: str,
+                 logo_url: str = '') -> tuple[str, str]:
         try:
-            clips = self._generate_video_clips(script['scene_prompts'])
+            primary_color = colors[0] if colors else '#e94560'
+            clips, has_branding = self._generate_clips_with_branding(
+                script['scene_prompts'], script['hook_text'], script['highlight_word'],
+                script['tag_cta'], primary_color, logo_url,
+            )
             if len(clips) < 3:
                 logger.warning(f"Reel abortado: solo {len(clips)}/3 clips de Veo generados")
                 return '', ''
@@ -779,7 +851,10 @@ class ReelGenerator:
             if narration is not None:
                 subtitles = SubtitleGenerator().generate(narration, script['narration_script'])
 
-            final_video = self._assemble_reel(clips, music, narration, script, colors, subtitles)
+            final_video = self._assemble_reel(
+                clips, music, narration, script, colors, subtitles,
+                skip_hook_cta_overlay=has_branding,
+            )
             poster = self._extract_poster_frame(final_video)
 
             video_url = self._upload_video_to_storage(final_video, filename_prefix)

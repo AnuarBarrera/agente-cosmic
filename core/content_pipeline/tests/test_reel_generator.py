@@ -509,6 +509,86 @@ class TestGenerateBrandedSegment:
         assert result is None
 
 
+class TestGenerateClipsWithBranding:
+    def test_branding_success_prepends_and_appends_normalized_segments(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_video_clips', return_value=[b'v', b's1', b's2', b's3', b's4', b's5']), \
+             patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
+             patch.object(gen, '_generate_branded_segment', side_effect=[b'portada-raw', b'contra-raw']) as mock_branded, \
+             patch.object(gen, '_normalize_branded_segment', side_effect=[b'portada-norm', b'contra-norm']) as mock_norm:
+            clips, has_branding = gen._generate_clips_with_branding(
+                ['scene 1', 'scene 2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'https://logo.png',
+            )
+
+        assert has_branding is True
+        assert clips == [b'portada-norm', b'v', b's1', b's2', b's3', b's4', b's5', b'contra-norm']
+        assert mock_branded.call_args_list == [
+            call('portada', 'Hook', 'word', 'CTA', '#1a1a2e', 'https://logo.png'),
+            call('contraportada', 'Hook', 'word', 'CTA', '#1a1a2e', 'https://logo.png'),
+        ]
+        assert mock_norm.call_args_list == [
+            call(b'portada-raw', 720, 1280, 24.0),
+            call(b'contra-raw', 720, 1280, 24.0),
+        ]
+
+    def test_falls_back_when_portada_fails_completely(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_video_clips', return_value=[b'v', b's1', b's2', b's3', b's4', b's5']), \
+             patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
+             patch.object(gen, '_generate_branded_segment', return_value=None) as mock_branded, \
+             patch.object(gen, '_normalize_branded_segment') as mock_norm, \
+             patch('core.content_pipeline.generators.reel_generator.record_hyperframes_fallback') as mock_fallback:
+            clips, has_branding = gen._generate_clips_with_branding(
+                ['scene 1', 'scene 2'], 'Hook', 'word', 'CTA', '#1a1a2e', '',
+            )
+
+        assert has_branding is False
+        assert clips == [b'v', b's1', b's2', b's3', b's4', b's5']
+        mock_norm.assert_not_called()
+        mock_fallback.assert_called_once()
+        # 2 intentos de portada (1 + reintento) antes de rendirse
+        assert mock_branded.call_count == 2
+
+    def test_skips_branding_attempt_when_body_has_fewer_than_3_clips(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_video_clips', return_value=[b'v']), \
+             patch.object(gen, '_generate_branded_segment') as mock_branded:
+            clips, has_branding = gen._generate_clips_with_branding(
+                ['scene 1'], 'Hook', 'word', 'CTA', '#1a1a2e', '',
+            )
+
+        assert clips == [b'v']
+        assert has_branding is False
+        mock_branded.assert_not_called()
+
+
+class TestNormalizeBrandedSegment:
+    def test_builds_scale_command_with_exact_dimensions(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'normalized-mp4'
+
+        def fake_run(cmd, *args, **kwargs):
+            with open(cmd[-1], 'wb') as f:
+                f.write(fake_output)
+            return MagicMock(returncode=0)
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=fake_run) as mock_run:
+            result = gen._normalize_branded_segment(b'raw-mp4', 720, 1280, 24.0)
+
+        assert result == fake_output
+        cmd = mock_run.call_args.args[0]
+        assert cmd[0] == 'ffmpeg'
+        vf_idx = cmd.index('-vf')
+        assert cmd[vf_idx + 1] == 'scale=720:1280'
+        r_idx = cmd.index('-r')
+        assert cmd[r_idx + 1] == '24.0'
+
+
 class TestProbeClipDimensions:
     def test_writes_bytes_to_temp_file_and_probes(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
@@ -811,6 +891,59 @@ class TestAssembleReel:
         map_idx = overlay_cmd.index('-map')
         assert overlay_cmd[map_idx + 1] == '[cta0]'
 
+    @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
+    def test_skip_hook_cta_overlay_without_subtitles_uses_plain_map(self, tmp_path):
+        # skip_hook_cta_overlay=True + sin subtitulos: filter_parts queda
+        # vacio, no debe armarse -filter_complex (romperia -map '[0:v]' sin
+        # ningun filtro que defina esa etiqueta) — usa -map 0:v directo.
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-mp4-bytes'
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=_fake_ffmpeg_run(fake_output)) as mock_run, \
+             patch('core.content_pipeline.generators.reel_generator._build_hook_filter_parts') as mock_hook, \
+             patch('core.content_pipeline.generators.reel_generator._build_cta_filter_parts') as mock_cta:
+            gen._assemble_reel(
+                clips=[b'clip1', b'clip2', b'clip3'],
+                music=None, narration=None,
+                script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
+                skip_hook_cta_overlay=True,
+            )
+
+        mock_hook.assert_not_called()
+        mock_cta.assert_not_called()
+        overlay_cmd = mock_run.call_args_list[3].args[0]
+        assert '-filter_complex' not in overlay_cmd
+        map_idx = overlay_cmd.index('-map')
+        assert overlay_cmd[map_idx + 1] == '0:v'
+
+    @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
+    def test_skip_hook_cta_overlay_with_subtitles_keeps_filter_complex(self, tmp_path):
+        # skip_hook_cta_overlay=True + CON subtitulos: filter_parts no queda
+        # vacio (los subtitulos si aportan filtros) — sigue el camino normal
+        # de -filter_complex/-map '[subN]'.
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-mp4-bytes'
+        subtitles = [{'text': 'Hola.', 'start': 0.0, 'end': 1.0}]
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=_fake_ffmpeg_run(fake_output)) as mock_run:
+            gen._assemble_reel(
+                clips=[b'clip1', b'clip2', b'clip3'],
+                music=None, narration=None,
+                script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
+                subtitles=subtitles, skip_hook_cta_overlay=True,
+            )
+
+        overlay_cmd = mock_run.call_args_list[3].args[0]
+        filter_complex_idx = overlay_cmd.index('-filter_complex')
+        filter_complex = overlay_cmd[filter_complex_idx + 1]
+        assert "text='Hola.'" in filter_complex
+        map_idx = overlay_cmd.index('-map')
+        assert overlay_cmd[map_idx + 1] == '[sub0]'
+
 
 class TestAssembleReelPlaywrightEngine:
     @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
@@ -913,7 +1046,7 @@ class TestGenerate:
     def test_returns_video_and_poster_urls_on_success(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_video_clips', return_value=[b'c1', b'c2', b'c3']), \
+        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2', b'c3'], False)) as mock_clips, \
              patch.object(gen, '_generate_music', return_value=b'music'), \
              patch.object(gen, '_generate_narration', return_value=b'narration'), \
              patch('core.content_pipeline.generators.reel_generator.SubtitleGenerator') as mock_sub_gen, \
@@ -926,17 +1059,40 @@ class TestGenerate:
 
         assert video_url == 'https://storage.test/reel.mp4'
         assert poster_url == 'https://storage.test/poster.png'
+        mock_clips.assert_called_once_with(
+            _FAKE_SCRIPT['scene_prompts'], _FAKE_SCRIPT['hook_text'], _FAKE_SCRIPT['highlight_word'],
+            _FAKE_SCRIPT['tag_cta'], '#1a1a2e', '',
+        )
         mock_up_video.assert_called_once_with(b'final-mp4', 'job1-day1')
         mock_up_poster.assert_called_once_with(b'poster-png', 'job1-day1-poster')
         mock_assemble.assert_called_once_with(
             [b'c1', b'c2', b'c3'], b'music', b'narration', _FAKE_SCRIPT, ['#1a1a2e'],
             [{'text': 'Hola.', 'start': 0.0, 'end': 1.0}],
+            skip_hook_cta_overlay=False,
         )
+
+    def test_passes_logo_url_and_skip_flag_when_branding_succeeds(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'p', b'c1', b'c2', b'c3', b'c'], True)) as mock_clips, \
+             patch.object(gen, '_generate_music', return_value=None), \
+             patch.object(gen, '_generate_narration', return_value=None), \
+             patch.object(gen, '_assemble_reel', return_value=b'final-mp4') as mock_assemble, \
+             patch.object(gen, '_extract_poster_frame', return_value=b'poster-png'), \
+             patch.object(gen, '_upload_video_to_storage', return_value='url1'), \
+             patch.object(gen, '_upload_to_storage', return_value='url2'):
+            gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1', logo_url='https://logo.png')
+
+        mock_clips.assert_called_once_with(
+            _FAKE_SCRIPT['scene_prompts'], _FAKE_SCRIPT['hook_text'], _FAKE_SCRIPT['highlight_word'],
+            _FAKE_SCRIPT['tag_cta'], '#1a1a2e', 'https://logo.png',
+        )
+        assert mock_assemble.call_args.kwargs['skip_hook_cta_overlay'] is True
 
     def test_skips_subtitle_generation_when_narration_fails(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_video_clips', return_value=[b'c1', b'c2', b'c3']), \
+        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2', b'c3'], False)), \
              patch.object(gen, '_generate_music', return_value=None), \
              patch.object(gen, '_generate_narration', return_value=None), \
              patch('core.content_pipeline.generators.reel_generator.SubtitleGenerator') as mock_sub_gen, \
@@ -953,14 +1109,14 @@ class TestGenerate:
     def test_returns_empty_strings_when_fewer_than_3_clips_generated(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_video_clips', return_value=[b'c1', b'c2']):
+        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2'], False)):
             video_url, poster_url = gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
         assert (video_url, poster_url) == ('', '')
 
     def test_returns_empty_strings_when_assembly_raises(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_video_clips', return_value=[b'c1', b'c2', b'c3']), \
+        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2', b'c3'], False)), \
              patch.object(gen, '_generate_music', return_value=None), \
              patch.object(gen, '_generate_narration', return_value=None), \
              patch.object(gen, '_assemble_reel', side_effect=Exception('ffmpeg error')):

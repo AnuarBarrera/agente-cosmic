@@ -27,7 +27,10 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
     (slide 1 del carrusel, poster frame del reel) para retrocompatibilidad."""
     if fmt == ContentPost.FORMAT_REEL:
         script = reel_script_gen.generate(post_data, brand_dna)
-        video_url, poster_url = reel_gen.generate(script=script, colors=kwargs.get('colors', []), filename_prefix=filename)
+        video_url, poster_url = reel_gen.generate(
+            script=script, colors=kwargs.get('colors', []), filename_prefix=filename,
+            logo_url=brand_dna.logo_url if brand_dna else '',
+        )
         if not video_url:
             url = image_gen.generate(filename=filename, max_qc_retries=max_qc_retries, **kwargs)
             return url, [], ''
