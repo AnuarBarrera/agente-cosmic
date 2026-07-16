@@ -3525,3 +3525,62 @@ Verificación real end-to-end (Task 6, ejecutada por Claude, no delegada):
 
 Severidad: N/A (feature, no vulnerabilidad).
 Prioridad: Cerrado.
+
+=================================================================
+HALLAZGO 73 — Ícono de botón de play alucinado en shots de Imagen del
+  cuerpo del reel — negative_prompt concatenado al prompt en vez de usar
+  el parámetro dedicado de la API
+Categoría: Bug de prompt engineering
+Estado: ✅ CORREGIDO Y VERIFICADO EN REAL — 2026-07-16
+=================================================================
+Contexto: tras ver los 3 videos finales del catálogo de templates
+  (HALLAZGO 72), Anuar reportó (con captura de pantalla) que en los 3
+  aparecía un ícono grande, blanco, circular, con un triángulo de "play"
+  incrustado DENTRO de una de las imágenes generadas por Imagen para el
+  cuerpo del reel — no es un control del reproductor de video (ese es el
+  ícono más pequeño y oscuro visible en la esquina, distinto).
+
+Causa raíz: `_generate_single_clip` (Veo) y `_generate_scene_still`
+  (Imagen), en `core/content_pipeline/generators/reel_generator.py`,
+  concatenaban la constante `_VEO_SAFE_CONSTRAINTS` ("Absolutely NO text...
+  NO UI elements, NO icons...") directo al `prompt` afirmativo en vez de
+  usar el parámetro `negative_prompt` dedicado que la API de Vertex AI
+  soporta en AMBOS `GenerateVideosConfig` y `GenerateImagesConfig`
+  (confirmado inspeccionando la firma real de ambas clases en el SDK
+  instalado). Mencionar un concepto dentro del prompt principal — aunque
+  sea para negarlo ("NO icons") — puede hacer que un modelo de difusión lo
+  genere de todos modos; es un comportamiento conocido de estos modelos,
+  y el canal correcto para exclusiones es el campo `negative_prompt`
+  separado, no texto negado dentro del prompt afirmativo. Este bug existía
+  desde antes de la sesión de hoy (afecta también las escenas de Imagen
+  de la Parte A/híbridas, no es nuevo de los templates de portada).
+
+Fix: ambos métodos dejan de concatenar `_VEO_SAFE_CONSTRAINTS` al
+  `prompt` — ahora se pasa como `negative_prompt=self._VEO_SAFE_CONSTRAINTS.strip()`
+  dentro del `config=` de cada llamada. Se reforzó además el contenido de
+  la constante agregando explícitamente "NO play buttons, NO video player
+  overlays" (antes solo decía "NO icons" de forma genérica).
+
+Verificado: 2 tests nuevos (`TestGenerateSingleClip::test_negative_prompt_passed_via_config_not_appended_to_prompt`,
+  actualización de `TestGenerateSceneStill::test_returns_image_bytes_on_success`)
+  confirman que `prompt` llega limpio (sin "NO icons" ni ningún texto de
+  la constante) y que `config.negative_prompt` sí lo recibe. 78/78 tests
+  de reels, 467/467 suite completa. Verificación real: se regeneró con
+  Imagen una escena casi idéntica a la de la captura de Anuar (bolsa de
+  compras con verduras/pan frente a una puerta oscura) — resultado limpio,
+  sin ningún ícono incrustado.
+
+**Lección reutilizable:** cuando un modelo de difusión (Imagen, Veo) sigue
+  generando un elemento pese a que el prompt lo prohíbe explícitamente en
+  texto, revisar primero si la API tiene un parámetro `negative_prompt`
+  dedicado antes de reforzar/repetir la prohibición dentro del prompt
+  afirmativo — agregar más texto negado al mismo canal no ayuda y puede
+  empeorar el problema. Aplica a cualquier futuro uso de Imagen/Veo en
+  este proyecto (`image_generator.py` tampoco usa `negative_prompt` hoy —
+  queda pendiente revisar si tiene el mismo problema, no verificado en
+  este hallazgo).
+
+Severidad: Medium (afecta la calidad visual de todos los reels con shots
+  de Imagen, no solo portada/contraportada — issue preexistente detectado
+  hoy).
+Prioridad: Cerrado.

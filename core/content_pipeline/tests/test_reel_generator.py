@@ -157,6 +157,39 @@ class TestBuildCtaFilterParts:
         assert f'fontsize={_CTA_FONTSIZE // 2}' in parts_scaled[0]
 
 
+class TestGenerateSingleClip:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
+    )
+    def test_negative_prompt_passed_via_config_not_appended_to_prompt(self):
+        # Concatenar "NO icons/UI elements" al prompt afirmativo puede hacer que
+        # el modelo los genere de todos modos (alucinacion real observada: icono
+        # de boton de play incrustado en una escena). El canal correcto es el
+        # parametro negative_prompt de la API, no el texto del prompt principal.
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_video = b'fake-video-bytes'
+        mock_video = MagicMock()
+        mock_video.video_bytes = fake_video
+        mock_generated = MagicMock()
+        mock_generated.video = mock_video
+        mock_op = MagicMock()
+        mock_op.done = True
+        mock_op.error = None
+        mock_op.result.generated_videos = [mock_generated]
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_videos.return_value = mock_op
+            result = gen._generate_single_clip('a workshop scene')
+
+        assert result == fake_video
+        call_kwargs = mock_vc.return_value.models.generate_videos.call_args.kwargs
+        assert call_kwargs['prompt'] == 'a workshop scene'
+        assert call_kwargs['config'].negative_prompt == gen._VEO_SAFE_CONSTRAINTS.strip()
+        assert 'NO icons' not in call_kwargs['prompt']
+
+
 class TestGenerateVideoClips:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
@@ -361,7 +394,13 @@ class TestGenerateSceneStill:
         call_kwargs = mock_vc.return_value.models.generate_images.call_args.kwargs
         assert call_kwargs['model'] == 'imagen-3.0-generate-001'
         assert call_kwargs['config'].aspect_ratio == '9:16'
-        assert call_kwargs['prompt'].startswith('a workshop scene')
+        # negative_prompt via el parametro dedicado de la API, NO concatenado al
+        # prompt afirmativo (mencionar "icons"/"UI elements" en el prompt
+        # principal, aunque sea para negarlos, puede hacer que Imagen los genere
+        # de todos modos — alucinacion real: icono de boton de play incrustado).
+        assert call_kwargs['prompt'] == 'a workshop scene'
+        assert call_kwargs['config'].negative_prompt == gen._VEO_SAFE_CONSTRAINTS.strip()
+        assert 'NO icons' not in call_kwargs['prompt']
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',

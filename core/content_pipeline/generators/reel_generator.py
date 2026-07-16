@@ -311,14 +311,19 @@ class ReelGenerator:
     def __init__(self, bucket_name: str):
         self._bucket = bucket_name
 
-    # Mismo patron que _SAFE_CONSTRAINTS en image_generator.py: se aplica siempre,
-    # sin depender de que el guion (Gemini) lo incluya por su cuenta — Veo alucina
-    # texto/UI legible especialmente cuando la escena describe pantallas, laptops,
-    # monitores o interfaces (comun en negocios de tecnologia/web), por eso el
-    # bloqueo va reforzado y al final del prompt, no solo como sugerencia inicial.
+    # Compartido por Veo (_generate_single_clip) e Imagen (_generate_scene_still):
+    # se aplica siempre, sin depender de que el guion (Gemini) lo incluya por su
+    # cuenta. Se pasa via el parametro negative_prompt de la API (Vertex AI lo
+    # soporta en ambos, GenerateVideosConfig y GenerateImagesConfig), NO
+    # concatenado al prompt afirmativo — mencionar "icons"/"UI elements" dentro
+    # del prompt principal, aunque sea para negarlos, puede hacer que el modelo
+    # de difusion los genere de todos modos (alucinacion real observada: un
+    # icono de boton de play aparecio incrustado en escenas de Imagen pese a
+    # que el prompt afirmativo las prohibia explicitamente).
     _VEO_SAFE_CONSTRAINTS = (
-        " Absolutely NO text, NO letters, NO words, NO numbers, NO captions, NO subtitles, "
-        "NO UI elements, NO icons, NO logos, NO readable screen content anywhere in the video. "
+        "Absolutely NO text, NO letters, NO words, NO numbers, NO captions, NO subtitles, "
+        "NO UI elements, NO icons, NO logos, NO play buttons, NO video player overlays, "
+        "NO readable screen content anywhere in the image or video. "
         "If a screen or monitor appears, it must be blank, off, or showing only abstract "
         "blurred light — never legible text or interface elements."
     )
@@ -565,7 +570,6 @@ class ReelGenerator:
     def _generate_single_clip(self, prompt: str) -> bytes | None:
         try:
             client = _vertex_client()
-            prompt = prompt + self._VEO_SAFE_CONSTRAINTS
 
             def _call():
                 with track_external_api('veo', operation='video_generate'):
@@ -577,6 +581,7 @@ class ReelGenerator:
                             duration_seconds=_VEO_CLIP_DURATION_SECONDS,
                             number_of_videos=1,
                             generate_audio=False,
+                            negative_prompt=self._VEO_SAFE_CONSTRAINTS.strip(),
                         ),
                     )
             operation = call_with_429_retry(_call, settings.VERTEX_VIDEO_MODEL)
@@ -606,10 +611,11 @@ class ReelGenerator:
             with track_external_api('imagen3', operation='image_generate'):
                 resp = client.models.generate_images(
                     model=settings.VERTEX_IMAGE_MODEL,
-                    prompt=prompt + self._VEO_SAFE_CONSTRAINTS,
+                    prompt=prompt,
                     config=types.GenerateImagesConfig(
                         number_of_images=1,
                         aspect_ratio='9:16',
+                        negative_prompt=self._VEO_SAFE_CONSTRAINTS.strip(),
                     ),
                 )
             if resp.generated_images:
