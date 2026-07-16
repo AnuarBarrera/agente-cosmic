@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="es"
+  data-composition-variables='[
+    {"id":"cta_text","type":"string","label":"CTA","default":""},
+    {"id":"primary_color","type":"color","label":"Color primario","default":"#1a1a2e"},
+    {"id":"text_color","type":"color","label":"Color de texto","default":"#ffffff"},
+    {"id":"font_family","type":"string","label":"Fuente","default":"Poppins, sans-serif"}
+  ]'
+>
+<head>
+  <meta charset="UTF-8" />
+  <script src="node_modules/gsap/dist/gsap.min.js"></script>
+  <style>
+    @font-face { font-family: 'Poppins'; font-weight: 900; src: url('assets/Poppins-Bold.ttf') format('truetype'); }
+    @font-face { font-family: 'Playfair Display'; font-weight: 900; src: url('assets/PlayfairDisplay-Bold.ttf') format('truetype'); }
+    @font-face { font-family: 'Space Grotesk'; font-weight: 700; src: url('assets/SpaceGrotesk-Bold.ttf') format('truetype'); }
+    @font-face { font-family: 'Bebas Neue'; font-weight: 400; src: url('assets/BebasNeue-Regular.ttf') format('truetype'); }
+    @font-face { font-family: 'DM Sans'; font-weight: 700; src: url('assets/DMSans-Bold.ttf') format('truetype'); }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 1080px; height: 1920px; overflow: hidden; background: #ffffff; }
+
+    .deco { position: absolute; background: var(--primary_color); }
+    .deco-1 { width: 400px; height: 10px; top: 200px; left: -200px; }
+    .deco-2 { width: 10px; height: 300px; bottom: -100px; right: 200px; }
+    .deco-3 { width: 80px; height: 80px; border-radius: 50%; top: 400px; right: 150px; opacity: 0.5; }
+
+    .wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 0 90px; }
+    #cta-container {
+      font-family: var(--font_family); font-weight: 900; font-size: 92px;
+      color: var(--primary_color); text-align: center; line-height: 1.3; max-width: 900px;
+    }
+    #cta-container .word { display: inline-block; }
+  </style>
+</head>
+<body>
+  <div id="root" data-composition-id="contraportada-kinetic-typography" data-start="0" data-duration="3"
+       data-width="1080" data-height="1920">
+    <div class="deco deco-1"></div>
+    <div class="deco deco-2"></div>
+    <div class="deco deco-3"></div>
+    <div class="wrap">
+      <div id="cta-container" class="clip" data-start="0" data-duration="3"></div>
+    </div>
+  </div>
+  <script>
+    const { cta_text } = window.__hyperframes.getVariables();
+    const container = document.getElementById('cta-container');
+    cta_text.trim().split(/\s+/).filter(Boolean).forEach((word, i, arr) => {
+      const span = document.createElement('span');
+      span.className = 'word';
+      span.textContent = word;
+      container.appendChild(span);
+      if (i < arr.length - 1) container.appendChild(document.createTextNode(' '));
+    });
+
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({ paused: true });
+
+    tl.to('.deco-1', { x: 600, duration: 3, ease: 'none' }, 0);
+    tl.to('.deco-2', { y: -500, duration: 3, ease: 'none' }, 0);
+    tl.to('.deco-3', { scale: 1.5, opacity: 0, duration: 3, ease: 'power1.inOut' }, 0);
+    tl.from('#cta-container .word', { y: 80, opacity: 0, duration: 0.6, stagger: 0.08, ease: 'power3.out' }, 0.2);
+
+    window.__timelines['contraportada-kinetic-typography'] = tl;
+  </script>
+</body>
+</html>
