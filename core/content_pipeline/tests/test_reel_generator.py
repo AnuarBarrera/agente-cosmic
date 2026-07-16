@@ -392,6 +392,51 @@ class TestGenerateSceneStill:
         assert result is None
 
 
+class TestChooseReelTemplate:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_template_chosen_by_gemini(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"template": "panel-wipe"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._choose_reel_template('Hook de prueba', 'CTA de prueba')
+        assert result == 'panel-wipe'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_falls_back_to_random_on_api_error(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator, _REEL_TEMPLATES
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            result = gen._choose_reel_template('Hook', 'CTA')
+        assert result in _REEL_TEMPLATES
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_falls_back_to_random_on_invalid_template_name(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator, _REEL_TEMPLATES
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"template": "not-a-real-template"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._choose_reel_template('Hook', 'CTA')
+        assert result in _REEL_TEMPLATES
+
+
 class TestAnimateStillToClip:
     def test_builds_zoompan_command_with_exact_dimensions(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
@@ -454,16 +499,17 @@ class TestGenerateBrandedSegment:
                     side_effect=fake_run), \
              patch('core.content_pipeline.generators.reel_generator.record_hyperframes_generation') as mock_record:
             result = gen._generate_branded_segment(
-                'portada', 'Descubre algo nuevo', 'algo', 'Compra ahora', '#1a1a2e', '',
+                'portada', 'Descubre algo nuevo', 'algo', 'Compra ahora', '#1a1a2e',
+                'panel-wipe', "'Poppins', sans-serif",
             )
 
         assert result == fake_output
         assert captured['variables'] == {
             'hook_before': 'Descubre ', 'hook_highlight': 'algo', 'hook_after': ' nuevo',
-            'primary_color': '#1a1a2e', 'text_color': 'white', 'logo_url': '',
+            'primary_color': '#1a1a2e', 'text_color': 'white', 'font_family': "'Poppins', sans-serif",
         }
         assert '-c' in captured['cmd']
-        assert captured['cmd'][captured['cmd'].index('-c') + 1] == 'compositions/portada.html'
+        assert captured['cmd'][captured['cmd'].index('-c') + 1] == 'compositions/portada-panel-wipe.html'
         assert '--fps' in captured['cmd']
         assert captured['cmd'][captured['cmd'].index('--fps') + 1] == '24'
         mock_record.assert_called_once_with('portada')
@@ -488,15 +534,16 @@ class TestGenerateBrandedSegment:
                     side_effect=fake_run), \
              patch('core.content_pipeline.generators.reel_generator.record_hyperframes_generation'):
             result = gen._generate_branded_segment(
-                'contraportada', 'Descubre algo nuevo', 'algo', 'Compra ahora', '#1a1a2e', 'https://logo.png',
+                'contraportada', 'Descubre algo nuevo', 'algo', 'Compra ahora', '#1a1a2e',
+                'dynamic-background', "'Bebas Neue', sans-serif",
             )
 
         assert result == fake_output
         assert captured['variables'] == {
             'cta_text': 'Compra ahora', 'primary_color': '#1a1a2e',
-            'text_color': 'white', 'logo_url': 'https://logo.png',
+            'text_color': 'white', 'font_family': "'Bebas Neue', sans-serif",
         }
-        assert captured['cmd'][captured['cmd'].index('-c') + 1] == 'compositions/contraportada.html'
+        assert captured['cmd'][captured['cmd'].index('-c') + 1] == 'compositions/contraportada-dynamic-background.html'
 
     def test_returns_none_on_subprocess_error(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
@@ -504,7 +551,8 @@ class TestGenerateBrandedSegment:
         with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
                     side_effect=subprocess.CalledProcessError(1, 'hyperframes')):
             result = gen._generate_branded_segment(
-                'portada', 'Descubre algo nuevo', 'algo', 'Compra ahora', '#1a1a2e', '',
+                'portada', 'Descubre algo nuevo', 'algo', 'Compra ahora', '#1a1a2e',
+                'panel-wipe', "'Poppins', sans-serif",
             )
         assert result is None
 
@@ -515,17 +563,22 @@ class TestGenerateClipsWithBranding:
         gen = ReelGenerator(bucket_name='test-bucket')
         with patch.object(gen, '_generate_video_clips', return_value=[b'v', b's1', b's2', b's3', b's4', b's5']), \
              patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
+             patch.object(gen, '_choose_reel_template', return_value='panel-wipe') as mock_template, \
+             patch('core.content_pipeline.generators.reel_generator.choose_font_preset',
+                   return_value={'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins'}) as mock_font, \
              patch.object(gen, '_generate_branded_segment', side_effect=[b'portada-raw', b'contra-raw']) as mock_branded, \
              patch.object(gen, '_normalize_branded_segment', side_effect=[b'portada-norm', b'contra-norm']) as mock_norm:
             clips, has_branding = gen._generate_clips_with_branding(
-                ['scene 1', 'scene 2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'https://logo.png',
+                ['scene 1', 'scene 2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
             )
 
         assert has_branding is True
         assert clips == [b'portada-norm', b'v', b's1', b's2', b's3', b's4', b's5', b'contra-norm']
+        mock_font.assert_called_once_with('job1')
+        mock_template.assert_called_once_with('Hook', 'CTA')
         assert mock_branded.call_args_list == [
-            call('portada', 'Hook', 'word', 'CTA', '#1a1a2e', 'https://logo.png'),
-            call('contraportada', 'Hook', 'word', 'CTA', '#1a1a2e', 'https://logo.png'),
+            call('portada', 'Hook', 'word', 'CTA', '#1a1a2e', 'panel-wipe', "'Poppins', sans-serif"),
+            call('contraportada', 'Hook', 'word', 'CTA', '#1a1a2e', 'panel-wipe', "'Poppins', sans-serif"),
         ]
         assert mock_norm.call_args_list == [
             call(b'portada-raw', 720, 1280, 24.0),
@@ -537,11 +590,14 @@ class TestGenerateClipsWithBranding:
         gen = ReelGenerator(bucket_name='test-bucket')
         with patch.object(gen, '_generate_video_clips', return_value=[b'v', b's1', b's2', b's3', b's4', b's5']), \
              patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
+             patch.object(gen, '_choose_reel_template', return_value='panel-wipe'), \
+             patch('core.content_pipeline.generators.reel_generator.choose_font_preset',
+                   return_value={'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins'}), \
              patch.object(gen, '_generate_branded_segment', return_value=None) as mock_branded, \
              patch.object(gen, '_normalize_branded_segment') as mock_norm, \
              patch('core.content_pipeline.generators.reel_generator.record_hyperframes_fallback') as mock_fallback:
             clips, has_branding = gen._generate_clips_with_branding(
-                ['scene 1', 'scene 2'], 'Hook', 'word', 'CTA', '#1a1a2e', '',
+                ['scene 1', 'scene 2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
             )
 
         assert has_branding is False
@@ -557,7 +613,7 @@ class TestGenerateClipsWithBranding:
         with patch.object(gen, '_generate_video_clips', return_value=[b'v']), \
              patch.object(gen, '_generate_branded_segment') as mock_branded:
             clips, has_branding = gen._generate_clips_with_branding(
-                ['scene 1'], 'Hook', 'word', 'CTA', '#1a1a2e', '',
+                ['scene 1'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
             )
 
         assert clips == [b'v']
@@ -1061,7 +1117,7 @@ class TestGenerate:
         assert poster_url == 'https://storage.test/poster.png'
         mock_clips.assert_called_once_with(
             _FAKE_SCRIPT['scene_prompts'], _FAKE_SCRIPT['hook_text'], _FAKE_SCRIPT['highlight_word'],
-            _FAKE_SCRIPT['tag_cta'], '#1a1a2e', '',
+            _FAKE_SCRIPT['tag_cta'], '#1a1a2e', 'job1-day1',
         )
         mock_up_video.assert_called_once_with(b'final-mp4', 'job1-day1')
         mock_up_poster.assert_called_once_with(b'poster-png', 'job1-day1-poster')
@@ -1071,22 +1127,18 @@ class TestGenerate:
             skip_hook_cta_overlay=False,
         )
 
-    def test_passes_logo_url_and_skip_flag_when_branding_succeeds(self):
+    def test_passes_skip_flag_when_branding_succeeds(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'p', b'c1', b'c2', b'c3', b'c'], True)) as mock_clips, \
+        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'p', b'c1', b'c2', b'c3', b'c'], True)), \
              patch.object(gen, '_generate_music', return_value=None), \
              patch.object(gen, '_generate_narration', return_value=None), \
              patch.object(gen, '_assemble_reel', return_value=b'final-mp4') as mock_assemble, \
              patch.object(gen, '_extract_poster_frame', return_value=b'poster-png'), \
              patch.object(gen, '_upload_video_to_storage', return_value='url1'), \
              patch.object(gen, '_upload_to_storage', return_value='url2'):
-            gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1', logo_url='https://logo.png')
+            gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
 
-        mock_clips.assert_called_once_with(
-            _FAKE_SCRIPT['scene_prompts'], _FAKE_SCRIPT['hook_text'], _FAKE_SCRIPT['highlight_word'],
-            _FAKE_SCRIPT['tag_cta'], '#1a1a2e', 'https://logo.png',
-        )
         assert mock_assemble.call_args.kwargs['skip_hook_cta_overlay'] is True
 
     def test_skips_subtitle_generation_when_narration_fails(self):

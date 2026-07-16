@@ -3,6 +3,7 @@ import html as _html
 import json
 import logging
 import os
+import random
 import re
 import subprocess
 import tempfile
@@ -13,6 +14,7 @@ from google.cloud import storage
 from django.conf import settings
 from playwright.sync_api import sync_playwright
 from PIL import ImageFont
+from core.shared.font_presets import choose_font_preset
 from core.shared.metrics import GCS_OPERATIONS
 from core.shared.metrics_utils import (
     track_external_api, record_tokens, record_veo_generation,
@@ -34,6 +36,7 @@ _IMAGE_SHOT_DURATION_SECONDS = 2.0  # duracion de cada shot corto de imagen (esc
 # min y SI completo con exito; un limite mas corto lo habria descartado igual.
 _VEO_POLL_TIMEOUT_SECONDS = 1800
 _VIDEO_WIDTH = 1080
+_REEL_TEMPLATES = ['panel-wipe', 'kinetic-typography', 'dynamic-background']
 
 # Fuente compartida por hook, CTA y subtitulos — todo el texto de los reels se
 # compone con el filtro drawtext de ffmpeg (fontfile= apunta directo al .ttf).
@@ -388,22 +391,61 @@ class ReelGenerator:
             return None
         return self._animate_still_to_clip(still, width, height, fps, duration=duration)
 
+    def _choose_reel_template(self, hook_text: str, tag_cta: str) -> str:
+        """Gemini elige el template de portada/contraportada que mejor calza con
+        el tono del guion, en vez de una eleccion aleatoria (mismo patron que
+        ImageGenerator._choose_template_for_image)."""
+        try:
+            client = _vertex_client()
+            prompt = (
+                "Este es el hook y el CTA de un reel vertical para redes sociales.\n"
+                f"Hook: \"{hook_text}\"\n"
+                f"CTA: \"{tag_cta}\"\n\n"
+                "Elige el template de portada/contraportada que mejor calce con el tono "
+                "del mensaje. Responde UNICAMENTE con este JSON (sin markdown):\n"
+                '{"template": "panel-wipe" | "kinetic-typography" | "dynamic-background"}\n\n'
+                "- 'panel-wipe': paneles solidos que entran deslizandose, estilo noticiero/anuncio "
+                "de TV. Ideal para mensajes directos, corporativos, de autoridad.\n"
+                "- 'kinetic-typography': palabras que entran en cascada con movimiento, fondo claro "
+                "con lineas decorativas. Ideal para mensajes energicos, dinamicos, juveniles.\n"
+                "- 'dynamic-background': fondo con formas de color en movimiento continuo, texto "
+                "simple. Ideal para mensajes calmados, aspiracionales, elegantes."
+            )
+            with track_external_api('gemini', operation='reel_template_select'):
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL,
+                    contents=prompt,
+                )
+            record_tokens(resp, operation='reel_template_select',
+                          response_preview=resp.text[:200] if resp.text else '')
+            raw = resp.text.strip()
+            match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                template = data.get('template', '')
+                if template in _REEL_TEMPLATES:
+                    logger.info(f"Template de reel seleccionado: {template}")
+                    return template
+        except Exception as e:
+            logger.warning(f"Seleccion de template de reel por IA fallo, usando aleatorio: {e}")
+        return random.choice(_REEL_TEMPLATES)
+
     def _generate_branded_segment(self, kind: str, hook_text: str, highlight_word: str,
-                                   tag_cta: str, primary_color: str, logo_url: str) -> bytes | None:
+                                   tag_cta: str, primary_color: str, template: str,
+                                   font_family: str) -> bytes | None:
         text_color = _readable_text_color(primary_color)
         if kind == 'portada':
             before, highlight, after = _split_highlight(hook_text, highlight_word)
             variables = {
                 'hook_before': before, 'hook_highlight': highlight, 'hook_after': after,
-                'primary_color': primary_color, 'text_color': text_color, 'logo_url': logo_url,
+                'primary_color': primary_color, 'text_color': text_color, 'font_family': font_family,
             }
-            composition = 'compositions/portada.html'
         else:
             variables = {
                 'cta_text': tag_cta, 'primary_color': primary_color,
-                'text_color': text_color, 'logo_url': logo_url,
+                'text_color': text_color, 'font_family': font_family,
             }
-            composition = 'compositions/contraportada.html'
+        composition = f'compositions/{kind}-{template}.html'
 
         with tempfile.TemporaryDirectory() as tmp:
             vars_path = os.path.join(tmp, 'vars.json')
@@ -441,19 +483,23 @@ class ReelGenerator:
 
     def _generate_clips_with_branding(self, scene_prompts: list[str], hook_text: str,
                                        highlight_word: str, tag_cta: str, primary_color: str,
-                                       logo_url: str) -> tuple[list[bytes], bool]:
+                                       filename_prefix: str) -> tuple[list[bytes], bool]:
         clips = self._generate_video_clips(scene_prompts)
         if len(clips) < 3:
             return clips, False
 
         width, height, fps = self._probe_clip_dimensions(clips[0])
 
+        font_seed = filename_prefix.rsplit('-day', 1)[0] if '-day' in filename_prefix else filename_prefix
+        font_preset = choose_font_preset(font_seed)
+        template = self._choose_reel_template(hook_text, tag_cta)
+
         portada = self._generate_branded_segment(
-            'portada', hook_text, highlight_word, tag_cta, primary_color, logo_url,
+            'portada', hook_text, highlight_word, tag_cta, primary_color, template, font_preset['font_family'],
         )
         if portada is None:
             portada = self._generate_branded_segment(
-                'portada', hook_text, highlight_word, tag_cta, primary_color, logo_url,
+                'portada', hook_text, highlight_word, tag_cta, primary_color, template, font_preset['font_family'],
             )  # 1 reintento
 
         if portada is None:
@@ -462,11 +508,11 @@ class ReelGenerator:
             return clips, False
 
         contraportada = self._generate_branded_segment(
-            'contraportada', hook_text, highlight_word, tag_cta, primary_color, logo_url,
+            'contraportada', hook_text, highlight_word, tag_cta, primary_color, template, font_preset['font_family'],
         )
         if contraportada is None:
             contraportada = self._generate_branded_segment(
-                'contraportada', hook_text, highlight_word, tag_cta, primary_color, logo_url,
+                'contraportada', hook_text, highlight_word, tag_cta, primary_color, template, font_preset['font_family'],
             )  # 1 reintento
 
         if contraportada is None:
@@ -833,13 +879,12 @@ class ReelGenerator:
             with open(frame_path, 'rb') as f:
                 return f.read()
 
-    def generate(self, script: dict, colors: list[str], filename_prefix: str,
-                 logo_url: str = '') -> tuple[str, str]:
+    def generate(self, script: dict, colors: list[str], filename_prefix: str) -> tuple[str, str]:
         try:
             primary_color = colors[0] if colors else '#e94560'
             clips, has_branding = self._generate_clips_with_branding(
                 script['scene_prompts'], script['hook_text'], script['highlight_word'],
-                script['tag_cta'], primary_color, logo_url,
+                script['tag_cta'], primary_color, filename_prefix,
             )
             if len(clips) < 3:
                 logger.warning(f"Reel abortado: solo {len(clips)}/3 clips de Veo generados")
