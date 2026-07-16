@@ -615,11 +615,16 @@ Corrige el mismo bug de desborde. A diferencia de los otros 2 templates, este pr
   <script>
     const { hook_before, hook_highlight, hook_after } = window.__hyperframes.getVariables();
     const container = document.getElementById('hook-container');
-    const fullText = [hook_before, hook_highlight, hook_after].join(' ').trim().replace(/\s+/g, ' ');
+    // Sin espacio en el join: hook_before/hook_after ya traen su propio espacio
+    // (o puntuacion pegada, ej. ", paso a paso") desde _split_highlight en Python.
+    const fullText = [hook_before, hook_highlight, hook_after].join('').trim().replace(/\s+/g, ' ');
     const highlightWords = new Set(hook_highlight.trim().split(/\s+/).filter(Boolean));
     fullText.split(' ').forEach((word, i, arr) => {
       const span = document.createElement('span');
-      span.className = 'word' + (highlightWords.has(word) ? ' highlight' : '');
+      // Compara sin puntuacion pegada (ej. "tecnológica," debe resaltar igual
+      // que "tecnológica") pero conserva la puntuacion original en pantalla.
+      const bareWord = word.replace(/^[¿¡"'([{]+|[.,!?;:"')\]}]+$/g, '');
+      span.className = 'word' + (highlightWords.has(bareWord) ? ' highlight' : '');
       span.textContent = word;
       container.appendChild(span);
       if (i < arr.length - 1) container.appendChild(document.createTextNode(' '));
