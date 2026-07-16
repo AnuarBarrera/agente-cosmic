@@ -25,6 +25,7 @@ from core.content_pipeline.generators.subtitle_generator import SubtitleGenerato
 logger = logging.getLogger(__name__)
 
 _VEO_CLIP_DURATION_SECONDS = 8
+_IMAGE_SHOT_DURATION_SECONDS = 2.0  # duracion de cada shot corto de imagen (escenas 1-5)
 # La LRO (long-running operation) de Veo puede quedar en done=False indefinidamente
 # sin devolver error — el polling sin limite espera para siempre. 30 min (no los 5
 # min sugeridos por una fuente externa) porque en produccion real un clip tardo 24
@@ -172,6 +173,18 @@ def _probe_video_dimensions(video_path: str) -> tuple[int, int, float]:
     num, den = fps_str.split('/')
     fps = float(num) / float(den) if float(den) != 0 else float(num)
     return int(width_str), int(height_str), fps
+
+
+def _probe_video_duration(video_path: str) -> float:
+    # Con clips de duracion mixta (Veo 8s + shots de imagen de 2s) la formula
+    # anterior duration = len(clips) * _VEO_CLIP_DURATION_SECONDS ya no es
+    # valida — se mide la duracion real del video ya concatenado.
+    result = subprocess.run(
+        ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+         '-of', 'csv=p=0', video_path],
+        check=True, capture_output=True, text=True,
+    )
+    return float(result.stdout.strip())
 
 
 def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color: str,
@@ -343,19 +356,21 @@ class ReelGenerator:
                 f.write(video_bytes)
             return _probe_video_dimensions(path)
 
-    def _generate_still_scene_clip(self, prompt: str, width: int, height: int, fps: float) -> bytes | None:
+    def _generate_still_scene_clip(self, prompt: str, width: int, height: int, fps: float,
+                                    duration: float = _VEO_CLIP_DURATION_SECONDS) -> bytes | None:
         still = self._generate_scene_still(prompt)
         if still is None:
             still = self._generate_scene_still(prompt)  # 1 reintento
         if still is None:
             return None
-        return self._animate_still_to_clip(still, width, height, fps)
+        return self._animate_still_to_clip(still, width, height, fps, duration=duration)
 
     def _generate_video_clips(self, scene_prompts: list[str]) -> list[bytes]:
-        # scene_prompts[0] va a Veo (video real). scene_prompts[1] y [2] se generan
-        # como imagen fija (Imagen) + animacion zoompan de ffmpeg — reduce el uso de
-        # Veo de 3 a 1 clip por reel (costo ~$2.40 -> ~$0.88, y elimina 2/3 del riesgo
-        # de alucinacion de movimiento). Ver docs/superpowers/specs/2026-07-15-reels-imagen-veo-hybrid-design.md
+        # scene_prompts[0] va a Veo (video real, _VEO_CLIP_DURATION_SECONDS=8s).
+        # scene_prompts[1:] (5 shots cortos) se generan como imagen fija (Imagen) +
+        # animacion zoompan de ffmpeg, cada uno de _IMAGE_SHOT_DURATION_SECONDS=2s —
+        # ritmo de corte rapido tipo publicidad, costo marginal (Imagen $0.04/imagen).
+        # Ver docs/superpowers/specs/2026-07-15-reels-short-image-shots-design.md
         clips = []
 
         veo_clip = self._generate_single_clip(scene_prompts[0])
@@ -371,12 +386,16 @@ class ReelGenerator:
                 f"Imagen: {scene_prompts[0][:80]}"
             )
             width, height, fps = _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS
-            still_clip = self._generate_still_scene_clip(scene_prompts[0], width, height, fps)
+            still_clip = self._generate_still_scene_clip(
+                scene_prompts[0], width, height, fps, duration=_VEO_CLIP_DURATION_SECONDS,
+            )
             if still_clip is not None:
                 clips.append(still_clip)
 
         for prompt in scene_prompts[1:]:
-            still_clip = self._generate_still_scene_clip(prompt, width, height, fps)
+            still_clip = self._generate_still_scene_clip(
+                prompt, width, height, fps, duration=_IMAGE_SHOT_DURATION_SECONDS,
+            )
             if still_clip is not None:
                 clips.append(still_clip)
             else:
@@ -550,7 +569,7 @@ class ReelGenerator:
                 check=True, capture_output=True,
             )
 
-            duration = len(clips) * _VEO_CLIP_DURATION_SECONDS
+            duration = _probe_video_duration(concat_path)
             cta_start = max(0, duration - 3)
             primary_color = colors[0] if colors else '#e94560'
             video_width = _probe_video_width(concat_path)

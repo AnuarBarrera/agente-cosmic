@@ -133,22 +133,27 @@ class TestGenerateVideoClips:
         VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
     )
     def test_first_scene_via_veo_rest_via_imagen_zoompan(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        from core.content_pipeline.generators.reel_generator import (
+            ReelGenerator, _IMAGE_SHOT_DURATION_SECONDS,
+        )
         gen = ReelGenerator(bucket_name='test-bucket')
         with patch.object(gen, '_generate_single_clip', return_value=b'veo-clip') as mock_veo, \
              patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)) as mock_probe, \
              patch.object(gen, '_generate_scene_still', return_value=b'still-bytes') as mock_still, \
              patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
-            clips = gen._generate_video_clips(['scene 1', 'scene 2', 'scene 3'])
+            clips = gen._generate_video_clips(
+                ['scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5', 'scene 6']
+            )
 
-        assert clips == [b'veo-clip', b'animated-clip', b'animated-clip']
+        assert clips == [b'veo-clip'] + [b'animated-clip'] * 5
         mock_veo.assert_called_once_with('scene 1')
         mock_probe.assert_called_once_with(b'veo-clip')
-        assert mock_still.call_args_list == [call('scene 2'), call('scene 3')]
-        assert mock_animate.call_args_list == [
-            call(b'still-bytes', 720, 1280, 24.0),
-            call(b'still-bytes', 720, 1280, 24.0),
+        assert mock_still.call_args_list == [
+            call('scene 2'), call('scene 3'), call('scene 4'), call('scene 5'), call('scene 6'),
         ]
+        assert mock_animate.call_args_list == [
+            call(b'still-bytes', 720, 1280, 24.0, duration=_IMAGE_SHOT_DURATION_SECONDS),
+        ] * 5
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
@@ -158,18 +163,29 @@ class TestGenerateVideoClips:
     def test_falls_back_to_imagen_when_veo_scene_fails_completely(self):
         from core.content_pipeline.generators.reel_generator import (
             ReelGenerator, _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS,
+            _VEO_CLIP_DURATION_SECONDS, _IMAGE_SHOT_DURATION_SECONDS,
         )
         gen = ReelGenerator(bucket_name='test-bucket')
         with patch.object(gen, '_generate_single_clip', return_value=None) as mock_veo, \
              patch.object(gen, '_probe_clip_dimensions') as mock_probe, \
              patch.object(gen, '_generate_scene_still', return_value=b'still-bytes'), \
              patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
-            clips = gen._generate_video_clips(['scene 1', 'scene 2', 'scene 3'])
+            clips = gen._generate_video_clips(
+                ['scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5', 'scene 6']
+            )
 
         assert mock_veo.call_count == 2  # 1 intento + 1 reintento, ambos fallan
         mock_probe.assert_not_called()
-        assert clips == [b'animated-clip', b'animated-clip', b'animated-clip']
-        assert mock_animate.call_args_list[0] == call(b'still-bytes', _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS)
+        assert clips == [b'animated-clip'] * 6
+        assert mock_animate.call_count == 6
+        assert mock_animate.call_args_list[0] == call(
+            b'still-bytes', _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS,
+            duration=_VEO_CLIP_DURATION_SECONDS,
+        )
+        assert mock_animate.call_args_list[1] == call(
+            b'still-bytes', _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS,
+            duration=_IMAGE_SHOT_DURATION_SECONDS,
+        )
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
@@ -183,10 +199,12 @@ class TestGenerateVideoClips:
              patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
              patch.object(gen, '_generate_scene_still', return_value=None) as mock_still, \
              patch.object(gen, '_animate_still_to_clip') as mock_animate:
-            clips = gen._generate_video_clips(['scene 1', 'scene 2', 'scene 3'])
+            clips = gen._generate_video_clips(
+                ['scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5', 'scene 6']
+            )
 
         assert clips == [b'veo-clip']
-        assert mock_still.call_count == 4  # 2 escenas x (1 intento + 1 reintento)
+        assert mock_still.call_count == 10  # 5 escenas x (1 intento + 1 reintento)
         mock_animate.assert_not_called()
 
     @override_settings(
@@ -272,6 +290,21 @@ class TestProbeVideoDimensions:
                     return_value=fake_result):
             _, _, fps = _probe_video_dimensions('/fake/path.mp4')
         assert round(fps, 3) == round(25000 / 1001, 3)
+
+
+class TestProbeVideoDuration:
+    def test_returns_duration_as_float(self):
+        from core.content_pipeline.generators.reel_generator import _probe_video_duration
+        fake_result = MagicMock()
+        fake_result.stdout = '18.5\n'
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    return_value=fake_result) as mock_run:
+            duration = _probe_video_duration('/fake/path.mp4')
+        assert duration == 18.5
+        cmd = mock_run.call_args.args[0]
+        assert cmd[0] == 'ffprobe'
+        assert 'format=duration' in cmd
+        assert '/fake/path.mp4' in cmd
 
 
 class TestGenerateSceneStill:
@@ -517,13 +550,16 @@ _FAKE_SCRIPT_FOR_ASSEMBLE = {
 }
 
 
-def _fake_ffmpeg_run(fake_output: bytes):
-    # _assemble_reel ahora llama ffprobe (via _probe_video_width) para saber el
-    # ancho real del video de Veo antes de posicionar el hook — ese subprocess
-    # no escribe a un archivo de salida como los demas, lee de stdout.
+def _fake_ffmpeg_run(fake_output: bytes, width: str = '1080', duration: str = '24.0'):
+    # _assemble_reel llama ffprobe 2 veces: una para la duracion real del video
+    # concatenado (_probe_video_duration, formato=duration) y otra para el ancho
+    # (_probe_video_width, stream=width, usado al posicionar el hook). Ninguna de
+    # las 2 escribe a un archivo de salida como los demas comandos, leen de stdout.
     def run(cmd, *args, **kwargs):
         if cmd[0] == 'ffprobe':
-            return MagicMock(returncode=0, stdout='1080\n')
+            if 'format=duration' in cmd:
+                return MagicMock(returncode=0, stdout=f'{duration}\n')
+            return MagicMock(returncode=0, stdout=f'{width}\n')
         with open(cmd[-1], 'wb') as f:
             f.write(fake_output)
         return MagicMock(returncode=0)
@@ -547,7 +583,7 @@ class TestAssembleReel:
                 colors=['#1a1a2e'],
             )
         assert result == fake_output
-        assert mock_run.call_count == 4  # concat, ffprobe, overlay-drawtext, audio-mix
+        assert mock_run.call_count == 5  # concat, ffprobe-duration, ffprobe-width, overlay-drawtext, audio-mix
         mix_cmd = mock_run.call_args_list[-1].args[0]
         assert '-f s16le -ar 24000 -ac 1 -i' in ' '.join(mix_cmd)
         assert '-filter_complex' in mix_cmd
@@ -585,7 +621,7 @@ class TestAssembleReel:
                 music=None, narration=None,
                 script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
             )
-        overlay_cmd = mock_run.call_args_list[2].args[0]
+        overlay_cmd = mock_run.call_args_list[3].args[0]
         assert overlay_cmd.count('-i') == 1  # solo concat_path, sin PNGs de hook/cta como input
         filter_complex_idx = overlay_cmd.index('-filter_complex')
         filter_complex = overlay_cmd[filter_complex_idx + 1]
@@ -603,20 +639,14 @@ class TestAssembleReel:
         gen = ReelGenerator(bucket_name='test-bucket')
         fake_output = b'fake-mp4-bytes'
 
-        def run(cmd, *args, **kwargs):
-            if cmd[0] == 'ffprobe':
-                return MagicMock(returncode=0, stdout='720\n')
-            with open(cmd[-1], 'wb') as f:
-                f.write(fake_output)
-            return MagicMock(returncode=0)
-
-        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=run) as mock_run:
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=_fake_ffmpeg_run(fake_output, width='720')) as mock_run:
             gen._assemble_reel(
                 clips=[b'clip1', b'clip2', b'clip3'],
                 music=None, narration=None,
                 script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
             )
-        overlay_cmd = mock_run.call_args_list[2].args[0]
+        overlay_cmd = mock_run.call_args_list[3].args[0]
         filter_complex = overlay_cmd[overlay_cmd.index('-filter_complex') + 1]
         # con ancho real 720 el cursor de 'nuevo' (resaltado, al final de la
         # linea) debe quedar bien a la izquierda de 720, nunca cerca de 1080
@@ -643,7 +673,7 @@ class TestAssembleReel:
                 subtitles=subtitles,
             )
         assert result == fake_output
-        overlay_cmd = mock_run.call_args_list[2].args[0]
+        overlay_cmd = mock_run.call_args_list[3].args[0]
         filter_complex_idx = overlay_cmd.index('-filter_complex')
         filter_complex = overlay_cmd[filter_complex_idx + 1]
         assert "text='Tu negocio en linea.'" in filter_complex
@@ -666,7 +696,7 @@ class TestAssembleReel:
                 music=None, narration=None,
                 script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
             )
-        overlay_cmd = mock_run.call_args_list[2].args[0]
+        overlay_cmd = mock_run.call_args_list[3].args[0]
         filter_complex_idx = overlay_cmd.index('-filter_complex')
         filter_complex = overlay_cmd[filter_complex_idx + 1]
         assert 'sub0' not in filter_complex
@@ -713,7 +743,7 @@ class TestAssembleReelPlaywrightEngine:
         assert cta_call.args == ('', '', 'cta', '#1a1a2e')
         assert cta_call.kwargs == {'cta_text': 'Compra ahora'}
 
-        overlay_cmd = mock_run.call_args_list[2].args[0]
+        overlay_cmd = mock_run.call_args_list[3].args[0]
         assert overlay_cmd.count('-i') == 3  # concat + hook.png + cta.png
         filter_complex = overlay_cmd[overlay_cmd.index('-filter_complex') + 1]
         assert filter_complex.count('overlay=0:0') == 2
@@ -740,7 +770,7 @@ class TestAssembleReelPlaywrightEngine:
                 script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
             )
 
-        overlay_cmd = mock_run.call_args_list[2].args[0]
+        overlay_cmd = mock_run.call_args_list[3].args[0]
         assert overlay_cmd.count('-i') == 2  # concat + cta.png (hook no genero PNG)
         filter_complex = overlay_cmd[overlay_cmd.index('-filter_complex') + 1]
         assert "text='nuevo'" in filter_complex  # hook cayo a drawtext
