@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es"
+  data-composition-variables='[
+    {"id":"hook_before","type":"string","label":"Hook (antes)","default":""},
+    {"id":"hook_highlight","type":"string","label":"Hook (resaltado)","default":""},
+    {"id":"hook_after","type":"string","label":"Hook (despues)","default":""},
+    {"id":"primary_color","type":"color","label":"Color primario","default":"#1a1a2e"},
+    {"id":"text_color","type":"color","label":"Color de texto","default":"#ffffff"},
+    {"id":"logo_url","type":"string","label":"Logo","default":""}
+  ]'
+>
+<head>
+  <meta charset="UTF-8" />
+  <script src="../node_modules/gsap/dist/gsap.min.js"></script>
+  <style>
+    @font-face {
+      font-family: 'Poppins'; font-weight: 900;
+      src: url('../assets/Poppins-Bold.ttf') format('truetype');
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 1080px; height: 1920px; overflow: hidden; background: #ffffff; }
+    .wrap {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; padding: 0 80px; gap: 60px;
+    }
+    #logo { width: 200px; height: 200px; object-fit: contain; }
+    #hook {
+      font-family: 'Poppins', sans-serif; font-weight: 900; font-size: 72px;
+      color: #1a1a2e; text-align: center; line-height: 1.25; max-width: 920px;
+    }
+    #hook-highlight {
+      display: inline-block; color: var(--text_color); background: var(--primary_color);
+      padding: 4px 20px; border-radius: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div id="root" data-composition-id="portada" data-start="0" data-duration="3"
+       data-width="1080" data-height="1920">
+    <div class="wrap">
+      <img id="logo" class="clip" data-start="0" data-duration="3"
+           data-var-src="logo_url"
+           src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" />
+      <div id="hook" class="clip" data-start="0" data-duration="3"><span id="hook-before" data-var-text="hook_before"></span><span id="hook-highlight" data-var-text="hook_highlight"></span><span id="hook-after" data-var-text="hook_after"></span></div>
+    </div>
+  </div>
+  <script>
+    const { logo_url } = window.__hyperframes.getVariables();
+    if (!logo_url) {
+      document.getElementById('logo').style.display = 'none';
+    }
+
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({ paused: true });
+    tl.from('#logo', { opacity: 0, scale: 0.7, duration: 0.5, ease: 'back.out(1.7)' }, 0);
+    tl.from('#hook', { opacity: 0, y: 30, duration: 0.5, ease: 'power2.out' }, 0.15);
+    window.__timelines['portada'] = tl;
+  </script>
+</body>
+</html>

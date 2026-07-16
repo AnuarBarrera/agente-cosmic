@@ -9,7 +9,7 @@ ENV PYTHONUNBUFFERED 1
 WORKDIR /app
 
 # Instalar dependencias del sistema (si las hubiera, como postgresql-client)
-RUN apt-get update && apt-get install -y postgresql-client ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y postgresql-client ffmpeg curl unzip && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
@@ -26,6 +26,13 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 # Copiar TODO el código fuente al contenedor
 # Este es el paso crucial que asegura que los workers siempre tengan el código
 COPY . .
+
+# Node.js 22 + HyperFrames (portada/contraportada de reels, ver
+# docs/superpowers/specs/2026-07-16-reels-hyperframes-intro-outro-design.md)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+RUN cd core/content_pipeline/hyperframes_reel && npm ci
 
 # El entrypoint y el comando se definen en docker-compose.yml
 # para mantener la flexibilidad.
