@@ -220,6 +220,129 @@ def test_content_generation_falls_back_to_image_when_reel_generation_fails(job_w
     assert day1.image_url == 'https://storage.googleapis.com/test/fallback.jpg'
 
 
+_MOCK_POSTS_FOR_SAMPLE = [
+    {'caption': 'Post reel', 'hashtags': ['#test'], 'suggested_time': '19:00', 'format': 'reel'},
+    {'caption': 'Post imagen', 'hashtags': ['#test'], 'suggested_time': '19:00', 'format': 'single'},
+    {'caption': 'Post carrusel', 'hashtags': ['#test'], 'suggested_time': '19:00', 'format': 'carousel'},
+] + [
+    {'caption': f'Post {i}', 'hashtags': ['#test'], 'suggested_time': '19:00', 'format': 'single'}
+    for i in range(4, 8)
+]
+
+
+@pytest.fixture
+def job_with_dna_sample_image():
+    job = AnalysisJob.objects.create(
+        email='t@t.com', business_url='https://tuwebmx.com',
+        status=AnalysisJob.STATUS_PROCESSING, stage=AnalysisJob.STAGE_CONTENT, progress=78,
+        generation_mode=AnalysisJob.MODE_SAMPLE_IMAGE,
+    )
+    BrandDNA.objects.create(
+        job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
+        description='Agencia digital', keywords=['diseno'], audience='PYMEs',
+        tone='profesional', primary_colors=['#1a1a2e'],
+    )
+    return job
+
+
+@pytest.fixture
+def job_with_dna_sample_reel():
+    job = AnalysisJob.objects.create(
+        email='t@t.com', business_url='https://tuwebmx.com',
+        status=AnalysisJob.STATUS_PROCESSING, stage=AnalysisJob.STAGE_CONTENT, progress=78,
+        generation_mode=AnalysisJob.MODE_SAMPLE_REEL,
+    )
+    BrandDNA.objects.create(
+        job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
+        description='Agencia digital', keywords=['diseno'], audience='PYMEs',
+        tone='profesional', primary_colors=['#1a1a2e'],
+    )
+    return job
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+)
+def test_generate_sample_task_creates_single_post_calendar_for_image(job_with_dna_sample_image):
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.EmailSender') as MockEmail, \
+         patch('core.content_pipeline.tasks.schedule_daily_emails') as mock_schedule:
+        MockText.return_value.generate.return_value = _MOCK_POSTS_FOR_SAMPLE
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/sample.jpg'
+
+        from core.content_pipeline.tasks import generate_sample_task
+        generate_sample_task(str(job_with_dna_sample_image.id))
+
+    assert ContentCalendar.objects.filter(brand_dna__job=job_with_dna_sample_image).exists()
+    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna_sample_image)
+    assert posts.count() == 1
+    post = posts.first()
+    assert post.format == ContentPost.FORMAT_SINGLE
+    assert post.caption == 'Post imagen'
+    assert post.image_url == 'https://storage.googleapis.com/test/sample.jpg'
+    MockEmail.return_value.send_initial.assert_not_called()
+    mock_schedule.assert_not_called()
+    job_with_dna_sample_image.refresh_from_db()
+    assert job_with_dna_sample_image.status == AnalysisJob.STATUS_DONE
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+)
+def test_generate_sample_task_creates_single_post_calendar_for_reel(job_with_dna_sample_reel):
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel, \
+         patch('core.content_pipeline.tasks.EmailSender') as MockEmail, \
+         patch('core.content_pipeline.tasks.schedule_daily_emails') as mock_schedule:
+        MockText.return_value.generate.return_value = _MOCK_POSTS_FOR_SAMPLE
+        MockScript.return_value.generate.return_value = {'hook_text': 'H', 'scene_prompts': ['a', 'b', 'c']}
+        MockReel.return_value.generate.return_value = ('https://storage.test/reel.mp4', 'https://storage.test/poster.png')
+
+        from core.content_pipeline.tasks import generate_sample_task
+        generate_sample_task(str(job_with_dna_sample_reel.id))
+
+    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna_sample_reel)
+    assert posts.count() == 1
+    post = posts.first()
+    assert post.format == ContentPost.FORMAT_REEL
+    assert post.caption == 'Post reel'
+    assert post.video_url == 'https://storage.test/reel.mp4'
+    MockEmail.return_value.send_initial.assert_not_called()
+    mock_schedule.assert_not_called()
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+)
+def test_generate_sample_task_marks_failed_on_error(job_with_dna_sample_image):
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText:
+        MockText.return_value.generate.side_effect = Exception('Gemini error')
+
+        from core.content_pipeline.tasks import generate_sample_task
+        generate_sample_task(str(job_with_dna_sample_image.id))
+
+    job_with_dna_sample_image.refresh_from_db()
+    assert job_with_dna_sample_image.status == AnalysisJob.STATUS_FAILED
+    assert 'Gemini error' in job_with_dna_sample_image.error_message
+
+
 @pytest.fixture
 def calendar_with_dna():
     job = AnalysisJob.objects.create(email='t@t.com', business_url='https://tuwebmx.com')

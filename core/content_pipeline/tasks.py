@@ -119,6 +119,74 @@ def content_generation_task(job_id: str) -> None:
         job.mark_failed(str(e))
 
 
+def generate_sample_task(job_id: str) -> None:
+    """Genera 1 sola pieza (imagen o reel) en vez del calendario completo —
+    usado para prospeccion (ver AnalysisJob.generation_mode). Reutiliza
+    TextGenerator/_generate_post_media tal cual: TextGenerator ya fija el
+    formato por posicion (dia 1/indice 0 = reel via REEL_DAY, el resto =
+    single salvo dia 3/indice 2 = carousel via CAROUSEL_DAY), asi que solo
+    se toma el primer post que coincida con el formato pedido."""
+    job = AnalysisJob.objects.get(id=job_id)
+    brand_dna = job.brand_dna
+
+    try:
+        job.update_progress(AnalysisJob.STAGE_CONTENT, 80)
+
+        text_gen = TextGenerator()
+        posts_data = text_gen.generate(brand_dna)
+        job.update_progress(AnalysisJob.STAGE_CONTENT, 87)
+
+        wanted_format = (
+            ContentPost.FORMAT_REEL if job.generation_mode == AnalysisJob.MODE_SAMPLE_REEL
+            else ContentPost.FORMAT_SINGLE
+        )
+        post_data = next(p for p in posts_data if p.get('format') == wanted_format)
+
+        calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
+        image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+        reel_script_gen = ReelScriptGenerator()
+        reel_gen = ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+
+        image_url, image_urls, video_url = _generate_post_media(
+            image_gen, reel_script_gen, reel_gen,
+            fmt=wanted_format,
+            filename=f"{job_id}-sample",
+            caption=post_data['caption'],
+            colors=brand_dna.primary_colors,
+            tone=brand_dna.tone,
+            brand_name=brand_dna.business_name,
+            keywords=brand_dna.keywords,
+            description=brand_dna.description,
+            audience=brand_dna.audience,
+            business_url=brand_dna.business_url,
+            brand_dna=brand_dna,
+            post_data=post_data,
+        )
+
+        ContentPost.objects.create(
+            calendar=calendar,
+            day_number=1,
+            caption=post_data['caption'],
+            image_url=image_url,
+            image_urls=image_urls,
+            video_url=video_url,
+            format=wanted_format,
+            suggested_time='09:00',
+            hashtags=post_data.get('hashtags', []),
+            scheduled_at=timezone.now(),
+        )
+
+        job.stage = AnalysisJob.STAGE_COMPLETE
+        job.progress = 100
+        job.status = AnalysisJob.STATUS_DONE
+        job.save(update_fields=['stage', 'progress', 'status'])
+        logger.info(f"Muestra generada para job {job_id} ({wanted_format})")
+
+    except Exception as e:
+        logger.error(f"generate_sample_task error para job {job_id}: {e}")
+        job.mark_failed(str(e))
+
+
 def _generate_missing_image(post: ContentPost) -> None:
     """Genera y guarda la imagen de un post que quedo sin image_url. No lanza — loggea y sigue."""
     brand_dna = post.calendar.brand_dna
