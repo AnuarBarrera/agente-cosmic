@@ -26,6 +26,14 @@ class AnalysisJob(models.Model):
         (STAGE_CONTENT, 'Generando contenido'),
         (STAGE_COMPLETE, 'Completo'),
     ]
+    MODE_FULL = 'full'
+    MODE_SAMPLE_IMAGE = 'sample_image'
+    MODE_SAMPLE_REEL = 'sample_reel'
+    MODE_CHOICES = [
+        (MODE_FULL, 'Calendario completo'),
+        (MODE_SAMPLE_IMAGE, 'Muestra: imagen'),
+        (MODE_SAMPLE_REEL, 'Muestra: reel'),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField()
@@ -39,6 +47,7 @@ class AnalysisJob(models.Model):
     post_images_paths = models.JSONField(default=list, blank=True)
     posts_text = models.TextField(blank=True, default='')
     profile_url = models.URLField(blank=True, default='')
+    generation_mode = models.CharField(max_length=20, choices=MODE_CHOICES, default=MODE_FULL)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

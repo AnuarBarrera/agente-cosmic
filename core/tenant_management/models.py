@@ -35,6 +35,10 @@ class Plan(models.Model):
     max_calendars_per_week = models.PositiveIntegerField(default=2)
     max_post_regenerations = models.PositiveIntegerField(default=2)
     max_post_edits = models.PositiveIntegerField(default=2)
+    # Permite generar 1 sola pieza de muestra (imagen o reel) desde el
+    # formulario de analisis, en vez del calendario completo de 7 dias —
+    # pensado para prospeccion. Activado hoy solo en el Plan Admin.
+    allows_sample_generation = models.BooleanField(default=False)
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
