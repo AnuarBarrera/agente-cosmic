@@ -212,6 +212,11 @@
           {% if post.user_status == 'edited' %}✏ Editado{% else %}↺ Cambio solicitado{% endif %}
         </div>
         {% endif %}
+        {% if post.format == 'reel' %}
+        <p class="note-tip" style="margin-bottom:12px;">
+          💡 Este video está optimizado para Reels/Stories/TikTok — no lo subas como publicación normal del feed, Instagram no lo va a aceptar así.
+        </p>
+        {% endif %}
         <div class="actions">
           <button class="btn-action btn-download" onclick="downloadImage('{{ post.id }}', '{{ post.format }}')">⬇ Descargar {% if post.format == 'carousel' %}carrusel (.zip){% elif post.format == 'reel' %}reel (.mp4){% else %}imagen{% endif %}</button>
           <button class="btn-action btn-edit" id="edit-btn-{{ post.id }}" onclick="startEdit('{{ post.id }}')" style="{% if post.downloaded_at %}display:none;{% endif %}">✏ Edita la descripción</button>

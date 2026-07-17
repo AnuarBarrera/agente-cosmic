@@ -3638,3 +3638,41 @@ Severidad: Medium (consumo de cuota/costo real duplicado por cada
   reenvío accidental, sin tope — puede repetirse indefinidamente sin este
   fix).
 Prioridad: Cerrado.
+
+=================================================================
+HALLAZGO 75 — Falta de aviso "sube el reel como Reel, no como post
+  normal" — fricción silenciosa que puede frenar la adopción de video
+Categoría: UX / fricción de producto
+Estado: ✅ RESUELTO — 2026-07-17
+=================================================================
+Contexto: consecuencia directa del caso de HALLAZGO 74 (video rechazado
+  por Instagram web al subirse como publicación normal en vez de Reel).
+  Anuar consultó esto en la app de Claude (fuera de esta sesión) y trajo
+  la recomendación de producto ya definida: el usuario (perfil de baja
+  madurez digital, ej. "Jorge") no va a saber traducir el error técnico
+  de Instagram ("relación de aspecto 4:5 a 16:9") a "debí subirlo como
+  Reel" — el riesgo real es que abandone en silencio sin volver a
+  intentarlo ni reportar el problema.
+
+Decisión de producto (ya definida antes de esta sesión, solo se
+  implementó): mostrar un aviso corto junto al video, en la MISMA pantalla
+  donde el usuario lo recibe (no solo en la de descarga), antes de que
+  intente subirlo — mensaje instructivo, no un disclaimer técnico:
+  "Este video está optimizado para Reels/Stories/TikTok — no lo subas
+  como publicación normal del feed, Instagram no lo va a aceptar así."
+
+Implementación: `core/brand_dna/templates/brand_dna/calendar_review.html`
+  — el aviso se agrega dentro de cada tarjeta de post con
+  `post.format == 'reel'`, justo antes de los botones de acción (por lo
+  tanto antes del botón de descarga), reutilizando la clase `.note-tip`
+  ya existente en el mismo archivo (mismo patrón visual del tip general
+  de programación de publicaciones que ya está arriba en la página — sin
+  CSS nuevo). No aparece en posts de imagen/carrusel.
+
+Verificado: 2 tests nuevos (`test_calendar_review_shows_reel_upload_tip_for_reel_posts`,
+  `test_calendar_review_omits_reel_upload_tip_when_no_reel_posts`)
+  confirman que el aviso aparece solo cuando hay al menos un post tipo
+  reel en el calendario. 44/44 tests de `test_views.py`.
+
+Severidad: N/A (mejora de UX, no bug/vulnerabilidad).
+Prioridad: Cerrado.

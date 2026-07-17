@@ -469,6 +469,30 @@ def test_calendar_review_shows_feedback_banner_when_pending(client, user, job_wi
     assert b'feedback-banner' in response.content
 
 
+def test_calendar_review_shows_reel_upload_tip_for_reel_posts(client, user, job_with_calendar):
+    # H74/H75: el video esta optimizado para Reels/Stories/TikTok, no para el
+    # feed normal — el aviso debe verse junto al video, antes de que el
+    # usuario intente subirlo (evita el error de "relacion de aspecto" de
+    # Instagram al subirlo como publicacion normal).
+    calendar = job_with_calendar.brand_dna.calendar
+    ContentPost.objects.create(
+        calendar=calendar, day_number=8, caption='Reel post', format=ContentPost.FORMAT_REEL,
+        video_url='https://example.com/reel.mp4', image_url='https://example.com/poster.jpg',
+        suggested_time='19:00', hashtags=[], scheduled_at=timezone.now() + timedelta(days=8),
+    )
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert response.status_code == 200
+    assert 'no lo subas como publicación normal del feed' in response.content.decode('utf-8')
+
+
+def test_calendar_review_omits_reel_upload_tip_when_no_reel_posts(client, user, job_with_calendar):
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert response.status_code == 200
+    assert 'no lo subas como publicación normal del feed' not in response.content.decode('utf-8')
+
+
 def test_calendar_review_groups_posts_by_week(client, user, job_with_calendar):
     calendar = job_with_calendar.brand_dna.calendar
     for i in range(8, 15):
