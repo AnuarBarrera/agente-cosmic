@@ -3676,3 +3676,84 @@ Verificado: 2 tests nuevos (`test_calendar_review_shows_reel_upload_tip_for_reel
 
 Severidad: N/A (mejora de UX, no bug/vulnerabilidad).
 Prioridad: Cerrado.
+
+=================================================================
+HALLAZGO 76 — Generación de muestra individual (imagen o reel) para
+  prospección, verificada en real
+Categoría: Feature
+Estado: ✅ CONSTRUIDO Y VERIFICADO EN REAL — 2026-07-18
+=================================================================
+Contexto: Anuar necesita salir a prospectar mostrando contenido de muestra
+  generado a partir de la marca de cada prospecto, sin comprometerse al
+  calendario completo de 7 días. No sabía de antemano si el reel o la
+  imagen genera más impacto por prospecto, así que pidió poder elegir el
+  formato caso por caso desde el mismo formulario de análisis.
+
+Diseño (spec `2026-07-18-single-sample-generation-design.md`, plan
+  `2026-07-18-single-sample-generation-plan.md`, 3 tareas de código + 1 de
+  verificación): permiso a nivel de `Plan` (`allows_sample_generation`,
+  activado hoy solo en el Plan Admin — reutilizable para Tester o un plan
+  de pago después sin tocar código), selector de 3 opciones en
+  `/analizar/` visible solo con el permiso, validación server-side siempre
+  (nunca confía en el valor del cliente), y `generate_sample_task` (nueva)
+  que reutiliza `TextGenerator`/`_generate_post_media` ya existentes para
+  generar 1 solo post, sin crear el calendario completo ni programar
+  correos.
+
+Implementación: 3 tareas vía agy (Gemini 3.1 Pro), cada una verificada con
+  diff exacto contra el plan:
+  - Task 1 (campos + migraciones): diff exacto, sin hallazgos.
+  - Task 2 (formulario + validación): el agente encontró y corrigió una
+    inconsistencia real de mi propio plan — el JS que arma el FormData no
+    estaba envuelto en el `{% if %}`, dejando el string
+    `name="generation_mode"` en el `<script>` aunque los radios no se
+    rindieran, rompiendo el test que verifica que el selector esté
+    completamente ausente sin permiso. Fix: comillas simples escapadas en
+    el selector CSS (equivalente funcional, cero cambio de comportamiento).
+  - Task 3 (`generate_sample_task` + bifurcación): el dispatch se cortó
+    por "timeout waiting for response" (caída de internet) justo antes de
+    comitear, pero el trabajo en disco coincidía exacto con el plan (solo
+    2 espacios en blanco de PEP8 faltantes entre funciones). Verificado y
+    commiteado por Claude.
+
+Verificación real end-to-end (ejecutada por Claude, no delegada) —
+  **hallazgo de concurrencia real encontrado en el proceso**: el primer
+  intento de generar la muestra de imagen llamó a `analyze_brand_task`
+  Y a `generate_sample_task` directo en el mismo script (para forzar
+  ejecución síncrona) — pero `analyze_brand_task` ya encola
+  `generate_sample_task` vía RQ real, y como los 3 workers reales seguían
+  corriendo, uno de ellos recogió la tarea encolada y la ejecutó en
+  paralelo con la llamada directa del script. Ambos intentaron crear el
+  mismo `ContentCalendar` (OneToOne con `BrandDNA`) — el segundo chocó
+  con `duplicate key value violates unique constraint`. El worker real
+  ganó la carrera y completó la generación con éxito de todos modos (no
+  es un bug de `generate_sample_task` en sí — es un artefacto de mi propio
+  método de verificación, duplicando una llamada que ya se encola sola).
+  Fix del método de verificación: para el reel, se dejó que
+  `analyze_brand_task` encolara normalmente y se hizo polling del estado
+  del job cada 10s hasta `done`/`failed`, sin llamar `generate_sample_task`
+  por separado — esto además es más representativo del flujo real de
+  producción que forzar sincronía artificial.
+
+  Resultado: **muestra de imagen real** — 1 post, formato `single`,
+  imagen profesional de escritorio/lámpara con headline "Tu PyME online
+  exitosa", sin calendario de 7 días. **Muestra de reel real** — 1 post,
+  formato `reel`, MP4 con duración EXACTA de 24.000000s, 720x1280@24fps,
+  escena de manos con maqueta arquitectónica limpia (sin ícono de play ni
+  artefactos, confirma que el fix de negative_prompt de HALLAZGO 73 sigue
+  funcionando). Confirmado en logs: ningún correo (`send_initial`/
+  `schedule_daily_emails`) se disparó en ninguna de las 2 corridas. Sin
+  errores reales en logs (los reintentos de QC/429 vistos son
+  comportamiento normal ya establecido, no fallos).
+
+**Lección reutilizable:** al verificar en real una tarea que normalmente
+  se dispara solo vía `django_rq.enqueue` (nunca llamada directo en
+  producción), NO llamar la función encolada manualmente en el mismo
+  script si hay workers reales corriendo escuchando la misma cola — hace
+  una carrera real contra el propio script. O se detienen los workers
+  antes de la verificación manual, o se deja que el worker real la
+  procese y se hace polling del resultado — esto último además prueba el
+  camino MÁS realista (igual al que corre un usuario real).
+
+Severidad: N/A (feature, no vulnerabilidad).
+Prioridad: Cerrado.
