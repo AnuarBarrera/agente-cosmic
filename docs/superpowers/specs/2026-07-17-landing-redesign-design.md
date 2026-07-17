@@ -99,7 +99,7 @@ Cambios:
     sensibles, se hardcodean directo en `brand.config.ts`, no vía env).
   - `founder: { linkedinUrl: string; personalSiteUrl: string; photoUrl:
     string }` — placeholders.
-  - `partnerCredit: { name: string; url: string; logoUrl: string }` —
+  - `partnerCredit: { name: string; url: string }` —
     placeholder ("Tu Web MX").
   - `pricing: { amountMXN: number; discountLabel: string;
     stripeButtonLabel: string }` — valores reales dados por Anuar (199,
