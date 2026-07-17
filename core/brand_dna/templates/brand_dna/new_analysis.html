@@ -102,6 +102,23 @@
         <input type="file" name="logo" accept="image/*">
       </div>
 
+      {% if allows_sample_generation %}
+      <div class="form-group">
+        <label>¿Qué quieres generar?</label>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px;">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:normal;">
+            <input type="radio" name="generation_mode" value="full" checked> Calendario completo (7 días)
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-weight:normal;">
+            <input type="radio" name="generation_mode" value="sample_image"> Solo 1 imagen de muestra
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-weight:normal;">
+            <input type="radio" name="generation_mode" value="sample_reel"> Solo 1 reel de muestra
+          </label>
+        </div>
+      </div>
+      {% endif %}
+
       <p style="text-align:center;color:#888;font-size:0.85rem;margin-top:20px;margin-bottom:4px;">Vamos a crear tu plan de contenido de siete días basado en tu marca.</p>
 
       <button type="submit" class="btn" id="submitBtn">
@@ -169,6 +186,9 @@
           var el = form.querySelector('[name="' + name + '"]');
           if (el) fd.append(name, el.value);
         });
+
+        var selectedMode = form.querySelector('[name=\'generation_mode\']:checked');
+        if (selectedMode) fd.append('generation_mode', selectedMode.value);
 
         results[0].forEach(function(f) { fd.append('logo', f); });
 

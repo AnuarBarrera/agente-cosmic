@@ -67,6 +67,26 @@ def test_new_analysis_without_screenshots_hides_gallery(user):
     assert b'screenshots/dashboard.webp' not in response.content
 
 
+def test_new_analysis_hides_sample_mode_selector_without_permission(user):
+    c = Client()
+    c.force_login(user)
+    response = c.get('/nuevo-analisis/')
+    assert response.status_code == 200
+    assert response.context['allows_sample_generation'] is False
+    assert b'name="generation_mode"' not in response.content
+
+
+def test_new_analysis_shows_sample_mode_selector_with_permission(user, free_plan):
+    free_plan.allows_sample_generation = True
+    free_plan.save(update_fields=['allows_sample_generation'])
+    c = Client()
+    c.force_login(user)
+    response = c.get('/nuevo-analisis/')
+    assert response.status_code == 200
+    assert response.context['allows_sample_generation'] is True
+    assert b'name="generation_mode"' in response.content
+
+
 def test_analyze_submit_creates_job(user):
     c = Client()
     c.force_login(user)
@@ -79,6 +99,54 @@ def test_analyze_submit_creates_job(user):
         })
     assert response.status_code == 302
     assert AnalysisJob.objects.filter(user=user).exists()
+
+
+def test_analyze_submit_saves_sample_mode_when_permitted(user, free_plan):
+    free_plan.allows_sample_generation = True
+    free_plan.save(update_fields=['allows_sample_generation'])
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.django_rq'), \
+         patch('core.brand_dna.moderation.check_business_legitimacy', return_value=(True, '')):
+        c.post('/analizar/', {
+            'business_name': 'Tu Web MX',
+            'business_description': 'Agencia digital que hace sitios web.',
+            'generation_mode': 'sample_reel',
+        })
+    job = AnalysisJob.objects.filter(user=user).latest('created_at')
+    assert job.generation_mode == AnalysisJob.MODE_SAMPLE_REEL
+
+
+def test_analyze_submit_ignores_sample_mode_without_permission(user):
+    # free_plan (fixture) tiene allows_sample_generation=False por default —
+    # un POST con generation_mode=sample_reel debe forzarse a 'full', nunca
+    # confiar en el valor del cliente para una capacidad restringida.
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.django_rq'), \
+         patch('core.brand_dna.moderation.check_business_legitimacy', return_value=(True, '')):
+        c.post('/analizar/', {
+            'business_name': 'Tu Web MX',
+            'business_description': 'Agencia digital que hace sitios web.',
+            'generation_mode': 'sample_reel',
+        })
+    job = AnalysisJob.objects.filter(user=user).latest('created_at')
+    assert job.generation_mode == AnalysisJob.MODE_FULL
+
+
+def test_analyze_submit_defaults_to_full_when_mode_missing(user, free_plan):
+    free_plan.allows_sample_generation = True
+    free_plan.save(update_fields=['allows_sample_generation'])
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.django_rq'), \
+         patch('core.brand_dna.moderation.check_business_legitimacy', return_value=(True, '')):
+        c.post('/analizar/', {
+            'business_name': 'Tu Web MX',
+            'business_description': 'Agencia digital que hace sitios web.',
+        })
+    job = AnalysisJob.objects.filter(user=user).latest('created_at')
+    assert job.generation_mode == AnalysisJob.MODE_FULL
 
 
 def test_analyze_submit_without_url_with_description(user):

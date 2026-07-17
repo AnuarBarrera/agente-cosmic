@@ -74,7 +74,10 @@ def home(request):
 def new_analysis(request):
     if not request.user.is_authenticated:
         return redirect('login')
-    return render(request, 'brand_dna/new_analysis.html', _screenshots_context())
+    from core.brand_dna.rate_limits import get_user_plan
+    context = _screenshots_context()
+    context['allows_sample_generation'] = get_user_plan(request.user).allows_sample_generation
+    return render(request, 'brand_dna/new_analysis.html', context)
 
 
 def favicon(request):
@@ -135,11 +138,19 @@ def analyze_submit(request):
     if duplicate_job:
         return redirect('results', job_id=duplicate_job.id)
 
+    # get_user_plan ya esta importado arriba en esta funcion (linea ~98,
+    # junto a can_create_calendar) — no hace falta reimportarlo.
+    requested_mode = request.POST.get('generation_mode', AnalysisJob.MODE_FULL)
+    valid_modes = {AnalysisJob.MODE_FULL, AnalysisJob.MODE_SAMPLE_IMAGE, AnalysisJob.MODE_SAMPLE_REEL}
+    if requested_mode not in valid_modes or not get_user_plan(request.user).allows_sample_generation:
+        requested_mode = AnalysisJob.MODE_FULL
+
     job = AnalysisJob.objects.create(
         email=email,
         business_url=business_url,
         business_description=business_description,
         user=request.user,
+        generation_mode=requested_mode,
     )
 
     if 'logo' in request.FILES:
