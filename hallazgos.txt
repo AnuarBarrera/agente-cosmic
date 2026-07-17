@@ -3584,3 +3584,57 @@ Severidad: Medium (afecta la calidad visual de todos los reels con shots
   de Imagen, no solo portada/contraportada — issue preexistente detectado
   hoy).
 Prioridad: Cerrado.
+
+=================================================================
+HALLAZGO 74 — Envío duplicado del formulario de análisis creaba 2
+  AnalysisJob idénticos, duplicando consumo de API
+Categoría: Bug de producción (incidente real)
+Estado: ✅ CORREGIDO Y VERIFICADO — 2026-07-17
+=================================================================
+Contexto: Anuar reportó (vía Claude Code corriendo en producción) un
+  incidente real: 2 `AnalysisJob` casi idénticos, creados 97 segundos
+  aparte, con la misma descripción de negocio exacta, ambos corriendo
+  activamente en RQ al mismo tiempo — consumo de API duplicado por
+  duplicado accidental de envío. Se dejó correr ambos hasta terminar
+  (decisión correcta: el costo del 80-87% ya generado estaba hundido, no
+  se recupera matando el job atrasado, y terminar ambos da 2 resultados
+  aprovechables por el mismo costo).
+
+Causa raíz: el botón "Analizar mi marca" (`new_analysis.html`) SÍ se
+  deshabilita en el primer clic (protección correcta contra doble-clic en
+  la misma carga de página) — pero eso no protege contra una carga de
+  página nueva (recargar, abrir una segunda pestaña) mientras el análisis
+  anterior sigue en curso, que es el escenario real más probable dado el
+  gap de 97 segundos. `analyze_submit` (`core/brand_dna/views.py`) no
+  tenía ninguna verificación server-side — creaba un `AnalysisJob` nuevo
+  sin importar si el usuario ya tenía uno idéntico en curso.
+
+Fix: antes de crear el `AnalysisJob`, se agrega una verificación —
+  si el usuario ya tiene un job con la MISMA `business_description`
+  (nombre+descripción ya concatenados) en estado `pending`/`processing`,
+  se redirige al job existente en vez de crear uno nuevo. Deliberadamente
+  acotado a contenido idéntico (no bloquea cualquier análisis concurrente)
+  para no restringir el caso legítimo de un usuario analizando 2 negocios
+  distintos en paralelo, ni un re-análisis intencional una vez que el
+  anterior ya terminó (`done`/`failed` no bloquean).
+
+Verificado: 3 tests nuevos en `test_views.py` — redirige sin crear
+  duplicado ni encolar tarea cuando hay un job idéntico en curso; permite
+  reenviar la misma descripción una vez que el job anterior ya terminó;
+  no bloquea un análisis de un negocio DISTINTO mientras el primero sigue
+  en curso. 42/42 tests de `test_views.py`, 470/470 suite completa.
+
+**Nota sobre otro reporte del mismo hilo, NO relacionado con código:**
+  Anuar también compartió una captura de un video rechazado por Instagram
+  web ("relación de aspecto incorrecta", video 720x1280/9:16/24s). Se
+  descartó como bug de Cosmic: 9:16 es el formato correcto de Reels, pero
+  el panel de la captura es el compositor GENÉRICO de publicaciones de
+  Instagram (fotos/video normal), que solo acepta de 4:5 a 16:9 —
+  excluye 9:16 a propósito, porque Reels tiene su propio flujo de subida
+  separado (app móvil o Meta Business Suite), no disponible en el
+  compositor genérico de escritorio. No se tocó el pipeline de reels.
+
+Severidad: Medium (consumo de cuota/costo real duplicado por cada
+  reenvío accidental, sin tope — puede repetirse indefinidamente sin este
+  fix).
+Prioridad: Cerrado.

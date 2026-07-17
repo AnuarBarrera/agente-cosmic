@@ -122,6 +122,19 @@ def analyze_submit(request):
 
     business_description = f"{business_name}\n{business_description}"
 
+    # Reenvio accidental del mismo formulario (recarga de pagina, segunda
+    # pestana) mientras el analisis anterior sigue en curso — el boton ya se
+    # deshabilita en el primer clic (new_analysis.html), pero eso no protege
+    # contra una carga de pagina nueva. Redirige al job existente en vez de
+    # duplicar el consumo de API.
+    duplicate_job = AnalysisJob.objects.filter(
+        user=request.user,
+        business_description=business_description,
+        status__in=[AnalysisJob.STATUS_PENDING, AnalysisJob.STATUS_PROCESSING],
+    ).first()
+    if duplicate_job:
+        return redirect('results', job_id=duplicate_job.id)
+
     job = AnalysisJob.objects.create(
         email=email,
         business_url=business_url,

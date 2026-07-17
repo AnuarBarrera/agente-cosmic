@@ -115,6 +115,77 @@ def test_analyze_submit_rejected_by_moderation_does_not_create_job(user):
     assert not AnalysisJob.objects.filter(user=user).exists()
 
 
+def test_analyze_submit_redirects_to_existing_job_when_duplicate_in_progress(user):
+    # Reenvio accidental (doble-clic tras recargar, segunda pestana, etc.) con
+    # la misma descripcion mientras el analisis anterior sigue en curso — no
+    # debe crear un segundo AnalysisJob que duplique el consumo de API.
+    c = Client()
+    c.force_login(user)
+    existing = AnalysisJob.objects.create(
+        email=user.email,
+        business_description='Tu Web MX\nAgencia digital que hace sitios web.',
+        status=AnalysisJob.STATUS_PROCESSING,
+        user=user,
+    )
+    with patch('core.brand_dna.views.django_rq') as mock_rq, \
+         patch('core.brand_dna.moderation.check_business_legitimacy', return_value=(True, '')):
+        response = c.post('/analizar/', {
+            'business_name': 'Tu Web MX',
+            'business_description': 'Agencia digital que hace sitios web.',
+            'business_url': 'https://tuwebmx.com',
+        })
+    assert response.status_code == 302
+    assert response.url == f'/resultados/{existing.id}/'
+    assert AnalysisJob.objects.filter(user=user).count() == 1
+    mock_rq.enqueue.assert_not_called()
+
+
+def test_analyze_submit_allows_resubmit_once_previous_job_is_done(user):
+    # Un analisis previo ya TERMINADO con la misma descripcion es una
+    # re-ejecucion intencional (no un reenvio accidental) — debe permitirse.
+    c = Client()
+    c.force_login(user)
+    AnalysisJob.objects.create(
+        email=user.email,
+        business_description='Tu Web MX\nAgencia digital que hace sitios web.',
+        status=AnalysisJob.STATUS_DONE,
+        user=user,
+    )
+    with patch('core.brand_dna.views.django_rq') as mock_rq, \
+         patch('core.brand_dna.moderation.check_business_legitimacy', return_value=(True, '')):
+        response = c.post('/analizar/', {
+            'business_name': 'Tu Web MX',
+            'business_description': 'Agencia digital que hace sitios web.',
+            'business_url': 'https://tuwebmx.com',
+        })
+    assert response.status_code == 302
+    assert AnalysisJob.objects.filter(user=user).count() == 2
+    mock_rq.enqueue.assert_called_once()
+
+
+def test_analyze_submit_allows_different_business_while_one_in_progress(user):
+    # Un analisis en curso para OTRO negocio no debe bloquear un envio
+    # legitimo con contenido distinto.
+    c = Client()
+    c.force_login(user)
+    AnalysisJob.objects.create(
+        email=user.email,
+        business_description='Otro Negocio\nDescripcion completamente distinta.',
+        status=AnalysisJob.STATUS_PROCESSING,
+        user=user,
+    )
+    with patch('core.brand_dna.views.django_rq') as mock_rq, \
+         patch('core.brand_dna.moderation.check_business_legitimacy', return_value=(True, '')):
+        response = c.post('/analizar/', {
+            'business_name': 'Tu Web MX',
+            'business_description': 'Agencia digital que hace sitios web.',
+            'business_url': 'https://tuwebmx.com',
+        })
+    assert response.status_code == 302
+    assert AnalysisJob.objects.filter(user=user).count() == 2
+    mock_rq.enqueue.assert_called_once()
+
+
 def test_analyze_submit_enqueues_task(user):
     c = Client()
     c.force_login(user)
