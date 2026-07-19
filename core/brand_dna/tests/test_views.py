@@ -35,11 +35,12 @@ def user(django_user_model, free_plan):
     return u
 
 
-def test_home_page_shows_marketing_for_anonymous_visitor():
+def test_home_page_redirects_anonymous_visitor_to_marketing_site(settings):
+    settings.MARKETING_SITE_URL = 'https://agentecosmic.com'
     c = Client()
     response = c.get('/')
-    assert response.status_code == 200
-    assert b'Reg\xc3\xadstrate gratis' in response.content
+    assert response.status_code == 302
+    assert response.url == 'https://agentecosmic.com'
 
 
 def test_home_page_redirects_authenticated_users_to_dashboard(user):

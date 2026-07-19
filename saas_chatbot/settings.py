@@ -552,6 +552,11 @@ FRONTEND_URL = get_env('FRONTEND_URL', default='http://localhost:3000')
 
 # Base URL para Agente Cosmic — usada para construir links en emails (encuesta semanal)
 COSMIC_BASE_URL = get_env('COSMIC_BASE_URL', default='https://cosmic.anuarbarrera.dev')
+
+# URL de la landing de marketing (agentecosmic/, Vite/React, servida en Cloudflare
+# Pages) — usada para redirigir la raiz de Django ('/') hacia la landing real,
+# ya que Django dejo de ser quien la sirve tras separar dominios/repos.
+MARKETING_SITE_URL = get_env('MARKETING_SITE_URL', default='https://agentecosmic.com')
 ADMIN_NOTIFICATION_EMAIL = get_env('ADMIN_NOTIFICATION_EMAIL', default='contacto@agentecosmic.com')
 
 # Google Analytics 4 — vacío en dev/test para no mandar tráfico de prueba a GA

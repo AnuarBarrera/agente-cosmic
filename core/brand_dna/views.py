@@ -69,7 +69,7 @@ def _screenshots_context() -> dict:
 def home(request):
     if request.user.is_authenticated:
         return redirect('dashboard')
-    return render(request, 'brand_dna/home.html', _screenshots_context())
+    return redirect(settings.MARKETING_SITE_URL)
 
 
 def new_analysis(request):
