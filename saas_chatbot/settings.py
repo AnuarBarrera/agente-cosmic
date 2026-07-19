@@ -556,6 +556,14 @@ COSMIC_BASE_URL = get_env('COSMIC_BASE_URL', default='https://cosmic.anuarbarrer
 # URL de la landing de marketing (agentecosmic/, Vite/React, servida en Cloudflare
 # Pages) — usada para redirigir la raiz de Django ('/') hacia la landing real,
 # ya que Django dejo de ser quien la sirve tras separar dominios/repos.
+#
+# ADVERTENCIA PARA QUIEN DESPLIEGUE ESTE CAMBIO (ver core/brand_dna/views.py:home):
+# mientras el DNS de la raiz de agentecosmic.com siga apuntando a ESTE servidor
+# Django (o sea, antes del cutover que lo mueve a Cloudflare Pages), este default
+# ('https://agentecosmic.com') hace que la vista raiz se redirija A SI MISMA —
+# loop infinito en el dominio que esta en vivo ahora mismo. NO desplegar el
+# commit que agrega el redirect en home() hasta que el DNS de la raiz ya
+# apunte a Cloudflare Pages (o al mismo tiempo que ese cambio de DNS).
 MARKETING_SITE_URL = get_env('MARKETING_SITE_URL', default='https://agentecosmic.com')
 ADMIN_NOTIFICATION_EMAIL = get_env('ADMIN_NOTIFICATION_EMAIL', default='contacto@agentecosmic.com')
 

@@ -67,6 +67,11 @@ def _screenshots_context() -> dict:
 
 
 def home(request):
+    # ADVERTENCIA DE DEPLOY: no desplegar este redirect hasta que el DNS de la
+    # raiz de agentecosmic.com ya apunte a Cloudflare Pages (ver advertencia
+    # completa junto a settings.MARKETING_SITE_URL). Si se despliega mientras
+    # la raiz siga apuntando a ESTE servidor, se forma un loop infinito de
+    # redirect en el dominio que esta en vivo ahora mismo.
     if request.user.is_authenticated:
         return redirect('dashboard')
     return redirect(settings.MARKETING_SITE_URL)
