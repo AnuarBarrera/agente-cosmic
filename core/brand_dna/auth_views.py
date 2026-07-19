@@ -353,7 +353,7 @@ def reset_password_view(request, token):
                         '<p>Tu contraseña fue restablecida exitosamente.</p>'
                         '<p style="color:#888;font-size:0.85rem;margin-top:16px;">'
                         'Si no realizaste este cambio, contacta soporte de inmediato a '
-                        '<a href="mailto:contacto.neia@gmail.com" style="color:#e94560;">contacto.neia@gmail.com</a></p></div>'
+                        '<a href="mailto:contacto@agentecosmic.com" style="color:#e94560;">contacto@agentecosmic.com</a></p></div>'
                     ),
                     fail_silently=True,
                 )
