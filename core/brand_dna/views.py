@@ -7,8 +7,9 @@ import time as _time
 from urllib.parse import urlparse
 import django_rq
 import google.genai as genai
+from google.genai import types
 from PIL import Image
-from core.shared.metrics_utils import track_external_api, record_tokens
+from core.shared.metrics_utils import track_external_api, record_tokens, vertex_labels
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, FileResponse, HttpResponse, Http404
@@ -568,7 +569,10 @@ def _regenerate_caption(post, feedback: str) -> str:
             location=settings.GOOGLE_CLOUD_LOCATION,
         )
         with track_external_api('gemini', operation='caption_regen'):
-            resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+            resp = client.models.generate_content(
+                model=settings.VERTEX_TEXT_MODEL, contents=prompt,
+                config=types.GenerateContentConfig(labels=vertex_labels()),
+            )
         record_tokens(resp, operation='caption_regen', response_preview=resp.text[:200] if resp.text else '')
         new_caption = resp.text.strip().strip('"').strip("'")
         raw = re.sub(r'^```.*?\n', '', new_caption, flags=re.DOTALL)
@@ -675,7 +679,10 @@ def _reanalyze_brand_field(brand_dna, job, field: str, feedback: str):
         location=settings.GOOGLE_CLOUD_LOCATION,
     )
     with track_external_api('gemini', operation='brand_dna_reanalyze'):
-        resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+        resp = client.models.generate_content(
+            model=settings.VERTEX_TEXT_MODEL, contents=prompt,
+            config=types.GenerateContentConfig(labels=vertex_labels()),
+        )
     record_tokens(resp, operation='brand_dna_reanalyze', response_preview=resp.text[:200] if resp.text else '')
     raw = resp.text.strip()
     raw = re.sub(r'^```(?:json)?\n?', '', raw)

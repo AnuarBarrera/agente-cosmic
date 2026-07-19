@@ -14,7 +14,7 @@ from google.genai import types
 from django.conf import settings
 from playwright.sync_api import sync_playwright
 from core.shared.metrics import GCS_OPERATIONS
-from core.shared.metrics_utils import track_external_api, record_tokens, record_imagen_generation
+from core.shared.metrics_utils import track_external_api, record_tokens, record_imagen_generation, vertex_labels
 from core.shared.rate_limiter import call_with_429_retry
 
 from PIL import Image
@@ -297,6 +297,7 @@ class ImageGenerator:
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=gemini_prompt,
+                    config=types.GenerateContentConfig(labels=vertex_labels()),
                 )
             record_tokens(resp, operation='image_bg',
                           prompt_preview=gemini_prompt[:500],
@@ -383,6 +384,7 @@ class ImageGenerator:
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=[image_part, prompt],
+                    config=types.GenerateContentConfig(labels=vertex_labels()),
                 )
             record_tokens(resp, operation='image_qc',
                           prompt_preview=prompt[:500],
@@ -426,6 +428,7 @@ class ImageGenerator:
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=[image_part, prompt],
+                    config=types.GenerateContentConfig(labels=vertex_labels()),
                 )
             record_tokens(resp, operation='image_qc',
                           prompt_preview=prompt[:500],
@@ -502,6 +505,7 @@ class ImageGenerator:
                                 "'garantizado', 'garantizamos', 'asegurar', 'aseguramos', 'asegurando', "
                                 "'resultados 100% seguros', 'nunca falla', 'sin riesgo'."
                             ),
+                            labels=vertex_labels(),
                         ),
                     )
             resp = call_with_429_retry(_call, settings.VERTEX_TEXT_MODEL)
@@ -585,6 +589,7 @@ class ImageGenerator:
                                 "Generas contenido de marketing para redes sociales. "
                                 "Español impecable. Cero errores ortográficos. Nunca inventes palabras."
                             ),
+                            labels=vertex_labels(),
                         ),
                     )
             resp = call_with_429_retry(_call, settings.VERTEX_TEXT_MODEL)
@@ -654,6 +659,7 @@ class ImageGenerator:
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=[image_part, prompt],
+                    config=types.GenerateContentConfig(labels=vertex_labels()),
                 )
             record_tokens(resp, operation='template_select',
                           response_preview=resp.text[:200] if resp.text else '')
@@ -731,6 +737,7 @@ class ImageGenerator:
                     config=types.GenerateImagesConfig(
                         number_of_images=1,
                         aspect_ratio='1:1',
+                        labels=vertex_labels(),
                     ),
                 )
             if resp.generated_images:
@@ -742,7 +749,8 @@ class ImageGenerator:
                 model=model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    response_modalities=['IMAGE', 'TEXT']
+                    response_modalities=['IMAGE', 'TEXT'],
+                    labels=vertex_labels(),
                 ),
             )
         record_tokens(resp)

@@ -2,9 +2,10 @@ import json
 import logging
 import re
 import google.genai as genai
+from google.genai import types
 from django.conf import settings
 from core.brand_dna.models import BrandDNA
-from core.shared.metrics_utils import track_external_api, record_tokens
+from core.shared.metrics_utils import track_external_api, record_tokens, vertex_labels
 from core.shared.rate_limiter import call_with_429_retry
 from core.content_pipeline.generators.text_generator import _is_sensitive_niche, _strip_accents
 
@@ -94,7 +95,10 @@ class ReelScriptGenerator:
 
             def _call():
                 with track_external_api('gemini', operation='reel_script'):
-                    return client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+                    return client.models.generate_content(
+                        model=settings.VERTEX_TEXT_MODEL, contents=prompt,
+                        config=types.GenerateContentConfig(labels=vertex_labels()),
+                    )
             resp = call_with_429_retry(_call, settings.VERTEX_TEXT_MODEL)
             record_tokens(resp, operation='reel_script',
                           prompt_preview=prompt[:500],

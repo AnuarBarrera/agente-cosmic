@@ -167,6 +167,10 @@ DEFAULT_TENANT_NOTIFICATION_EMAIL = get_env('DEFAULT_TENANT_NOTIFICATION_EMAIL',
 GOOGLE_CLOUD_PROJECT = get_env('GOOGLE_CLOUD_PROJECT', default='agente-cosmic')
 GOOGLE_CLOUD_STORAGE_BUCKET = get_env('GOOGLE_CLOUD_STORAGE_BUCKET', default='agente-cosmic-assets')
 GOOGLE_CLOUD_LOCATION = get_env('GOOGLE_CLOUD_LOCATION', default='us-central1')
+# Label adjunto a cada llamada a Vertex AI (labels= en Generate*Config) para poder
+# separar costo de produccion vs desarrollo en el billing export de BigQuery.
+# Produccion debe fijar GCP_REQUEST_ORIGIN=production en .env.prod.
+GCP_REQUEST_ORIGIN = get_env('GCP_REQUEST_ORIGIN', default='development')
 VERTEX_TEXT_MODEL = 'publishers/google/models/gemini-2.5-flash'
 VERTEX_IMAGE_MODEL = 'imagen-3.0-generate-001'
 VERTEX_IMAGE_EDIT_MODEL = 'imagen-3.0-capability-001'

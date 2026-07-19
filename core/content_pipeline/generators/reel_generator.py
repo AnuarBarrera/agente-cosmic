@@ -21,6 +21,7 @@ from core.shared.metrics_utils import (
     record_lyria_generation, record_tts_generation,
     record_playwright_overlay_fallback, record_imagen_generation,
     record_hyperframes_generation, record_hyperframes_fallback,
+    vertex_labels,
 )
 from core.shared.rate_limiter import call_with_429_retry
 from core.content_pipeline.generators.subtitle_generator import SubtitleGenerator
@@ -420,6 +421,7 @@ class ReelGenerator:
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL,
                     contents=prompt,
+                    config=types.GenerateContentConfig(labels=vertex_labels()),
                 )
             record_tokens(resp, operation='reel_template_select',
                           response_preview=resp.text[:200] if resp.text else '')
@@ -582,6 +584,7 @@ class ReelGenerator:
                             number_of_videos=1,
                             generate_audio=False,
                             negative_prompt=self._VEO_SAFE_CONSTRAINTS.strip(),
+                            labels=vertex_labels(),
                         ),
                     )
             operation = call_with_429_retry(_call, settings.VERTEX_VIDEO_MODEL)
@@ -616,6 +619,7 @@ class ReelGenerator:
                         number_of_images=1,
                         aspect_ratio='9:16',
                         negative_prompt=self._VEO_SAFE_CONSTRAINTS.strip(),
+                        labels=vertex_labels(),
                     ),
                 )
             if resp.generated_images:
@@ -701,6 +705,7 @@ class ReelGenerator:
                                 prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name='Kore')
                             )
                         ),
+                        labels=vertex_labels(),
                     ),
                 )
             for part in resp.candidates[0].content.parts:

@@ -3,7 +3,7 @@ import google.genai as genai
 from google.cloud import vision
 from google.genai import types
 from django.conf import settings
-from core.shared.metrics_utils import track_external_api, record_tokens
+from core.shared.metrics_utils import track_external_api, record_tokens, vertex_labels
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ class LogoAnalyzer:
             resp = client.models.generate_content(
                 model=settings.VERTEX_TEXT_MODEL,
                 contents=[_VISION_PROMPT, image_part],
+                config=types.GenerateContentConfig(labels=vertex_labels()),
             )
         record_tokens(resp)
         return resp.text.strip()

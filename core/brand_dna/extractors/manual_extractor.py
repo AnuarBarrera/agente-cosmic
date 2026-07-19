@@ -2,8 +2,9 @@ import json
 import logging
 import re
 import google.genai as genai
+from google.genai import types
 from django.conf import settings
-from core.shared.metrics_utils import track_external_api, record_tokens
+from core.shared.metrics_utils import track_external_api, record_tokens, vertex_labels
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ class ManualBrandExtractor:
             with track_external_api('gemini'):
                 resp = client.models.generate_content(
                     model=settings.VERTEX_TEXT_MODEL, contents=prompt,
+                    config=types.GenerateContentConfig(labels=vertex_labels()),
                 )
             record_tokens(resp)
             raw = resp.text.strip()

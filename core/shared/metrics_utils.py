@@ -2,6 +2,7 @@ import time
 import math
 import logging
 from contextlib import contextmanager
+from django.conf import settings
 from core.shared.metrics import (
     EXTERNAL_API_REQUESTS,
     EXTERNAL_API_DURATION,
@@ -10,6 +11,13 @@ from core.shared.metrics import (
 
 logger = logging.getLogger(__name__)
 llm_audit = logging.getLogger('cosmic.llm_audit')
+
+
+def vertex_labels() -> dict:
+    """Label que se adjunta a cada llamada a Vertex AI (labels= en los
+    Generate*Config) para poder separar costo de produccion vs desarrollo
+    en el billing export de BigQuery."""
+    return {'origin': settings.GCP_REQUEST_ORIGIN}
 
 # ---------------------------------------------------------------------------
 # Precios (microdólares para evitar floats en contadores)

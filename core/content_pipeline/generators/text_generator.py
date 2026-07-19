@@ -3,9 +3,10 @@ import logging
 import re
 import unicodedata
 import google.genai as genai
+from google.genai import types
 from django.conf import settings
 from core.brand_dna.models import BrandDNA
-from core.shared.metrics_utils import track_external_api, record_tokens
+from core.shared.metrics_utils import track_external_api, record_tokens, vertex_labels
 from core.shared.rate_limiter import call_with_429_retry
 
 logger = logging.getLogger(__name__)
@@ -147,7 +148,10 @@ class TextGenerator:
         )
         def _call():
             with track_external_api('gemini', operation='text_gen'):
-                return client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+                return client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL, contents=prompt,
+                    config=types.GenerateContentConfig(labels=vertex_labels()),
+                )
         resp = call_with_429_retry(_call, settings.VERTEX_TEXT_MODEL)
         record_tokens(resp, operation='text_gen',
                       prompt_preview=prompt[:500],
@@ -195,7 +199,10 @@ class TextGenerator:
             client = _vertex_client()
             prompt = _SAFETY_QC_PROMPT.format(caption=caption, tone=tone, audience=audience)
             with track_external_api('gemini', operation='caption_safety_qc'):
-                resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL, contents=prompt,
+                    config=types.GenerateContentConfig(labels=vertex_labels()),
+                )
             record_tokens(resp, operation='caption_safety_qc',
                           prompt_preview=prompt[:500],
                           response_preview=resp.text[:300] if resp.text else '')
@@ -221,7 +228,10 @@ class TextGenerator:
             client = _vertex_client()
             prompt = _SAFETY_FIX_PROMPT.format(caption=caption, tone=tone)
             with track_external_api('gemini', operation='caption_safety_fix'):
-                resp = client.models.generate_content(model=settings.VERTEX_TEXT_MODEL, contents=prompt)
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL, contents=prompt,
+                    config=types.GenerateContentConfig(labels=vertex_labels()),
+                )
             record_tokens(resp, operation='caption_safety_fix',
                           response_preview=resp.text[:300] if resp.text else '')
             new_caption = resp.text.strip().strip('"').strip("'")
