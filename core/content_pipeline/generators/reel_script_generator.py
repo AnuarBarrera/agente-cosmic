@@ -21,9 +21,8 @@ _FALLBACK_SCENES = [
 
 _PROMPT = (
     "Eres un guionista de reels para redes sociales. Genera el guion completo para un "
-    "reel de ~18 segundos (1 escena de video + 5 shots de imagen) sobre este negocio, "
-    "basado en este post:\n\n"
-    "MARCA: {business_name}\n"
+    "reel de ~18 segundos (1 escena de video + 5 shots de imagen) sobre este negocio "
+    "real llamado \"{business_name}\", basado en este post:\n\n"
     "CAPTION DEL POST: {caption}\n"
     "TONO: {tone}\n"
     "DESCRIPCION: {description}\n\n"
@@ -32,7 +31,10 @@ _PROMPT = (
     "2. highlight_word: UNA palabra dentro de hook_text a resaltar visualmente.\n"
     "3. tag_cta: 2-4 palabras, llamada a la accion de cierre (aparece en los ultimos 3s).\n"
     "4. narration_script: guion de voz en off en espanol, ~15-20 segundos hablados "
-    "(unas 40-50 palabras), tono conversacional, sin leer literalmente el hook ni el CTA.\n"
+    "(unas 40-50 palabras), tono conversacional, sin leer literalmente el hook ni el CTA. "
+    "Si mencionas el nombre del negocio, usa el nombre real exacto \"{business_name}\" tal "
+    "cual — nunca escribas la palabra generica \"marca\" ni un placeholder entre corchetes "
+    "como [Marca].\n"
     "5. scene_prompts: exactamente 6 prompts EN INGLES describiendo 6 escenas visuales "
     "relacionadas al negocio, con roles DISTINTOS por posicion:\n"
     "   - scene_prompts[0]: para un GENERADOR DE VIDEO. Debe ser un plano amplio o de "
