@@ -706,6 +706,21 @@ def test_ga4_tag_absent_when_measurement_id_empty(settings):
     assert b'gtag' not in response.content
 
 
+def test_umami_tag_renders_when_website_id_configured(settings):
+    settings.UMAMI_WEBSITE_ID = 'test-umami-id'
+    c = Client()
+    response = c.get('/privacidad/')
+    assert b'umami.anuarbarrera.dev' in response.content
+    assert b'test-umami-id' in response.content
+
+
+def test_umami_tag_absent_when_website_id_empty(settings):
+    settings.UMAMI_WEBSITE_ID = ''
+    c = Client()
+    response = c.get('/privacidad/')
+    assert b'umami.anuarbarrera.dev' not in response.content
+
+
 def test_download_post_image_returns_mp4_for_reel(client, user, job_with_calendar):
     post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
     post.format = 'reel'

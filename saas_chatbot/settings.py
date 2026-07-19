@@ -307,6 +307,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'core.brand_dna.context_processors.ga4',
+                'core.brand_dna.context_processors.umami',
             ],
         },
     },
@@ -556,6 +557,9 @@ ADMIN_NOTIFICATION_EMAIL = get_env('ADMIN_NOTIFICATION_EMAIL', default='contacto
 
 # Google Analytics 4 — vacío en dev/test para no mandar tráfico de prueba a GA
 GA4_MEASUREMENT_ID = get_env('GA4_MEASUREMENT_ID', default='')
+
+# Umami (analytics + grabador de sesion/heatmap) — vacío en dev/test, mismo motivo que GA4
+UMAMI_WEBSITE_ID = get_env('UMAMI_WEBSITE_ID', default='')
 
 # Sentry Configuration for Error Tracking
 SENTRY_DSN = get_env('SENTRY_DSN', default='')
