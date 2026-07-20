@@ -50,10 +50,13 @@ def _get_client_ip(request) -> str:
 def _check_email_rate_limit(request, action: str) -> bool:
     ip = _get_client_ip(request)
     key = f'{action}_rate:{ip}'
-    attempts = cache.get(key, 0)
-    if attempts >= _EMAIL_ACTION_MAX:
+    try:
+        attempts = cache.incr(key)
+    except ValueError:
+        cache.set(key, 1, _EMAIL_ACTION_WINDOW)
+        attempts = 1
+    if attempts > _EMAIL_ACTION_MAX:
         return False
-    cache.set(key, attempts + 1, _EMAIL_ACTION_WINDOW)
     return True
 
 
@@ -254,8 +257,12 @@ def login_view(request):
             email = form.cleaned_data['email'].lower().strip()
             ip = _get_client_ip(request)
             cache_key = f'login_attempts:{ip}:{email}'
-            attempts = cache.get(cache_key, 0)
-            if attempts >= _LOGIN_MAX_ATTEMPTS:
+            try:
+                attempts = cache.incr(cache_key)
+            except ValueError:
+                cache.set(cache_key, 1, _LOGIN_LOCKOUT_SECONDS)
+                attempts = 1
+            if attempts > _LOGIN_MAX_ATTEMPTS:
                 LOGIN_ATTEMPTS.labels(result='locked').inc()
                 error = 'Demasiados intentos. Intenta de nuevo en 5 minutos.'
             else:
@@ -267,7 +274,6 @@ def login_view(request):
                     login(request, user)
                     next_url = request.GET.get('next', 'dashboard')
                     return redirect(next_url)
-                cache.set(cache_key, attempts + 1, _LOGIN_LOCKOUT_SECONDS)
                 LOGIN_ATTEMPTS.labels(result='failed').inc()
                 deactivated = User.objects.filter(email=email, is_active=False).first()
                 if deactivated:
@@ -518,8 +524,12 @@ def apply_code_view(request):
         return redirect('dashboard')
     from core.tenant_management.models import InvitationCode
     rate_key = f'invite_code_attempts:{request.user.id}'
-    attempts = cache.get(rate_key, 0)
-    if attempts >= _CODE_RATE_LIMIT:
+    try:
+        attempts = cache.incr(rate_key)
+    except ValueError:
+        cache.set(rate_key, 1, _CODE_RATE_WINDOW)
+        attempts = 1
+    if attempts > _CODE_RATE_LIMIT:
         logger.warning(f"Rate limit alcanzado en apply_code para {request.user.email}")
         return redirect('dashboard')
     code_str = request.POST.get('code', '').strip().upper()
@@ -530,10 +540,8 @@ def apply_code_view(request):
             cache.delete(rate_key)
             logger.info(f"Codigo {code_str} aplicado por {request.user.email}")
         else:
-            cache.set(rate_key, attempts + 1, _CODE_RATE_WINDOW)
             logger.warning(f"Codigo invalido {code_str} intentado por {request.user.email}")
     except InvitationCode.DoesNotExist:
-        cache.set(rate_key, attempts + 1, _CODE_RATE_WINDOW)
         logger.warning(f"Codigo inexistente {code_str} intentado por {request.user.email}")
     return redirect('dashboard')
 
