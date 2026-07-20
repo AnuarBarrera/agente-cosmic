@@ -400,9 +400,8 @@ def test_download_post_image_returns_attachment(client, user, job_with_calendar)
     post.save(update_fields=['image_url'])
     client.force_login(user)
     fake_response = MagicMock()
-    fake_response.read.return_value = b'fake-image-bytes'
-    fake_response.__enter__.return_value = fake_response
-    with patch('urllib.request.urlopen', return_value=fake_response):
+    fake_response.content = b'fake-image-bytes'
+    with patch('requests.get', return_value=fake_response):
         response = client.get(f'/api/post/{post.id}/download/')
     assert response.status_code == 200
     assert response['Content-Type'] == 'image/png'
@@ -415,10 +414,10 @@ def test_download_post_image_blocks_non_gcs_url(client, user, job_with_calendar)
     post.image_url = 'file:///etc/passwd'
     post.save(update_fields=['image_url'])
     client.force_login(user)
-    with patch('urllib.request.urlopen') as mock_urlopen:
+    with patch('requests.get') as mock_get:
         response = client.get(f'/api/post/{post.id}/download/')
     assert response.status_code == 404
-    mock_urlopen.assert_not_called()
+    mock_get.assert_not_called()
 
 
 def test_download_post_image_returns_zip_for_carousel(client, user, job_with_calendar):
@@ -432,13 +431,12 @@ def test_download_post_image_returns_zip_for_carousel(client, user, job_with_cal
     post.save(update_fields=['format', 'image_urls'])
     client.force_login(user)
 
-    def _fake_urlopen(url, timeout=15):
+    def _fake_get(url, timeout=15):
         fake_response = MagicMock()
-        fake_response.read.return_value = b'fake-slide-bytes-' + url.encode()[-6:]
-        fake_response.__enter__.return_value = fake_response
+        fake_response.content = b'fake-slide-bytes-' + url.encode()[-6:]
         return fake_response
 
-    with patch('urllib.request.urlopen', side_effect=_fake_urlopen):
+    with patch('requests.get', side_effect=_fake_get):
         response = client.get(f'/api/post/{post.id}/download/')
     assert response.status_code == 200
     assert response['Content-Type'] == 'application/zip'
@@ -721,9 +719,8 @@ def test_download_post_image_returns_mp4_for_reel(client, user, job_with_calenda
     post.save(update_fields=['format', 'video_url'])
     client.force_login(user)
     fake_response = MagicMock()
-    fake_response.read.return_value = b'fake-mp4-bytes'
-    fake_response.__enter__.return_value = fake_response
-    with patch('urllib.request.urlopen', return_value=fake_response):
+    fake_response.content = b'fake-mp4-bytes'
+    with patch('requests.get', return_value=fake_response):
         response = client.get(f'/api/post/{post.id}/download/')
     assert response.status_code == 200
     assert response['Content-Type'] == 'video/mp4'

@@ -327,7 +327,7 @@ def download_post_image(request, post_id):
     Posts carrusel (H20 + roadmap #5) se sirven como un único .zip con las N
     slides — descargar 4 archivos sueltos por click es mala UX y los navegadores
     suelen bloquear descargas múltiples automáticas como si fueran popups."""
-    import urllib.request
+    import requests
     from core.content_pipeline.models import ContentPost
     post = get_object_or_404(
         ContentPost.objects.select_related('calendar__brand_dna__job'),
@@ -341,8 +341,9 @@ def download_post_image(request, post_id):
         if not _is_gcs_url(post.video_url):
             raise Http404
         try:
-            with urllib.request.urlopen(post.video_url, timeout=30) as resp:
-                data = resp.read()
+            resp = requests.get(post.video_url, timeout=30)
+            resp.raise_for_status()
+            data = resp.content
         except Exception as e:
             logger.warning(f"download_post_image: no se pudo obtener el reel de {post.video_url}: {e}")
             raise Http404
@@ -358,8 +359,9 @@ def download_post_image(request, post_id):
                 if not _is_gcs_url(slide_url):
                     continue
                 try:
-                    with urllib.request.urlopen(slide_url, timeout=15) as resp:
-                        zf.writestr(f'slide-{i}.png', resp.read())
+                    resp = requests.get(slide_url, timeout=15)
+                    resp.raise_for_status()
+                    zf.writestr(f'slide-{i}.png', resp.content)
                 except Exception as e:
                     logger.warning(f"download_post_image: no se pudo obtener la slide {i} de {slide_url}: {e}")
         if not buf.getbuffer().nbytes:
@@ -371,8 +373,9 @@ def download_post_image(request, post_id):
     if not _is_gcs_url(post.image_url):
         raise Http404
     try:
-        with urllib.request.urlopen(post.image_url, timeout=15) as resp:
-            data = resp.read()
+        resp = requests.get(post.image_url, timeout=15)
+        resp.raise_for_status()
+        data = resp.content
     except Exception as e:
         logger.warning(f"download_post_image: no se pudo obtener la imagen de {post.image_url}: {e}")
         raise Http404
