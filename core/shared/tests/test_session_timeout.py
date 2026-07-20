@@ -73,7 +73,9 @@ def test_session_flushed_on_inactivity(user):
     assert 'reason=inactivity' in response.url
 
 
-def test_unauthenticated_request_passes_through():
+def test_unauthenticated_request_passes_through(settings):
+    settings.MARKETING_SITE_URL = 'https://agentecosmic.com'
     c = Client()
     response = c.get('/')
-    assert response.status_code == 200
+    assert response.status_code == 302
+    assert response.url == 'https://agentecosmic.com'
