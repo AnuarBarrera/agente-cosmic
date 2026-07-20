@@ -3757,3 +3757,72 @@ Verificación real end-to-end (ejecutada por Claude, no delegada) —
 
 Severidad: N/A (feature, no vulnerabilidad).
 Prioridad: Cerrado.
+
+=================================================================
+HALLAZGO 77 — Logo alucinado (nombre real del negocio impreso en una
+  etiqueta falsa) en el clip de Veo de un reel de muestra
+Categoría: Bug de prompt engineering
+Estado: 🟡 DIAGNOSTICADO EN PRODUCCIÓN — PENDIENTE DE FIX — 2026-07-20
+  (root cause confirmado con evidencia visual, fix NO implementado
+  todavía — para hacer en el servidor de desarrollo)
+=================================================================
+Contexto: Anuar generó un reel de muestra para el negocio "MariBelas"
+  (velas y jabones artesanales) y reportó que el video se ve bien pero
+  tiene un logo que no es el oficial del negocio.
+
+Verificación: el negocio no tiene NINGÚN asset de marca real cargado —
+  confirmado en BD que `AnalysisJob.logo_file_path`, `post_images_paths`,
+  `BrandDNA.logo_url` y `primary_colors` están todos vacíos para el job
+  `92b9ad5d-77a2-42dd-a6cb-b5571f76c763`. Es decir, el logo visible en el
+  video es 100% inventado por el modelo, no un asset real mal aplicado.
+  Se descargó el MP4 final (`.../reels/92b9ad5d...-sample.mp4`) y se
+  extrajeron frames a 1fps: el logo aparece de forma consistente en TODO
+  el clip de Veo (segundos ~3-11 del reel, correspondiente a
+  `scene_prompts[0]`) — una vela con una etiqueta perfectamente legible
+  que dice "MariBelas" con un emblema floral. Las 5 escenas de Imagen
+  (segundos ~11-21, `scene_prompts[1:]`) NO tienen ningún logo — el
+  problema está aislado a la escena de Veo.
+
+Causa raíz: a diferencia de HALLAZGO 73 (donde el negative_prompt se
+  concatenaba mal al prompt afirmativo), aquí `_generate_single_clip` en
+  `core/content_pipeline/generators/reel_generator.py` YA pasa
+  `_VEO_SAFE_CONSTRAINTS` correctamente vía el parámetro dedicado
+  `negative_prompt` de `GenerateVideosConfig` — la protección de
+  HALLAZGO 73 sigue intacta y funcionando. El problema está un nivel
+  arriba: en `core/content_pipeline/generators/reel_script_generator.py`,
+  el `_PROMPT` que le pide a Gemini escribir los 6 `scene_prompts` no le
+  prohíbe describir el empaque/etiqueta del producto en el texto
+  afirmativo de la escena — solo le pide terminar cada prompt con el
+  sufijo genérico "no text, no logos, no people speaking to camera."
+  Todo indica que Gemini, al escribir una escena "de marca" para un
+  negocio de velas, describió el producto CON su propia etiqueta (ej.
+  "a candle with a label reading MariBelas") en la parte afirmativa del
+  prompt — y esa descripción específica, ya en el string que llega a
+  Veo, le gana a la negación genérica del final del mismo prompt. El
+  `negative_prompt` de la API frena logos que el modelo inventa por su
+  cuenta, pero no puede anular una instrucción afirmativa explícita que
+  ya está en el prompt principal. Nada en `reel_generator.py` inyecta el
+  nombre del negocio al prompt de Veo — el string llega intacto tal como
+  lo escribió Gemini, así que el origen está confirmado en
+  `reel_script_generator.py`, no en la capa de Veo/Imagen.
+
+Fix propuesto (NO implementado — para el servidor de desarrollo):
+  1. Reforzar la instrucción #5 del `_PROMPT` en `reel_script_generator.py`
+     con una regla explícita: los `scene_prompts` nunca deben mencionar
+     el nombre del negocio, etiquetas, empaque con texto, ni nada que
+     implique una marca visible — describir el producto solo por forma/
+     textura/material/color.
+  2. Backstop determinístico (mismo patrón que `caption_safety_qc`/
+     `caption_safety_fix` ya existente para captions): después de recibir
+     los `scene_prompts` de Gemini, revisar con regex si alguno contiene
+     el `business_name` o palabras como "label"/"logo"/"brand"/
+     "text reading"/"sign that says" — si aparece, descartar esa escena
+     puntual y usar el fallback correspondiente de `_FALLBACK_SCENES` en
+     vez de todo el guion.
+  Ninguno de los dos fixes requiere tocar `reel_generator.py` — el
+  `negative_prompt` de Veo/Imagen ya está bien.
+
+Severidad: Media (afecta credibilidad de marca en contenido generado
+  para prospección/clientes reales — un negocio real puede terminar con
+  un logo falso en su propio contenido de muestra).
+Prioridad: Alta — implementar fix en próxima sesión de desarrollo.

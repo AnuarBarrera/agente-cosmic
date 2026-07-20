@@ -20,6 +20,20 @@ _FALLBACK_SCENES = [
     "Wide clean studio shot of the product centered with soft shadow, minimal background, no text, no logos.",
 ]
 
+# HALLAZGO 77 (hallazgos.txt, 2026-07-20): Gemini a veces describe la
+# etiqueta/empaque del producto en la parte AFIRMATIVA de scene_prompts[0]
+# (ej. "a candle with a label reading {business_name}"), y esa descripcion
+# especifica le gana al negative_prompt generico ("no logos") que se manda
+# a Veo/Imagen por separado — resultado: logo alucinado con el nombre real
+# del negocio impreso, confirmado en un reel de MariBelas (sin ningun asset
+# de marca real cargado). Pendiente: (1) prohibir explicitamente en esta
+# instruccion que scene_prompts mencione el nombre del negocio, etiquetas o
+# empaque con texto — no solo el sufijo "no text, no logos"; (2) agregar un
+# backstop por regex tras recibir la respuesta de Gemini (mismo patron que
+# caption_safety_qc/caption_safety_fix) que descarte una escena puntual si
+# menciona business_name/label/logo/brand y la reemplace con
+# _FALLBACK_SCENES. El negative_prompt de reel_generator.py (HALLAZGO 73)
+# ya esta bien — el fix es aqui, en como se construye el prompt de Gemini.
 _PROMPT = (
     "Eres un guionista de reels para redes sociales. Genera el guion completo para un "
     "reel de ~18 segundos (1 escena de video + 5 shots de imagen) sobre este negocio "
