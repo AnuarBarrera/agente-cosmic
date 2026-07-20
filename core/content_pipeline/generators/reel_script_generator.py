@@ -26,14 +26,12 @@ _FALLBACK_SCENES = [
 # especifica le gana al negative_prompt generico ("no logos") que se manda
 # a Veo/Imagen por separado — resultado: logo alucinado con el nombre real
 # del negocio impreso, confirmado en un reel de MariBelas (sin ningun asset
-# de marca real cargado). Pendiente: (1) prohibir explicitamente en esta
-# instruccion que scene_prompts mencione el nombre del negocio, etiquetas o
-# empaque con texto — no solo el sufijo "no text, no logos"; (2) agregar un
-# backstop por regex tras recibir la respuesta de Gemini (mismo patron que
-# caption_safety_qc/caption_safety_fix) que descarte una escena puntual si
-# menciona business_name/label/logo/brand y la reemplace con
-# _FALLBACK_SCENES. El negative_prompt de reel_generator.py (HALLAZGO 73)
-# ya esta bien — el fix es aqui, en como se construye el prompt de Gemini.
+# de marca real cargado). Fix de 2 partes: (1) prohibicion explicita abajo
+# en la instruccion #5 de mencionar nombre del negocio/etiquetas/empaque
+# con texto; (2) backstop deterministico _scrub_brand_leak() que reemplaza
+# por fallback cualquier escena puntual que se cuele con eso. El
+# negative_prompt de reel_generator.py (HALLAZGO 73) ya estaba bien — el
+# problema era como se construye este prompt, no la capa de Veo/Imagen.
 _PROMPT = (
     "Eres un guionista de reels para redes sociales. Genera el guion completo para un "
     "reel de ~18 segundos (1 escena de video + 5 shots de imagen) sobre este negocio "
@@ -66,8 +64,10 @@ _PROMPT = (
     "fija y no necesita coherencia fisica en el tiempo.\n"
     "   Las 6 evitan describir pantallas, laptops, monitores o interfaces con contenido — "
     "el generador alucina texto falso/ilegible cuando la escena implica una pantalla con "
-    "informacion. Cada prompt debe terminar con: 'no text, no logos, no people speaking "
-    "to camera.'\n"
+    "informacion. NINGUNA escena debe mencionar el nombre del negocio, una etiqueta, "
+    "empaque con texto, letrero o cualquier marca visible en el producto — describe el "
+    "producto solo por su forma, textura, material y color, nunca por su etiqueta o marca. "
+    "Cada prompt debe terminar con: 'no text, no logos, no people speaking to camera.'\n"
     "6. music_mood: 1 frase corta en ingles describiendo el mood musical (ej. "
     "'upbeat corporate, optimistic, minimal percussion').\n\n"
     "REGLA DE SEGURIDAD: si el negocio pertenece a un nicho sensible, usa tono neutro-positivo, "
@@ -85,6 +85,31 @@ def _vertex_client():
         project=settings.GOOGLE_CLOUD_PROJECT,
         location=settings.GOOGLE_CLOUD_LOCATION,
     )
+
+
+_BRAND_LEAK_KEYWORDS = re.compile(
+    r'\b(label|logo|brand(?:ing)?|packaging|signage|wordmark|emblem|'
+    r'text reading|sign that says|writing that says|words? reading)\b',
+    re.IGNORECASE,
+)
+
+
+def _scrub_brand_leak(scene_prompts: list, business_name: str) -> list:
+    """HALLAZGO 77: backstop deterministico — si una escena puntual se cuela
+    mencionando el nombre real del negocio o palabras de etiquetado/marca en
+    la parte afirmativa del prompt, se reemplaza solo esa escena por el
+    fallback en la misma posicion (no se descarta el guion completo)."""
+    scrubbed = list(scene_prompts)
+    name = (business_name or '').strip().lower()
+    for i, scene in enumerate(scrubbed):
+        if i >= len(_FALLBACK_SCENES):
+            break
+        scene_lower = scene.lower()
+        leaks = (name and name in scene_lower) or _BRAND_LEAK_KEYWORDS.search(scene)
+        if leaks:
+            logger.warning(f"ReelScriptGenerator: scene_prompts[{i}] mencionaba la marca, reemplazado por fallback")
+            scrubbed[i] = _FALLBACK_SCENES[i]
+    return scrubbed
 
 
 class ReelScriptGenerator:
@@ -127,6 +152,8 @@ class ReelScriptGenerator:
             scene_prompts = data.get('scene_prompts') or []
             if len(scene_prompts) != 6:
                 scene_prompts = list(_FALLBACK_SCENES)
+            else:
+                scene_prompts = _scrub_brand_leak(scene_prompts, brand_dna.business_name)
             result = {
                 'hook_text': str(data.get('hook_text', '')).strip() or fallback['hook_text'],
                 'highlight_word': str(data.get('highlight_word', '')).strip() or fallback['highlight_word'],

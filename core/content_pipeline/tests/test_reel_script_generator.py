@@ -125,6 +125,65 @@ def test_generate_rejects_banned_language_in_sensitive_niche(sensitive_brand_dna
     assert result['hook_text'] != 'Garantizamos tu salud'
 
 
+def test_scrub_brand_leak_replaces_scene_mentioning_business_name():
+    from core.content_pipeline.generators.reel_script_generator import _scrub_brand_leak, _FALLBACK_SCENES
+    scenes = [
+        'a candle with a label reading MariBelas, soft lighting, no text, no logos.',
+        'clean detail shot, no text, no logos.',
+        'clean detail shot, no text, no logos.',
+        'clean detail shot, no text, no logos.',
+        'clean detail shot, no text, no logos.',
+        'clean detail shot, no text, no logos.',
+    ]
+    result = _scrub_brand_leak(scenes, 'MariBelas')
+    assert result[0] == _FALLBACK_SCENES[0]
+    assert result[1:] == scenes[1:]
+
+
+def test_scrub_brand_leak_replaces_scene_with_generic_branding_keyword():
+    from core.content_pipeline.generators.reel_script_generator import _scrub_brand_leak, _FALLBACK_SCENES
+    scenes = [
+        'clean overhead shot, no text, no logos.',
+        'product with visible packaging label design, no text, no logos.',
+        'clean detail shot, no text, no logos.',
+        'clean detail shot, no text, no logos.',
+        'clean detail shot, no text, no logos.',
+        'clean detail shot, no text, no logos.',
+    ]
+    result = _scrub_brand_leak(scenes, 'Tu Web MX')
+    assert result[1] == _FALLBACK_SCENES[1]
+    assert result[0] == scenes[0]
+
+
+def test_scrub_brand_leak_leaves_clean_scenes_untouched():
+    from core.content_pipeline.generators.reel_script_generator import _scrub_brand_leak
+    scenes = ['clean shot describing texture and material, no text, no logos.'] * 6
+    result = _scrub_brand_leak(scenes, 'MariBelas')
+    assert result == scenes
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_scrubs_business_name_leak_from_gemini_response(brand_dna):
+    from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator, _FALLBACK_SCENES
+    post_data = {'caption': 'Bolsos artesanales hechos a mano'}
+    response_json = (
+        '{"hook_text":"H","highlight_word":"H","tag_cta":"C","narration_script":"N",'
+        '"scene_prompts":["a bag with a label reading Tu Web MX, no text, no logos.",'
+        '"s2, no text, no logos.","s3, no text, no logos.","s4, no text, no logos.",'
+        '"s5, no text, no logos.","s6, no text, no logos."],"music_mood":"M"}'
+    )
+    with patch('core.content_pipeline.generators.reel_script_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(response_json)
+        result = ReelScriptGenerator().generate(post_data, brand_dna)
+
+    assert result['scene_prompts'][0] == _FALLBACK_SCENES[0]
+    assert result['scene_prompts'][1] == 's2, no text, no logos.'
+
+
 @override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
     GOOGLE_CLOUD_LOCATION='us-central1',
