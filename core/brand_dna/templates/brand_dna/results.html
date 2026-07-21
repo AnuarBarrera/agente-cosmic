@@ -252,10 +252,11 @@
       <div class="dna-label">Descripción</div>
       <div class="dna-value" id="value-description">{{ brand_dna.description }}</div>
       <div class="dna-actions" id="actions-description" {% if 'description' in brand_dna.approved_fields %}style="display:none;"{% endif %}>
-        <button class="btn-action" onclick="startFieldEdit('description')">✏ Editar</button>
-        <button class="btn-action" onclick="toggleFieldRegen('description')">↺ Reanalizar</button>
-        <button class="btn-action btn-approve" onclick="approveField('description')">✓ Aprobado</button>
+        <button class="btn-action" id="editbtn-description" onclick="startFieldEdit('description')">✏ Editar</button>
+        <button class="btn-action" id="regenbtn-description" onclick="toggleFieldRegen('description')">↺ Reanalizar</button>
+        <button class="btn-action btn-approve" id="approvebtn-description" onclick="approveField('description')">✓ Aprobado</button>
         <button class="btn-action btn-save" id="save-description" onclick="saveFieldEdit('description')">Guardar</button>
+        <button class="btn-action" id="cancelbtn-description" onclick="cancelFieldEdit('description')" style="display:none;">Cancelar</button>
       </div>
       <div class="field-feedback-area" id="regen-description">
         <textarea id="note-description" placeholder="¿Qué no refleja tu marca?"></textarea>
@@ -268,10 +269,11 @@
       <div class="dna-label">Audiencia</div>
       <div class="dna-value" id="value-audience">{{ brand_dna.audience }}</div>
       <div class="dna-actions" id="actions-audience" {% if 'audience' in brand_dna.approved_fields %}style="display:none;"{% endif %}>
-        <button class="btn-action" onclick="startFieldEdit('audience')">✏ Editar</button>
-        <button class="btn-action" onclick="toggleFieldRegen('audience')">↺ Reanalizar</button>
-        <button class="btn-action btn-approve" onclick="approveField('audience')">✓ Aprobado</button>
+        <button class="btn-action" id="editbtn-audience" onclick="startFieldEdit('audience')">✏ Editar</button>
+        <button class="btn-action" id="regenbtn-audience" onclick="toggleFieldRegen('audience')">↺ Reanalizar</button>
+        <button class="btn-action btn-approve" id="approvebtn-audience" onclick="approveField('audience')">✓ Aprobado</button>
         <button class="btn-action btn-save" id="save-audience" onclick="saveFieldEdit('audience')">Guardar</button>
+        <button class="btn-action" id="cancelbtn-audience" onclick="cancelFieldEdit('audience')" style="display:none;">Cancelar</button>
       </div>
       <div class="field-feedback-area" id="regen-audience">
         <textarea id="note-audience" placeholder="¿Qué no refleja tu marca?"></textarea>
@@ -297,10 +299,11 @@
       <div class="dna-label">Keywords</div>
       <div class="dna-value" id="value-keywords">{{ brand_dna.keywords|join:", " }}</div>
       <div class="dna-actions" id="actions-keywords" {% if 'keywords' in brand_dna.approved_fields %}style="display:none;"{% endif %}>
-        <button class="btn-action" onclick="startFieldEdit('keywords')">✏ Editar</button>
-        <button class="btn-action" onclick="toggleFieldRegen('keywords')">↺ Reanalizar</button>
-        <button class="btn-action btn-approve" onclick="approveField('keywords')">✓ Aprobado</button>
+        <button class="btn-action" id="editbtn-keywords" onclick="startFieldEdit('keywords')">✏ Editar</button>
+        <button class="btn-action" id="regenbtn-keywords" onclick="toggleFieldRegen('keywords')">↺ Reanalizar</button>
+        <button class="btn-action btn-approve" id="approvebtn-keywords" onclick="approveField('keywords')">✓ Aprobado</button>
         <button class="btn-action btn-save" id="save-keywords" onclick="saveFieldEdit('keywords')">Guardar</button>
+        <button class="btn-action" id="cancelbtn-keywords" onclick="cancelFieldEdit('keywords')" style="display:none;">Cancelar</button>
       </div>
       <div class="field-feedback-area" id="regen-keywords">
         <textarea id="note-keywords" placeholder="¿Qué no refleja tu marca?"></textarea>
@@ -316,10 +319,11 @@
       </div>
       <div class="dna-value" id="value-primary_colors">{{ brand_dna.primary_colors|join:", " }}</div>
       <div class="dna-actions" id="actions-primary_colors" {% if 'primary_colors' in brand_dna.approved_fields %}style="display:none;"{% endif %}>
-        <button class="btn-action" onclick="startFieldEdit('primary_colors')">✏ Editar</button>
-        {% if brand_dna.business_url %}<button class="btn-action" onclick="toggleFieldRegen('primary_colors')">↺ Reanalizar</button>{% endif %}
-        <button class="btn-action btn-approve" onclick="approveField('primary_colors')">✓ Aprobado</button>
+        <button class="btn-action" id="editbtn-primary_colors" onclick="startFieldEdit('primary_colors')">✏ Editar</button>
+        {% if brand_dna.business_url %}<button class="btn-action" id="regenbtn-primary_colors" onclick="toggleFieldRegen('primary_colors')">↺ Reanalizar</button>{% endif %}
+        <button class="btn-action btn-approve" id="approvebtn-primary_colors" onclick="approveField('primary_colors')">✓ Aprobado</button>
         <button class="btn-action btn-save" id="save-primary_colors" onclick="saveFieldEdit('primary_colors')">Guardar</button>
+        <button class="btn-action" id="cancelbtn-primary_colors" onclick="cancelFieldEdit('primary_colors')" style="display:none;">Cancelar</button>
       </div>
       {% if brand_dna.business_url %}
       <div class="field-feedback-area" id="regen-primary_colors">
@@ -449,6 +453,52 @@
     document.getElementById('approved-' + field).style.display = 'block';
   }
 
+  // Entra a modo edicion para un campo: oculta Aprobado, oculta el boton de
+  // la accion activa (Editar o Reanalizar) y muestra Cancelar + el boton
+  // "contrario" (si editas texto libre, puedes cambiar a Reanalizar y
+  // viceversa) — evita el bug de aprobar un campo (irreversible) mientras
+  // sigue a medio editar.
+  function _enterFieldEditState(field, mode) {
+    const cancelBtn = document.getElementById('cancelbtn-' + field);
+    const approveBtn = document.getElementById('approvebtn-' + field);
+    const editBtn = document.getElementById('editbtn-' + field);
+    const regenBtn = document.getElementById('regenbtn-' + field);
+    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+    if (approveBtn) approveBtn.style.display = 'none';
+    if (editBtn) editBtn.style.display = (mode === 'edit') ? 'none' : 'inline-block';
+    if (regenBtn) regenBtn.style.display = (mode === 'regen') ? 'none' : 'inline-block';
+  }
+
+  // Regresa un campo a su estado normal (Editar/Reanalizar/Aprobado visibles,
+  // Cancelar oculto) — se usa al cancelar, guardar, o reanalizar con exito.
+  function _exitFieldEditState(field) {
+    const cancelBtn = document.getElementById('cancelbtn-' + field);
+    const approveBtn = document.getElementById('approvebtn-' + field);
+    const editBtn = document.getElementById('editbtn-' + field);
+    const regenBtn = document.getElementById('regenbtn-' + field);
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    if (approveBtn) approveBtn.style.display = 'inline-block';
+    if (editBtn) editBtn.style.display = 'inline-block';
+    if (regenBtn) regenBtn.style.display = 'inline-block';
+  }
+
+  function cancelFieldEdit(field) {
+    const el = document.getElementById('value-' + field);
+    if (el.contentEditable === 'true') {
+      el.contentEditable = 'false';
+      if (el.dataset.original !== undefined) el.innerText = el.dataset.original;
+    }
+    const saveBtn = document.getElementById('save-' + field);
+    if (saveBtn) saveBtn.style.display = 'none';
+    const regenArea = document.getElementById('regen-' + field);
+    if (regenArea) {
+      regenArea.classList.remove('show');
+      const note = document.getElementById('note-' + field);
+      if (note) note.value = '';
+    }
+    _exitFieldEditState(field);
+  }
+
   function allFieldsApproved() {
     return EDITABLE_FIELDS.every(f => APPROVED_FIELDS.has(f));
   }
@@ -489,6 +539,7 @@
     el.contentEditable = 'true';
     el.focus();
     document.getElementById('save-' + field).style.display = 'inline-block';
+    _enterFieldEditState(field, 'edit');
   }
 
   async function saveFieldEdit(field) {
@@ -496,6 +547,7 @@
     const newValue = el.innerText.trim();
     el.contentEditable = 'false';
     document.getElementById('save-' + field).style.display = 'none';
+    _exitFieldEditState(field);
     const data = await fieldAction(field, { action: 'edit', value: newValue });
     if (data.status === 'ok') {
       el.innerText = displayValue(data.value);
@@ -509,7 +561,12 @@
   }
 
   function toggleFieldRegen(field) {
-    document.getElementById('regen-' + field).classList.toggle('show');
+    const isShowing = document.getElementById('regen-' + field).classList.toggle('show');
+    if (isShowing) {
+      _enterFieldEditState(field, 'regen');
+    } else {
+      _exitFieldEditState(field);
+    }
   }
 
   async function requestFieldRegen(field) {
@@ -525,6 +582,7 @@
       el.innerText = displayValue(data.value);
       note.value = '';
       document.getElementById('regen-' + field).classList.remove('show');
+      _exitFieldEditState(field);
       markDnaChanged();
       updateRegenButtonState();
       showToast('Reanalizado ✨');
