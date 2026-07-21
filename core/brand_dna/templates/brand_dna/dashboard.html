@@ -94,28 +94,13 @@
     <div style="display:inline-flex;align-items:center;gap:8px;padding:8px 16px;background:#1a1a2e;border-radius:8px;margin-bottom:24px;font-size:0.82rem;color:#aaa;margin-left:12px;">
       📅 Calendarios: <strong style="color:#f0f0f0;">{{ used_total }}/{{ max_calendars }}</strong>
     </div>
-    {% else %}
+    {% elif user.groups.all.0.name == 'tester' or user.groups.all.0.name == 'admin' %}
     <div style="display:flex;align-items:center;gap:10px;padding:14px 20px;background:#3a1a1a;border:1px solid #c0392b;border-radius:10px;margin-bottom:24px;font-size:0.88rem;">
       <span>📅</span>
       <div>
         <strong style="color:#e94560;">Límite de calendarios alcanzado</strong>
         <div style="color:#aaa;font-size:0.8rem;margin-top:2px;">Ya generaste {{ used_total }} de {{ max_calendars }} calendarios de tu plan. Contacta soporte para ampliar tu acceso.</div>
       </div>
-    </div>
-    {% endif %}
-
-    {% if not user.groups.all.0.name == 'tester' and not user.groups.all.0.name == 'admin' %}
-    <div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:12px;padding:20px 24px;margin-bottom:24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-      <div style="flex:1;min-width:200px;">
-        <div style="font-weight:600;font-size:0.95rem;margin-bottom:4px;">¿Tienes un código de invitación?</div>
-        <div style="font-size:0.8rem;color:#aaa;">Ingresa tu código para obtener acceso ampliado como tester.</div>
-      </div>
-      <form method="POST" action="{% url 'apply_code' %}" style="display:flex;gap:8px;align-items:center;">
-        {% csrf_token %}
-        <input type="text" name="code" placeholder="COSMIC-XXXXXX" required
-               style="padding:10px 14px;border-radius:8px;border:1px solid #333;background:#0d0d1a;color:#f0f0f0;font-size:0.9rem;width:170px;text-transform:uppercase;">
-        <button type="submit" style="padding:10px 20px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;white-space:nowrap;">Aplicar</button>
-      </form>
     </div>
     {% endif %}
 
