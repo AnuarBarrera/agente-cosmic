@@ -226,7 +226,12 @@ def test_field_action_blocks_other_user(job_with_calendar, django_user_model, fr
     assert response.status_code == 404
 
 
+_ALL_DNA_FIELDS = ['description', 'audience', 'tone', 'keywords', 'primary_colors']
+
+
 def test_regenerate_calendar_updates_pending_posts_only(user, job_with_calendar):
+    job_with_calendar.brand_dna.approved_fields = _ALL_DNA_FIELDS
+    job_with_calendar.brand_dna.save(update_fields=['approved_fields'])
     calendar = job_with_calendar.brand_dna.calendar
     day1 = calendar.posts.get(day_number=1)
     day2 = calendar.posts.get(day_number=2)
@@ -262,8 +267,96 @@ def test_regenerate_calendar_no_calendar_returns_404(user):
 
 
 def test_regenerate_calendar_all_sent_returns_400(user, job_with_calendar):
+    job_with_calendar.brand_dna.approved_fields = _ALL_DNA_FIELDS
+    job_with_calendar.brand_dna.save(update_fields=['approved_fields'])
     job_with_calendar.brand_dna.calendar.posts.update(status=ContentPost.STATUS_SENT)
     c = Client()
     c.force_login(user)
     response = c.post(f'/api/calendar/{job_with_calendar.id}/regenerate/')
     assert response.status_code == 400
+
+
+def test_regenerate_calendar_blocked_when_not_all_fields_approved(user, job_with_calendar):
+    job_with_calendar.brand_dna.approved_fields = ['description', 'audience']  # faltan tone/keywords/primary_colors
+    job_with_calendar.brand_dna.save(update_fields=['approved_fields'])
+    c = Client()
+    c.force_login(user)
+    response = c.post(f'/api/calendar/{job_with_calendar.id}/regenerate/')
+    assert response.status_code == 400
+    assert 'Aprueba todos los campos' in response.json()['error']
+
+
+def test_regenerate_calendar_blocked_when_no_fields_approved(user, job_with_calendar):
+    c = Client()
+    c.force_login(user)
+    response = c.post(f'/api/calendar/{job_with_calendar.id}/regenerate/')
+    assert response.status_code == 400
+
+
+def test_field_approve_action_persists(user, job_with_calendar):
+    c = Client()
+    c.force_login(user)
+    response = c.post(
+        f'/api/brand-dna/{job_with_calendar.id}/field/',
+        data=json.dumps({'field': 'description', 'action': 'approve'}),
+        content_type='application/json',
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data['approved_fields'] == ['description']
+    assert data['all_approved'] is False
+    job_with_calendar.brand_dna.refresh_from_db()
+    assert job_with_calendar.brand_dna.approved_fields == ['description']
+
+
+def test_field_approve_reports_all_approved_when_complete(user, job_with_calendar):
+    c = Client()
+    c.force_login(user)
+    for field in _ALL_DNA_FIELDS[:-1]:
+        c.post(
+            f'/api/brand-dna/{job_with_calendar.id}/field/',
+            data=json.dumps({'field': field, 'action': 'approve'}),
+            content_type='application/json',
+        )
+    response = c.post(
+        f'/api/brand-dna/{job_with_calendar.id}/field/',
+        data=json.dumps({'field': _ALL_DNA_FIELDS[-1], 'action': 'approve'}),
+        content_type='application/json',
+    )
+    data = response.json()
+    assert data['all_approved'] is True
+    assert set(data['approved_fields']) == set(_ALL_DNA_FIELDS)
+
+
+def test_field_edit_unapproves_only_that_field(user, job_with_calendar):
+    job_with_calendar.brand_dna.approved_fields = _ALL_DNA_FIELDS
+    job_with_calendar.brand_dna.save(update_fields=['approved_fields'])
+    c = Client()
+    c.force_login(user)
+    response = c.post(
+        f'/api/brand-dna/{job_with_calendar.id}/field/',
+        data=json.dumps({'field': 'description', 'action': 'edit', 'value': 'Nueva descripcion'}),
+        content_type='application/json',
+    )
+    data = response.json()
+    assert 'description' not in data['approved_fields']
+    assert set(data['approved_fields']) == {'audience', 'tone', 'keywords', 'primary_colors'}
+
+
+def test_field_reanalyze_unapproves_only_that_field(user, job_with_calendar):
+    job_with_calendar.brand_dna.approved_fields = _ALL_DNA_FIELDS
+    job_with_calendar.brand_dna.save(update_fields=['approved_fields'])
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.genai.Client') as MockClient:
+        mock_resp = MockClient.return_value.models.generate_content.return_value
+        mock_resp.text = 'Descripcion corregida por IA'
+        mock_resp.usage_metadata = None
+        response = c.post(
+            f'/api/brand-dna/{job_with_calendar.id}/field/',
+            data=json.dumps({'field': 'description', 'action': 'reanalyze', 'value': 'no menciona que somos B2B'}),
+            content_type='application/json',
+        )
+    data = response.json()
+    assert 'description' not in data['approved_fields']
+    assert set(data['approved_fields']) == {'audience', 'tone', 'keywords', 'primary_colors'}

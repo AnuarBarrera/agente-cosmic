@@ -631,9 +631,13 @@ def brand_dna_field_action_api(request, job_id):
             if not value:
                 return JsonResponse({'error': 'El campo no puede quedar vacío'}, status=400)
             setattr(brand_dna, field, value)
-        brand_dna.save(update_fields=[field])
+        _unapprove_field(brand_dna, field)
+        brand_dna.save(update_fields=[field, 'approved_fields'])
         POST_ACTIONS.labels(action='brand_dna_edited').inc()
-        return JsonResponse({'status': 'ok', 'field': field, 'value': getattr(brand_dna, field)})
+        return JsonResponse({
+            'status': 'ok', 'field': field, 'value': getattr(brand_dna, field),
+            'approved_fields': brand_dna.approved_fields,
+        })
 
     if action == 'reanalyze':
         if field not in _BRAND_DNA_REANALYZABLE_FIELDS:
@@ -643,11 +647,33 @@ def brand_dna_field_action_api(request, job_id):
         except ValueError as e:
             return JsonResponse({'error': str(e)}, status=400)
         setattr(brand_dna, field, new_value)
-        brand_dna.save(update_fields=[field])
+        _unapprove_field(brand_dna, field)
+        brand_dna.save(update_fields=[field, 'approved_fields'])
         POST_ACTIONS.labels(action='brand_dna_reanalyzed').inc()
-        return JsonResponse({'status': 'ok', 'field': field, 'value': new_value})
+        return JsonResponse({
+            'status': 'ok', 'field': field, 'value': new_value,
+            'approved_fields': brand_dna.approved_fields,
+        })
+
+    if action == 'approve':
+        if field not in brand_dna.approved_fields:
+            brand_dna.approved_fields = brand_dna.approved_fields + [field]
+            brand_dna.save(update_fields=['approved_fields'])
+        POST_ACTIONS.labels(action='brand_dna_field_approved').inc()
+        return JsonResponse({
+            'status': 'ok', 'field': field,
+            'approved_fields': brand_dna.approved_fields,
+            'all_approved': _BRAND_DNA_EDITABLE_FIELDS.issubset(set(brand_dna.approved_fields)),
+        })
 
     return JsonResponse({'error': 'Acción desconocida'}, status=400)
+
+
+def _unapprove_field(brand_dna, field):
+    """El campo que se acaba de editar/reanalizar deja de estar aprobado — los
+    demás campos conservan su estado (aprobados siguen aprobados, sin tocar)."""
+    if field in brand_dna.approved_fields:
+        brand_dna.approved_fields = [f for f in brand_dna.approved_fields if f != field]
 
 
 def _reanalyze_brand_field(brand_dna, job, field: str, feedback: str):
@@ -713,6 +739,11 @@ def regenerate_calendar_api(request, job_id):
     calendar = getattr(brand_dna, 'calendar', None) if brand_dna else None
     if not calendar:
         return JsonResponse({'error': 'No hay calendario para regenerar'}, status=404)
+
+    if not _BRAND_DNA_EDITABLE_FIELDS.issubset(set(brand_dna.approved_fields)):
+        return JsonResponse({
+            'error': 'Aprueba todos los campos del ADN de marca antes de regenerar tu contenido.',
+        }, status=400)
 
     pending_posts = list(calendar.posts.exclude(status=ContentPost.STATUS_SENT).order_by('day_number'))
     if not pending_posts:

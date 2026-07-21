@@ -251,7 +251,7 @@
     <div class="dna-field">
       <div class="dna-label">Descripción</div>
       <div class="dna-value" id="value-description">{{ brand_dna.description }}</div>
-      <div class="dna-actions" id="actions-description">
+      <div class="dna-actions" id="actions-description" {% if 'description' in brand_dna.approved_fields %}style="display:none;"{% endif %}>
         <button class="btn-action" onclick="startFieldEdit('description')">✏ Editar</button>
         <button class="btn-action" onclick="toggleFieldRegen('description')">↺ Reanalizar</button>
         <button class="btn-action btn-approve" onclick="approveField('description')">✓ Aprobado</button>
@@ -261,13 +261,13 @@
         <textarea id="note-description" placeholder="¿Qué no refleja tu marca?"></textarea>
         <button class="btn-send-regen" onclick="requestFieldRegen('description')">Reanalizar con IA ✨</button>
       </div>
-      <div class="dna-approved-status" id="approved-description">✓ Aprobado</div>
+      <div class="dna-approved-status" id="approved-description" {% if 'description' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado <button class="btn-action" style="margin-left:8px;" onclick="unlockField('description')">Editar de nuevo</button></div>
     </div>
 
     <div class="dna-field">
       <div class="dna-label">Audiencia</div>
       <div class="dna-value" id="value-audience">{{ brand_dna.audience }}</div>
-      <div class="dna-actions" id="actions-audience">
+      <div class="dna-actions" id="actions-audience" {% if 'audience' in brand_dna.approved_fields %}style="display:none;"{% endif %}>
         <button class="btn-action" onclick="startFieldEdit('audience')">✏ Editar</button>
         <button class="btn-action" onclick="toggleFieldRegen('audience')">↺ Reanalizar</button>
         <button class="btn-action btn-approve" onclick="approveField('audience')">✓ Aprobado</button>
@@ -277,26 +277,26 @@
         <textarea id="note-audience" placeholder="¿Qué no refleja tu marca?"></textarea>
         <button class="btn-send-regen" onclick="requestFieldRegen('audience')">Reanalizar con IA ✨</button>
       </div>
-      <div class="dna-approved-status" id="approved-audience">✓ Aprobado</div>
+      <div class="dna-approved-status" id="approved-audience" {% if 'audience' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado <button class="btn-action" style="margin-left:8px;" onclick="unlockField('audience')">Editar de nuevo</button></div>
     </div>
 
     <div class="dna-field">
       <div class="dna-label">Tono</div>
-      <select class="dna-select" id="value-tone" onchange="saveToneChange()">
+      <select class="dna-select" id="value-tone" onchange="saveToneChange()" {% if 'tone' in brand_dna.approved_fields %}disabled{% endif %}>
         {% for t in tone_choices %}
         <option value="{{ t }}" {% if brand_dna.tone == t %}selected{% endif %}>{{ t|capfirst }}</option>
         {% endfor %}
       </select>
-      <div class="dna-actions" id="actions-tone">
+      <div class="dna-actions" id="actions-tone" {% if 'tone' in brand_dna.approved_fields %}style="display:none;"{% endif %}>
         <button class="btn-action btn-approve" onclick="approveField('tone')">✓ Aprobado</button>
       </div>
-      <div class="dna-approved-status" id="approved-tone">✓ Aprobado</div>
+      <div class="dna-approved-status" id="approved-tone" {% if 'tone' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado <button class="btn-action" style="margin-left:8px;" onclick="unlockField('tone')">Editar de nuevo</button></div>
     </div>
 
     <div class="dna-field">
       <div class="dna-label">Keywords</div>
       <div class="dna-value" id="value-keywords">{{ brand_dna.keywords|join:", " }}</div>
-      <div class="dna-actions" id="actions-keywords">
+      <div class="dna-actions" id="actions-keywords" {% if 'keywords' in brand_dna.approved_fields %}style="display:none;"{% endif %}>
         <button class="btn-action" onclick="startFieldEdit('keywords')">✏ Editar</button>
         <button class="btn-action" onclick="toggleFieldRegen('keywords')">↺ Reanalizar</button>
         <button class="btn-action btn-approve" onclick="approveField('keywords')">✓ Aprobado</button>
@@ -306,7 +306,7 @@
         <textarea id="note-keywords" placeholder="¿Qué no refleja tu marca?"></textarea>
         <button class="btn-send-regen" onclick="requestFieldRegen('keywords')">Reanalizar con IA ✨</button>
       </div>
-      <div class="dna-approved-status" id="approved-keywords">✓ Aprobado</div>
+      <div class="dna-approved-status" id="approved-keywords" {% if 'keywords' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado <button class="btn-action" style="margin-left:8px;" onclick="unlockField('keywords')">Editar de nuevo</button></div>
     </div>
 
     <div class="dna-field">
@@ -315,7 +315,7 @@
         {% for c in brand_dna.primary_colors %}<span class="color-swatch" style="background:{{ c }};" title="{{ c }}"></span>{% endfor %}
       </div>
       <div class="dna-value" id="value-primary_colors">{{ brand_dna.primary_colors|join:", " }}</div>
-      <div class="dna-actions" id="actions-primary_colors">
+      <div class="dna-actions" id="actions-primary_colors" {% if 'primary_colors' in brand_dna.approved_fields %}style="display:none;"{% endif %}>
         <button class="btn-action" onclick="startFieldEdit('primary_colors')">✏ Editar</button>
         {% if brand_dna.business_url %}<button class="btn-action" onclick="toggleFieldRegen('primary_colors')">↺ Reanalizar</button>{% endif %}
         <button class="btn-action btn-approve" onclick="approveField('primary_colors')">✓ Aprobado</button>
@@ -327,14 +327,15 @@
         <button class="btn-send-regen" onclick="requestFieldRegen('primary_colors')">Reanalizar con IA ✨</button>
       </div>
       {% endif %}
-      <div class="dna-approved-status" id="approved-primary_colors">✓ Aprobado</div>
+      <div class="dna-approved-status" id="approved-primary_colors" {% if 'primary_colors' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado <button class="btn-action" style="margin-left:8px;" onclick="unlockField('primary_colors')">Editar de nuevo</button></div>
     </div>
   </div>
 
   <div class="regen-banner" id="regenBanner">
-    <span>Hiciste cambios a tu ADN de marca.</span>
+    <span id="regenBannerText">Hiciste cambios a tu ADN de marca.</span>
     <button id="regenBtn" onclick="regenerateCalendar()">Regenerar mis posts con estos cambios</button>
   </div>
+  {{ brand_dna.approved_fields|json_script:"approved-fields-data" }}
 
   <div style="text-align:center;margin-top:24px;">
     <a id="calendarLink" href="{% url 'calendar_review' job.id %}" class="nav-btn nav-btn-primary" style="display:inline-block;padding:14px 32px;font-size:1rem;text-decoration:none;background:#e94560;color:#fff;border-radius:8px;font-weight:600;">
@@ -421,6 +422,9 @@
 
   {% if job.status == 'done' and brand_dna %}
   // ── Edición de ADN de marca ──
+  const EDITABLE_FIELDS = ['description', 'audience', 'tone', 'keywords', 'primary_colors'];
+  let APPROVED_FIELDS = new Set(JSON.parse(document.getElementById('approved-fields-data').textContent));
+
   async function fieldAction(field, payload) {
     const res = await fetch('/api/brand-dna/' + JOB_ID + '/field/', {
       method: 'POST',
@@ -434,13 +438,55 @@
     document.getElementById('regenBanner').style.display = 'flex';
   }
 
-  function approveField(field) {
+  // Solo manipula el DOM — no llama a la API. Se usa tanto al aprobar de verdad
+  // como para pintar el estado inicial ya aprobado que vino del servidor.
+  function _setApprovedUI(field) {
     document.getElementById('actions-' + field).style.display = 'none';
     const regenArea = document.getElementById('regen-' + field);
     if (regenArea) regenArea.style.display = 'none';
     const select = document.getElementById('value-' + field);
     if (select && select.tagName === 'SELECT') select.disabled = true;
     document.getElementById('approved-' + field).style.display = 'block';
+  }
+
+  // Revela de nuevo los controles de edición de un campo ya aprobado — no
+  // desaprueba nada en el servidor todavía, eso solo pasa si de verdad se
+  // edita o reanaliza el campo (ver fieldAction en saveFieldEdit/requestFieldRegen).
+  function unlockField(field) {
+    document.getElementById('actions-' + field).style.display = 'flex';
+    const select = document.getElementById('value-' + field);
+    if (select && select.tagName === 'SELECT') select.disabled = false;
+    document.getElementById('approved-' + field).style.display = 'none';
+  }
+
+  function allFieldsApproved() {
+    return EDITABLE_FIELDS.every(f => APPROVED_FIELDS.has(f));
+  }
+
+  // Habilita "Regenerar mis posts" solo cuando TODOS los campos del ADN de
+  // marca están aprobados — evita regenerar contenido con partes sin revisar.
+  function updateRegenButtonState() {
+    const btn = document.getElementById('regenBtn');
+    const hint = document.getElementById('regenBannerText');
+    if (allFieldsApproved()) {
+      btn.disabled = false;
+      hint.textContent = 'Hiciste cambios a tu ADN de marca.';
+    } else {
+      btn.disabled = true;
+      hint.textContent = 'Hiciste cambios a tu ADN de marca. Aprueba todos los campos de arriba para poder regenerar tus posts.';
+    }
+  }
+
+  async function approveField(field) {
+    const data = await fieldAction(field, { action: 'approve' });
+    if (data.status === 'ok') {
+      APPROVED_FIELDS = new Set(data.approved_fields);
+      _setApprovedUI(field);
+      updateRegenButtonState();
+      showToast('Campo aprobado ✓');
+    } else {
+      showToast(data.error || 'Error', '#e74c3c');
+    }
   }
 
   function displayValue(v) {
@@ -463,7 +509,9 @@
     const data = await fieldAction(field, { action: 'edit', value: newValue });
     if (data.status === 'ok') {
       el.innerText = displayValue(data.value);
+      APPROVED_FIELDS = new Set(data.approved_fields);
       markDnaChanged();
+      updateRegenButtonState();
       showToast('Campo actualizado ✓');
     } else {
       el.innerText = el.dataset.original;
@@ -488,7 +536,9 @@
       el.innerText = displayValue(data.value);
       note.value = '';
       document.getElementById('regen-' + field).classList.remove('show');
+      APPROVED_FIELDS = new Set(data.approved_fields);
       markDnaChanged();
+      updateRegenButtonState();
       showToast('Reanalizado ✨');
     } else {
       showToast(data.error || 'Error', '#e74c3c');
@@ -499,7 +549,9 @@
     const sel = document.getElementById('value-tone');
     const data = await fieldAction('tone', { action: 'edit', value: sel.value });
     if (data.status === 'ok') {
+      APPROVED_FIELDS = new Set(data.approved_fields);
       markDnaChanged();
+      updateRegenButtonState();
       showToast('Tono actualizado ✓');
     } else {
       showToast(data.error || 'Error', '#e74c3c');
