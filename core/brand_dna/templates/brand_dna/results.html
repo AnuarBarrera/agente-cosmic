@@ -261,7 +261,7 @@
         <textarea id="note-description" placeholder="¿Qué no refleja tu marca?"></textarea>
         <button class="btn-send-regen" onclick="requestFieldRegen('description')">Reanalizar con IA ✨</button>
       </div>
-      <div class="dna-approved-status" id="approved-description" {% if 'description' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado <button class="btn-action" style="margin-left:8px;" onclick="unlockField('description')">Editar de nuevo</button></div>
+      <div class="dna-approved-status" id="approved-description" {% if 'description' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado</div>
     </div>
 
     <div class="dna-field">
@@ -277,7 +277,7 @@
         <textarea id="note-audience" placeholder="¿Qué no refleja tu marca?"></textarea>
         <button class="btn-send-regen" onclick="requestFieldRegen('audience')">Reanalizar con IA ✨</button>
       </div>
-      <div class="dna-approved-status" id="approved-audience" {% if 'audience' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado <button class="btn-action" style="margin-left:8px;" onclick="unlockField('audience')">Editar de nuevo</button></div>
+      <div class="dna-approved-status" id="approved-audience" {% if 'audience' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado</div>
     </div>
 
     <div class="dna-field">
@@ -290,7 +290,7 @@
       <div class="dna-actions" id="actions-tone" {% if 'tone' in brand_dna.approved_fields %}style="display:none;"{% endif %}>
         <button class="btn-action btn-approve" onclick="approveField('tone')">✓ Aprobado</button>
       </div>
-      <div class="dna-approved-status" id="approved-tone" {% if 'tone' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado <button class="btn-action" style="margin-left:8px;" onclick="unlockField('tone')">Editar de nuevo</button></div>
+      <div class="dna-approved-status" id="approved-tone" {% if 'tone' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado</div>
     </div>
 
     <div class="dna-field">
@@ -306,7 +306,7 @@
         <textarea id="note-keywords" placeholder="¿Qué no refleja tu marca?"></textarea>
         <button class="btn-send-regen" onclick="requestFieldRegen('keywords')">Reanalizar con IA ✨</button>
       </div>
-      <div class="dna-approved-status" id="approved-keywords" {% if 'keywords' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado <button class="btn-action" style="margin-left:8px;" onclick="unlockField('keywords')">Editar de nuevo</button></div>
+      <div class="dna-approved-status" id="approved-keywords" {% if 'keywords' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado</div>
     </div>
 
     <div class="dna-field">
@@ -327,7 +327,7 @@
         <button class="btn-send-regen" onclick="requestFieldRegen('primary_colors')">Reanalizar con IA ✨</button>
       </div>
       {% endif %}
-      <div class="dna-approved-status" id="approved-primary_colors" {% if 'primary_colors' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado <button class="btn-action" style="margin-left:8px;" onclick="unlockField('primary_colors')">Editar de nuevo</button></div>
+      <div class="dna-approved-status" id="approved-primary_colors" {% if 'primary_colors' in brand_dna.approved_fields %}style="display:block;"{% endif %}>✓ Aprobado</div>
     </div>
   </div>
 
@@ -449,16 +449,6 @@
     document.getElementById('approved-' + field).style.display = 'block';
   }
 
-  // Revela de nuevo los controles de edición de un campo ya aprobado — no
-  // desaprueba nada en el servidor todavía, eso solo pasa si de verdad se
-  // edita o reanaliza el campo (ver fieldAction en saveFieldEdit/requestFieldRegen).
-  function unlockField(field) {
-    document.getElementById('actions-' + field).style.display = 'flex';
-    const select = document.getElementById('value-' + field);
-    if (select && select.tagName === 'SELECT') select.disabled = false;
-    document.getElementById('approved-' + field).style.display = 'none';
-  }
-
   function allFieldsApproved() {
     return EDITABLE_FIELDS.every(f => APPROVED_FIELDS.has(f));
   }
@@ -509,7 +499,6 @@
     const data = await fieldAction(field, { action: 'edit', value: newValue });
     if (data.status === 'ok') {
       el.innerText = displayValue(data.value);
-      APPROVED_FIELDS = new Set(data.approved_fields);
       markDnaChanged();
       updateRegenButtonState();
       showToast('Campo actualizado ✓');
@@ -536,7 +525,6 @@
       el.innerText = displayValue(data.value);
       note.value = '';
       document.getElementById('regen-' + field).classList.remove('show');
-      APPROVED_FIELDS = new Set(data.approved_fields);
       markDnaChanged();
       updateRegenButtonState();
       showToast('Reanalizado ✨');
@@ -549,7 +537,6 @@
     const sel = document.getElementById('value-tone');
     const data = await fieldAction('tone', { action: 'edit', value: sel.value });
     if (data.status === 'ok') {
-      APPROVED_FIELDS = new Set(data.approved_fields);
       markDnaChanged();
       updateRegenButtonState();
       showToast('Tono actualizado ✓');

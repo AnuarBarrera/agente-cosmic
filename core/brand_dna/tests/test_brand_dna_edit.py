@@ -328,8 +328,8 @@ def test_field_approve_reports_all_approved_when_complete(user, job_with_calenda
     assert set(data['approved_fields']) == set(_ALL_DNA_FIELDS)
 
 
-def test_field_edit_unapproves_only_that_field(user, job_with_calendar):
-    job_with_calendar.brand_dna.approved_fields = _ALL_DNA_FIELDS
+def test_field_edit_rejected_when_already_approved(user, job_with_calendar):
+    job_with_calendar.brand_dna.approved_fields = ['description']
     job_with_calendar.brand_dna.save(update_fields=['approved_fields'])
     c = Client()
     c.force_login(user)
@@ -338,13 +338,31 @@ def test_field_edit_unapproves_only_that_field(user, job_with_calendar):
         data=json.dumps({'field': 'description', 'action': 'edit', 'value': 'Nueva descripcion'}),
         content_type='application/json',
     )
-    data = response.json()
-    assert 'description' not in data['approved_fields']
-    assert set(data['approved_fields']) == {'audience', 'tone', 'keywords', 'primary_colors'}
+    assert response.status_code == 400
+    assert 'ya está aprobado' in response.json()['error']
+    job_with_calendar.brand_dna.refresh_from_db()
+    assert job_with_calendar.brand_dna.description == 'Agencia digital'  # sin cambios
+    assert job_with_calendar.brand_dna.approved_fields == ['description']  # sigue aprobado
 
 
-def test_field_reanalyze_unapproves_only_that_field(user, job_with_calendar):
-    job_with_calendar.brand_dna.approved_fields = _ALL_DNA_FIELDS
+def test_field_edit_allowed_when_other_field_approved(user, job_with_calendar):
+    job_with_calendar.brand_dna.approved_fields = ['audience']
+    job_with_calendar.brand_dna.save(update_fields=['approved_fields'])
+    c = Client()
+    c.force_login(user)
+    response = c.post(
+        f'/api/brand-dna/{job_with_calendar.id}/field/',
+        data=json.dumps({'field': 'description', 'action': 'edit', 'value': 'Nueva descripcion'}),
+        content_type='application/json',
+    )
+    assert response.status_code == 200
+    job_with_calendar.brand_dna.refresh_from_db()
+    assert job_with_calendar.brand_dna.description == 'Nueva descripcion'
+    assert job_with_calendar.brand_dna.approved_fields == ['audience']  # intacto
+
+
+def test_field_reanalyze_rejected_when_already_approved(user, job_with_calendar):
+    job_with_calendar.brand_dna.approved_fields = ['description']
     job_with_calendar.brand_dna.save(update_fields=['approved_fields'])
     c = Client()
     c.force_login(user)
@@ -357,6 +375,8 @@ def test_field_reanalyze_unapproves_only_that_field(user, job_with_calendar):
             data=json.dumps({'field': 'description', 'action': 'reanalyze', 'value': 'no menciona que somos B2B'}),
             content_type='application/json',
         )
-    data = response.json()
-    assert 'description' not in data['approved_fields']
-    assert set(data['approved_fields']) == {'audience', 'tone', 'keywords', 'primary_colors'}
+    assert response.status_code == 400
+    MockClient.return_value.models.generate_content.assert_not_called()
+    assert 'ya está aprobado' in response.json()['error']
+    job_with_calendar.brand_dna.refresh_from_db()
+    assert job_with_calendar.brand_dna.description == 'Agencia digital'  # sin cambios
