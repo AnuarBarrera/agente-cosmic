@@ -8,6 +8,7 @@ from django.conf import settings
 from core.brand_dna.models import BrandDNA
 from core.shared.metrics_utils import track_external_api, record_tokens, vertex_labels
 from core.shared.rate_limiter import call_with_429_retry
+from core.content_pipeline.generators.brand_consistency_qc import audit_brand_consistency, rewrite_for_brand_consistency
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +178,14 @@ class TextGenerator:
                 post['format'] = 'carousel'
             else:
                 post['format'] = 'single'
+
+        captions_to_audit = {f"post_{i}": p['caption'] for i, p in enumerate(posts)}
+        issues = audit_brand_consistency(captions_to_audit, brand_dna)
+        for field_name, reason in issues.items():
+            idx = int(field_name.split('_')[1])
+            posts[idx]['caption'] = rewrite_for_brand_consistency(
+                field_name, posts[idx]['caption'], reason, brand_dna,
+            )
 
         if _is_sensitive_niche(brand_dna) or not brand_dna.business_url:
             logger.info(f"Auditando captions para '{brand_dna.business_name}' (nicho sensible o sin business_url)")

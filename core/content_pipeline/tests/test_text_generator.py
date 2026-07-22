@@ -34,6 +34,13 @@ def _mock_vertex_client(json_text):
     return mock_client
 
 
+@pytest.fixture(autouse=True)
+def _mock_brand_consistency_qc():
+    with patch('core.content_pipeline.generators.text_generator.audit_brand_consistency', return_value={}) as mock_audit, \
+         patch('core.content_pipeline.generators.text_generator.rewrite_for_brand_consistency') as mock_rewrite:
+        yield mock_audit, mock_rewrite
+
+
 @override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
     GOOGLE_CLOUD_LOCATION='us-central1',
@@ -311,3 +318,41 @@ def test_validate_caption_safety_allows_website_mention_when_url_present(brand_d
     assert result is True
 
 
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_rewrites_only_flagged_caption(brand_dna, _mock_brand_consistency_qc):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    mock_audit, mock_rewrite = _mock_brand_consistency_qc
+    mock_audit.return_value = {'post_2': 'connotacion inferior'}
+    mock_rewrite.return_value = 'Caption corregida'
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
+        gen = TextGenerator()
+        result = gen.generate(brand_dna)
+
+    mock_audit.assert_called_once()
+    mock_rewrite.assert_called_once_with('post_2', 'Post 3: tu marca online', 'connotacion inferior', brand_dna)
+    assert result[2]['caption'] == 'Caption corregida'
+    assert result[0]['caption'] == 'Post 1: diseno que convierte'
+    assert result[1]['caption'] == 'Post 2: presencia digital'
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_runs_brand_consistency_audit_for_normal_business(brand_dna, _mock_brand_consistency_qc):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    mock_audit, _ = _mock_brand_consistency_qc
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
+        gen = TextGenerator()
+        gen.generate(brand_dna)
+
+    mock_audit.assert_called_once()
+    called_fields = mock_audit.call_args.args[0]
+    assert len(called_fields) == 7
