@@ -3894,3 +3894,23 @@ Severidad: Media (el contenido no llegó a publicarse — el sistema de
   premium de una marca real frente a sus clientes).
 Prioridad: Media — Anuar analiza y decide el approach antes de que se
   implemente nada.
+
+ACTUALIZACIÓN 2026-07-22 — 🟢 RESUELTO — implementado el auditor de
+  consistencia de marca propuesto por Anuar (ver spec
+  docs/superpowers/specs/2026-07-22-brand-consistency-auditor-design.md).
+  Nuevo módulo `core/content_pipeline/generators/brand_consistency_qc.py`
+  con `audit_brand_consistency()` (una sola llamada a Gemini que evalúa
+  varios campos a la vez contra `BrandDNA.description`/`tone`/`keywords`,
+  fail-open) y `rewrite_for_brand_consistency()` (reescribe solo el campo
+  marcado, fail-open). Corre SIEMPRE, en toda generación — no condicionado
+  a nicho sensible ni a `business_url` como `caption_safety_qc`. Enganchado
+  en `ReelScriptGenerator` (hook_text/tag_cta/narration_script/scene_prompts
+  — este último se audita pero nunca se reescribe automáticamente, solo se
+  loggea) y en `TextGenerator` (las 7 captions del calendario). `music_mood`
+  queda excluido. Commits: `62a8dcb` (módulo base), `a993035` (integración
+  en ReelScriptGenerator), `650a21b` (integración en TextGenerator).
+  Implementado con subagent-driven-development delegando a agentes externos
+  (Gemini CLI vía agy), revisión de cada tarea + revisión final de todo el
+  branch por Claude — "Ready to merge: Yes", sin hallazgos Critical/Important.
+  Fuera de alcance (spec separado pendiente): variabilidad/anti-repetición
+  entre generaciones (ej. la misma imaginería repetida entre reels).
