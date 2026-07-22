@@ -24,6 +24,13 @@ def _mock_vertex_client(json_text):
     return mock_client
 
 
+@pytest.fixture(autouse=True)
+def _mock_brand_consistency_qc():
+    with patch('core.content_pipeline.generators.reel_script_generator.audit_brand_consistency', return_value={}) as mock_audit, \
+         patch('core.content_pipeline.generators.reel_script_generator.rewrite_for_brand_consistency') as mock_rewrite:
+        yield mock_audit, mock_rewrite
+
+
 @override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
     GOOGLE_CLOUD_LOCATION='us-central1',
@@ -207,4 +214,79 @@ def test_prompt_differentiates_veo_scene_from_imagen_scenes(brand_dna):
     assert 'GENERADOR DE IMAGEN FIJA' in sent_prompt
     assert '5 shots' in sent_prompt
     assert 'NO debe incluir manipulacion precisa' in sent_prompt
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_rewrites_field_flagged_by_brand_consistency_audit(brand_dna, _mock_brand_consistency_qc):
+    from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
+    mock_audit, mock_rewrite = _mock_brand_consistency_qc
+    mock_audit.return_value = {'narration_script': 'connotacion inferior'}
+    mock_rewrite.return_value = 'Hecho con upcycling.'
+    post_data = {'caption': 'Bolsos artesanales hechos a mano'}
+    response_json = (
+        '{"hook_text":"H","highlight_word":"H","tag_cta":"C",'
+        '"narration_script":"Hecho con materiales reutilizados.",'
+        '"scene_prompts":["s1, no text, no logos.","s2, no text, no logos.",'
+        '"s3, no text, no logos.","s4, no text, no logos.",'
+        '"s5, no text, no logos.","s6, no text, no logos."],"music_mood":"M"}'
+    )
+    with patch('core.content_pipeline.generators.reel_script_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(response_json)
+        result = ReelScriptGenerator().generate(post_data, brand_dna)
+
+    mock_audit.assert_called_once()
+    mock_rewrite.assert_called_once_with(
+        'narration_script', 'Hecho con materiales reutilizados.', 'connotacion inferior', brand_dna,
+    )
+    assert result['narration_script'] == 'Hecho con upcycling.'
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_does_not_rewrite_scene_prompts_when_flagged(brand_dna, _mock_brand_consistency_qc):
+    from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
+    mock_audit, mock_rewrite = _mock_brand_consistency_qc
+    mock_audit.return_value = {'scene_prompts': 'inconsistente'}
+    post_data = {'caption': 'Bolsos artesanales hechos a mano'}
+    response_json = (
+        '{"hook_text":"H","highlight_word":"H","tag_cta":"C","narration_script":"N",'
+        '"scene_prompts":["s1, no text, no logos.","s2, no text, no logos.",'
+        '"s3, no text, no logos.","s4, no text, no logos.",'
+        '"s5, no text, no logos.","s6, no text, no logos."],"music_mood":"M"}'
+    )
+    with patch('core.content_pipeline.generators.reel_script_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(response_json)
+        result = ReelScriptGenerator().generate(post_data, brand_dna)
+
+    mock_rewrite.assert_not_called()
+    assert result['scene_prompts'][0] == 's1, no text, no logos.'
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_skips_rewrite_when_audit_returns_no_issues(brand_dna, _mock_brand_consistency_qc):
+    from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
+    _, mock_rewrite = _mock_brand_consistency_qc
+    post_data = {'caption': 'Bolsos artesanales hechos a mano'}
+    response_json = (
+        '{"hook_text":"H","highlight_word":"H","tag_cta":"C","narration_script":"N",'
+        '"scene_prompts":["s1, no text, no logos.","s2, no text, no logos.",'
+        '"s3, no text, no logos.","s4, no text, no logos.",'
+        '"s5, no text, no logos.","s6, no text, no logos."],"music_mood":"M"}'
+    )
+    with patch('core.content_pipeline.generators.reel_script_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(response_json)
+        ReelScriptGenerator().generate(post_data, brand_dna)
+
+    mock_rewrite.assert_not_called()
 

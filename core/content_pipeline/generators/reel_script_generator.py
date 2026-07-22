@@ -8,6 +8,7 @@ from core.brand_dna.models import BrandDNA
 from core.shared.metrics_utils import track_external_api, record_tokens, vertex_labels
 from core.shared.rate_limiter import call_with_429_retry
 from core.content_pipeline.generators.text_generator import _is_sensitive_niche, _strip_accents
+from core.content_pipeline.generators.brand_consistency_qc import audit_brand_consistency, rewrite_for_brand_consistency
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +169,19 @@ class ReelScriptGenerator:
                 if any(word in text_to_check for word in banned):
                     logger.warning("ReelScriptGenerator: guion rechazado por lenguaje prohibido en nicho sensible, usando fallback")
                     return fallback
+
+            fields_to_audit = {
+                'hook_text': result['hook_text'],
+                'tag_cta': result['tag_cta'],
+                'narration_script': result['narration_script'],
+                'scene_prompts': ' | '.join(result['scene_prompts']),
+            }
+            issues = audit_brand_consistency(fields_to_audit, brand_dna)
+            for field_name, reason in issues.items():
+                if field_name == 'scene_prompts':
+                    logger.warning(f"ReelScriptGenerator: scene_prompts marcado por consistencia de marca ({reason}), no se reescribe automaticamente")
+                    continue
+                result[field_name] = rewrite_for_brand_consistency(field_name, result[field_name], reason, brand_dna)
             return result
         except Exception as e:
             logger.warning(f"ReelScriptGenerator fallback: {e}")
