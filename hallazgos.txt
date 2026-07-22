@@ -3826,3 +3826,71 @@ Severidad: Media (afecta credibilidad de marca en contenido generado
   para prospección/clientes reales — un negocio real puede terminar con
   un logo falso en su propio contenido de muestra).
 Prioridad: Alta — implementar fix en próxima sesión de desarrollo.
+
+=================================================================
+HALLAZGO 78 — Narración de reel parafraseó "upcycling" como
+  "materiales reutilizados", perjudicando el posicionamiento de la
+  marca (patron: traduccion/parafraseo tecnicamente valido pero
+  perjudicial, sin QC que lo detecte)
+Categoría: Bug de prompt engineering / falta de QC semantico
+Estado: 🟡 DIAGNOSTICADO EN PRODUCCIÓN — PENDIENTE DE ANÁLISIS —
+  2026-07-22 (Anuar va a revisarlo con más calma antes de decidir el
+  fix — NO implementar todavía)
+=================================================================
+Contexto: Anuar detectó por qué no se publicó el reel del día 15 del
+  calendario de "El perro rebelde" (`elperrorebelde61@gmail.com`,
+  negocio de ropa/collares para mascotas hechos con técnica de
+  upcycling) — el video dice "reutilizados", palabra que no habla bien
+  de la marca.
+
+Verificación: se descargó el reel
+  (`.../reels/772ef955-ce7d-4b6c-ad50-6b5daf4f8db5-day15.mp4`) y se
+  extrajeron frames a 2fps. El subtítulo quemado en el segundo ~5 dice
+  textual: "En El Perro Rebelde, creamos piezas exclusivas con
+  materiales reutilizados,". Se revisó el `BrandDNA` completo de este
+  job — `description` dice correctamente "técnica de upcycling", y el
+  `caption` del mismo post también usa "upcycling" con buen framing
+  ("elaborados con upcycling para un estilo consciente y original").
+  Es decir, tanto el ADN de marca como la caption están bien — el
+  problema está aislado a como Gemini redactó el `narration_script` en
+  `reel_script_generator.py` para ESTE post puntual: en vez de mantener
+  "upcycling" (termino de moda sostenible, posicionamiento premium) o
+  usar un equivalente en español con el mismo tono ("moda circular",
+  "materiales rescatados y transformados", "segunda vida con estilo"),
+  el modelo lo parafraseo como "materiales reutilizados" — correcto
+  como traduccion literal, pero con una connotacion de segunda
+  mano/barato que contradice la propuesta de valor real de la marca.
+  No se pudieron recuperar los logs originales de esta generación (el
+  job es del 2026-07-05, los contenedores ya se reciclaron varias veces
+  desde entonces en deploys posteriores) — el hallazgo se reconstruyó
+  100% a partir del video final descargado, no de logs.
+
+Causa raíz (observación de Anuar, confirmada en el patrón): esto es la
+  MISMA clase de problema que el reporte anterior (sin hallazgo formal
+  todavía) sobre la narración con "voz muy catalana" en vez de la voz
+  habitual — en ambos casos el modelo produce una salida que es
+  técnicamente válida (una traducción correcta, un acento válido de
+  español) pero el pipeline no tiene ningún paso que evalúe si esa
+  salida específica sirve o perjudica el posicionamiento de ESA marca
+  en particular. Existe QC para promesas absolutas/reclamos no
+  verificables (`caption_safety_qc`) y ahora para fugas de marca/logo
+  en escenas visuales (HALLAZGO 77), pero no existe ningún QC semántico
+  sobre el tono/connotación de la narración hablada del reel — es un
+  hueco de cobertura, no un bug puntual de una sola palabra.
+
+Fix: NO PROPUESTO TODAVÍA — Anuar quiere analizarlo con más calma antes
+  de decidir el approach (posibles direcciones a evaluar: reforzar el
+  prompt de `narration_script` para preservar terminología de la
+  propia marca cuando ya viene en `description`/`caption` en vez de
+  parafrasear; o un paso de QC semántico tipo
+  `caption_safety_qc`/`_scrub_brand_leak` pero enfocado en detectar
+  palabras con connotación negativa que no estaban en el vocabulario
+  original de la marca — NINGUNA de las dos implementada aún, es
+  material de análisis, no un plan cerrado).
+
+Severidad: Media (el contenido no llegó a publicarse — el sistema de
+  descarga manual funcionó como red de seguridad — pero si hubiera
+  pasado desapercibido habría dañado el posicionamiento sostenible/
+  premium de una marca real frente a sus clientes).
+Prioridad: Media — Anuar analiza y decide el approach antes de que se
+  implemente nada.
