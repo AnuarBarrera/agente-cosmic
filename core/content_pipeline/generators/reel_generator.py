@@ -101,12 +101,31 @@ _MUSIC_FALLBACK_PROMPT = (
 _font_cache: dict[int, ImageFont.FreeTypeFont] = {}
 
 
+# HALLAZGO (analisisPipeline.md, 2026-07-22): un nombre/caption/narracion con
+# apostrofe (ej. "Maika Pet's") rompia el reel completo — ffmpeg exit status 8.
+# Causa raiz: el texto se pasaba inline como text='...' dentro del filtergraph,
+# y NINGUNA secuencia de escape probada para el apostrofe (\', ni el patron
+# 'cerrar-escapar-reabrir' '\'' que si funciona en shells) hace que el parser
+# de -filter_complex de ffmpeg produzca texto visible sin fallar — verificado
+# empiricamente contra ffmpeg real: \' revienta el parser (exit distinto de 0),
+# y '\'' "funciona" (exit 0) pero renderiza el texto vacio en silencio, peor
+# que un crash. La solucion verificada es usar textfile= (lee el texto de un
+# archivo, nunca pasa por el parser de comillas del filtergraph) — ahi el
+# apostrofe y los dos puntos ya no necesitan escape alguno (probado con
+# "Hola: bienvenido a Maika Pet's" via textfile=, exit 0, texto visible).
+# Solo \ y % siguen necesitando escape: son la sintaxis de expansion propia de
+# drawtext (%{...}), se aplica igual leyendo de archivo que inline.
 def _escape_drawtext(text: str) -> str:
     text = text.replace('\\', '\\\\')
-    text = text.replace(':', '\\:')
-    text = text.replace("'", "\\'")
     text = text.replace('%', '\\%')
     return text
+
+
+def _write_drawtext_textfile(tmp_dir: str, filename: str, text: str) -> str:
+    path = os.path.join(tmp_dir, filename)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(_escape_drawtext(text))
+    return path
 
 
 def _wrap_text(text: str, max_chars: int = 22) -> str:
@@ -214,7 +233,7 @@ def _probe_video_duration(video_path: str) -> float:
 
 
 def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color: str,
-                              source_label: str, video_width: int = _VIDEO_WIDTH,
+                              source_label: str, tmp_dir: str, video_width: int = _VIDEO_WIDTH,
                               scale: float = 1.0) -> tuple[list[str], str]:
     box_color = _hex_to_ffmpeg_color(primary_color)
     highlight_fontcolor = _readable_text_color(primary_color)
@@ -234,8 +253,9 @@ def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color:
 
         if idx == -1:
             next_label = f'hook{i}'
+            textfile = _write_drawtext_textfile(tmp_dir, f'{next_label}.txt', line)
             filter_parts.append(
-                f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{_escape_drawtext(line)}':"
+                f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:textfile={textfile}:"
                 f"fontsize={fontsize}:fontcolor=white:borderw=3:bordercolor=black:"
                 f"x=(w-text_w)/2:y={y}:enable='{enable}'[{next_label}]"
             )
@@ -253,8 +273,9 @@ def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color:
 
         if before:
             next_label = f'hook{i}a'
+            textfile = _write_drawtext_textfile(tmp_dir, f'{next_label}.txt', before)
             filter_parts.append(
-                f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{_escape_drawtext(before)}':"
+                f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:textfile={textfile}:"
                 f"fontsize={fontsize}:fontcolor=white:borderw=3:bordercolor=black:"
                 f"x={cursor}:y={y}:enable='{enable}'[{next_label}]"
             )
@@ -262,8 +283,9 @@ def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color:
         cursor += before_w
 
         next_label = f'hook{i}b'
+        textfile = _write_drawtext_textfile(tmp_dir, f'{next_label}.txt', highlight)
         filter_parts.append(
-            f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{_escape_drawtext(highlight)}':"
+            f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:textfile={textfile}:"
             f"fontsize={fontsize}:fontcolor={highlight_fontcolor}:box=1:boxcolor={box_color}@1.0:"
             f"boxborderw={box_borderw}:x={cursor + box_borderw}:y={y}:"
             f"enable='{enable}'[{next_label}]"
@@ -273,8 +295,9 @@ def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color:
 
         if after:
             next_label = f'hook{i}c'
+            textfile = _write_drawtext_textfile(tmp_dir, f'{next_label}.txt', after)
             filter_parts.append(
-                f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{_escape_drawtext(after)}':"
+                f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:textfile={textfile}:"
                 f"fontsize={fontsize}:fontcolor=white:borderw=3:bordercolor=black:"
                 f"x={cursor}:y={y}:enable='{enable}'[{next_label}]"
             )
@@ -284,15 +307,17 @@ def _build_hook_filter_parts(hook_text: str, highlight_word: str, primary_color:
 
 
 def _build_cta_filter_parts(cta_text: str, primary_color: str, source_label: str,
-                             cta_start: float, duration: float, scale: float = 1.0) -> tuple[list[str], str]:
+                             cta_start: float, duration: float, tmp_dir: str,
+                             scale: float = 1.0) -> tuple[list[str], str]:
     box_color = _hex_to_ffmpeg_color(primary_color)
     fontcolor = _readable_text_color(primary_color)
     fontsize = max(1, int(_CTA_FONTSIZE * scale))
     box_borderw = max(1, int(_CTA_BOX_BORDERW * scale))
-    text = _escape_drawtext(_wrap_text(cta_text, max_chars=_CTA_MAX_CHARS))
+    text = _wrap_text(cta_text, max_chars=_CTA_MAX_CHARS)
     next_label = 'cta0'
+    textfile = _write_drawtext_textfile(tmp_dir, f'{next_label}.txt', text)
     filter_part = (
-        f"[{source_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{text}':"
+        f"[{source_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:textfile={textfile}:"
         f"fontsize={fontsize}:fontcolor={fontcolor}:box=1:boxcolor={box_color}@1.0:"
         f"boxborderw={box_borderw}:x=(w-text_w)/2:y=(h-text_h)/2:"
         f"enable='between(t,{cta_start},{duration})'[{next_label}]"
@@ -777,7 +802,7 @@ class ReelGenerator:
                 else:
                     filter_parts_h, last_label = _build_hook_filter_parts(
                         script['hook_text'], script['highlight_word'], primary_color, last_label,
-                        video_width=video_width, scale=scale,
+                        tmp, video_width=video_width, scale=scale,
                     )
                     filter_parts += filter_parts_h
 
@@ -791,7 +816,7 @@ class ReelGenerator:
                     last_label = 'ctaout'
                 else:
                     cta_parts, last_label = _build_cta_filter_parts(
-                        script['tag_cta'], primary_color, last_label, cta_start, duration, scale=scale,
+                        script['tag_cta'], primary_color, last_label, cta_start, duration, tmp, scale=scale,
                     )
                     filter_parts += cta_parts
 
@@ -799,9 +824,9 @@ class ReelGenerator:
             subtitle_y_offset = int(300 * scale)
             for i, sub in enumerate(subtitles or []):
                 next_label = f'sub{i}'
-                text = _escape_drawtext(_wrap_text(sub['text']))
+                textfile = _write_drawtext_textfile(tmp, f'{next_label}.txt', _wrap_text(sub['text']))
                 filter_parts.append(
-                    f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:text='{text}':"
+                    f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:textfile={textfile}:"
                     f"fontcolor=white:fontsize={subtitle_fontsize}:borderw=3:bordercolor=black:"
                     f"x=(w-text_w)/2:y=h-{subtitle_y_offset}:"
                     f"enable='between(t,{sub['start']},{sub['end']})'[{next_label}]"
@@ -877,14 +902,14 @@ class ReelGenerator:
             with open(output_path, 'rb') as f:
                 return f.read()
 
-    def _extract_poster_frame(self, video_bytes: bytes) -> bytes:
+    def _extract_poster_frame(self, video_bytes: bytes, offset_seconds: float = 1.0) -> bytes:
         with tempfile.TemporaryDirectory() as tmp:
             video_path = os.path.join(tmp, 'video.mp4')
             with open(video_path, 'wb') as f:
                 f.write(video_bytes)
             frame_path = os.path.join(tmp, 'frame.png')
             subprocess.run(
-                ['ffmpeg', '-y', '-ss', '1', '-i', video_path, '-vframes', '1', frame_path],
+                ['ffmpeg', '-y', '-ss', str(offset_seconds), '-i', video_path, '-vframes', '1', frame_path],
                 check=True, capture_output=True,
             )
             with open(frame_path, 'rb') as f:
@@ -911,7 +936,15 @@ class ReelGenerator:
                 clips, music, narration, script, colors, subtitles,
                 skip_hook_cta_overlay=has_branding,
             )
-            poster = self._extract_poster_frame(final_video)
+            # HALLAZGO (analisisPipeline.md, 2026-07-22): con portada HyperFrames
+            # (has_branding=True, _BRANDED_SEGMENT_DURATION_SECONDS=3.0s), extraer
+            # en t=1s cae DENTRO de la animacion de fade-in del hook (0.5-2.0s en
+            # la plantilla mas lenta, dynamic-background) — poster con texto
+            # palido/incompleto. t=2.5s queda despues del fade-in mas lento de las
+            # 3 plantillas y antes de que la portada termine. Sin portada (fallback
+            # sin marca) se mantiene t=1s, comportamiento sin cambios.
+            poster_offset = 2.5 if has_branding else 1.0
+            poster = self._extract_poster_frame(final_video, offset_seconds=poster_offset)
 
             video_url = self._upload_video_to_storage(final_video, filename_prefix)
             poster_url = self._upload_to_storage(poster, f'{filename_prefix}-poster')

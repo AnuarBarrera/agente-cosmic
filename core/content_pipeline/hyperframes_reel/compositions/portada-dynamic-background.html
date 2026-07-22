@@ -36,7 +36,13 @@
       font-family: var(--font_family); font-weight: 900; font-size: 76px;
       color: #ffffff; text-align: center; line-height: 1.3; max-width: 900px;
     }
-    #hook-highlight { color: var(--primary_color); }
+    /* HALLAZGO (analisisPipeline.md, 2026-07-22): la palabra resaltada usaba
+       var(--primary_color), el MISMO color que los blobs animados de fondo
+       (.blob, linea de arriba) — cuando un blob pasa detras del texto durante
+       la animacion de 3s, el contraste cae a casi cero. text_color ya viene
+       precalculado (reel_generator.py::_readable_text_color) especificamente
+       para contrastar contra primary_color, es la variable correcta aqui. */
+    #hook-highlight { color: var(--text_color); }
   </style>
 </head>
 <body>

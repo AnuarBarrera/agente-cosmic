@@ -219,3 +219,47 @@ descarte o confirme con más detalle (¿en qué negocio ocurrió exactamente?).
 | 5 | Subtítulo faltante | 🔴 Baja | No reproducido en las 2 muestras revisadas |
 | 6 | Imágenes cortadas (veterinaria) | 🔴 Baja | No reproducido en las muestras revisadas |
 | 7 | Tarjeta verde solo 1 vez | 🟡 Media | Mecanismo plausible identificado (redirect anti-duplicado), no confirmado como causa exacta |
+
+---
+
+## ACTUALIZACIÓN 2026-07-22 (Claude, misma sesión que hizo pull de este análisis) — Hallazgos 1, 2 y 3 RESUELTOS
+
+Verificados independientemente contra el código real antes de tocar nada, y cada fix probado contra ffmpeg/ffprobe real (no solo mockeado) antes de darlo por bueno.
+
+**#1 — apóstrofe rompe el reel.** Se probaron empíricamente TODAS las secuencias de
+escape candidatas para `text='...'` inline contra `ffmpeg -filter_complex` real
+(el contexto exacto que usa producción, con labels/chaining — no `-vf` simple):
+ninguna funciona. `\'` (el código anterior) revienta el parser (`Invalid argument`
+/ exit ≠0). El patrón estándar `'\''` (cerrar comilla, escapar, reabrir) evita el
+crash pero **renderiza el texto vacío en silencio** — peor que el crash. La
+solución verificada: `textfile=` en vez de `text='...'` — el texto se escribe a
+un archivo temporal y ffmpeg lo lee de ahí, sin pasar por el parser de comillas
+del filtergraph. Con esto, `:` y `'` dejan de necesitar escape; solo `\` y `%`
+siguen necesitándolo (sintaxis de expansión propia de drawtext). Afecta 5 puntos
+de uso: hook (3 segmentos), CTA, y subtítulos — todos migrados. Verificado con
+un render real end-to-end usando "Maika Pet's" en hook, CTA y narración: el
+video se genera sin error y el apóstrofe se ve correctamente en el frame
+extraído (hook con highlight box + subtítulo).
+
+**#2 — palabra sin contraste.** `#hook-highlight` en
+`portada-dynamic-background.html` cambiado de `var(--primary_color)` a
+`var(--text_color)` — esta última variable ya se computaba y pasaba
+(`reel_generator.py::_readable_text_color(primary_color)`) específicamente para
+contrastar contra `primary_color`, y ya es el patrón usado correctamente en
+`portada-panel-wipe.html`. Verificado por inspección de código y precedente, no
+con un render real de HyperFrames (requiere Chrome headless, fuera del alcance
+rápido de esta sesión) — vale la pena una verificación visual real en la
+siguiente tanda de reels.
+
+**#3 — poster pálido.** `_extract_poster_frame` ahora acepta `offset_seconds`;
+`generate()` usa 2.5s (en vez de 1s) cuando hay portada HyperFrames
+(`has_branding=True`) — después del fade-in más lento de las 3 plantillas
+(máx. 2.0s) y antes de que termine la portada (3.0s). Sin portada, sigue en 1s
+sin cambios.
+
+Todos los tests existentes actualizados + 83/83 en `test_reel_generator.py`,
+259/259 en toda la suite de `content_pipeline`. Commits: ver `git log`.
+
+**Pendiente, no tocado — decisión de producto, no bug:** hallazgo #4 (defaults a
+`full` en UI y backend). No se cambió sin confirmar con Anuar si el
+comportamiento actual es intencional o debe volverse más conservador.

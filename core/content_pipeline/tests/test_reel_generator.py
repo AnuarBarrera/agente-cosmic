@@ -7,22 +7,38 @@ import subprocess
 from core.content_pipeline.generators.reel_generator import (
     _escape_drawtext, _wrap_text, _hex_to_ffmpeg_color, _measure_text_width,
     _build_hook_filter_parts, _build_cta_filter_parts, _CTA_FONTSIZE,
-    _readable_text_color,
+    _readable_text_color, _write_drawtext_textfile,
 )
 
 
 class TestEscapeDrawtext:
-    def test_escapes_colon(self):
-        assert _escape_drawtext('Hola: bienvenido') == 'Hola\\: bienvenido'
+    # HALLAZGO (analisisPipeline.md, 2026-07-22): con text='...' inline, NINGUNA
+    # secuencia de escape probada para el apostrofe hacia que ffmpeg renderizara
+    # el texto sin fallar o sin quedar vacio (verificado empiricamente). El fix
+    # es leer el texto desde archivo (textfile=, ver _write_drawtext_textfile) —
+    # ahi ':' y "'" ya no pasan por el parser de comillas del filtergraph y no
+    # necesitan escape. Solo '\' y '%' siguen necesitando escape (sintaxis de
+    # expansion propia de drawtext, %{...}, se aplica igual via textfile).
+    def test_does_not_escape_colon(self):
+        assert _escape_drawtext('Hola: bienvenido') == 'Hola: bienvenido'
 
-    def test_escapes_single_quote(self):
-        assert _escape_drawtext("Tu 'mejor' opcion") == "Tu \\'mejor\\' opcion"
+    def test_does_not_escape_single_quote(self):
+        assert _escape_drawtext("Tu 'mejor' opcion") == "Tu 'mejor' opcion"
 
     def test_escapes_percent(self):
         assert _escape_drawtext('50% de descuento') == '50\\% de descuento'
 
     def test_escapes_backslash_first(self):
         assert _escape_drawtext('a\\b') == 'a\\\\b'
+
+
+class TestWriteDrawtextTextfile:
+    def test_writes_escaped_text_and_returns_path(self, tmp_path):
+        path = _write_drawtext_textfile(str(tmp_path), 'hook0.txt', "Maika Pet's: 50% off")
+        with open(path, encoding='utf-8') as f:
+            content = f.read()
+        assert content == "Maika Pet's: 50\\% off"
+        assert path.endswith('hook0.txt')
 
 
 class TestWrapText:
@@ -96,63 +112,94 @@ class TestMeasureTextWidth:
         assert long_ > short
 
 
+def _read_textfile_from_filter(filter_part: str) -> str:
+    # Extrae la ruta de textfile=... del fragmento de filtro (termina en ':' o
+    # '[') y devuelve el contenido real escrito en disco — el reemplazo directo
+    # de "assert \"text='...'\" in parts[0]" ahora que el texto vive en archivo.
+    start = filter_part.index('textfile=') + len('textfile=')
+    end = min(i for i in (filter_part.find(':', start), filter_part.find('[', start)) if i != -1)
+    path = filter_part[start:end]
+    with open(path, encoding='utf-8') as f:
+        return f.read()
+
+
 class TestBuildHookFilterParts:
-    def test_plain_line_when_highlight_not_found(self):
+    def test_plain_line_when_highlight_not_found(self, tmp_path):
         parts, last_label = _build_hook_filter_parts(
-            'Texto sin resaltado', 'inexistente', '#002951', '0:v',
+            'Texto sin resaltado', 'inexistente', '#002951', '0:v', str(tmp_path),
         )
         assert len(parts) == 1
         assert parts[0].startswith('[0:v]drawtext=')
-        assert "text='Texto sin resaltado'" in parts[0]
+        assert _read_textfile_from_filter(parts[0]) == 'Texto sin resaltado'
         assert 'box=1' not in parts[0]
         assert "enable='between(t,0,3)'" in parts[0]
         assert last_label == 'hook0'
 
-    def test_splits_line_around_highlight_word(self):
+    def test_splits_line_around_highlight_word(self, tmp_path):
         # 'nuevo' esta al final de la frase (20 caracteres, no se envuelve) ->
         # queda un segmento 'before' + el resaltado, sin segmento 'after'.
         parts, last_label = _build_hook_filter_parts(
-            'Descubre algo nuevo', 'nuevo', '#002951', '0:v',
+            'Descubre algo nuevo', 'nuevo', '#002951', '0:v', str(tmp_path),
         )
-        assert any("text='Descubre algo '" in p for p in parts)
-        highlight_parts = [p for p in parts if "text='nuevo'" in p]
+        assert any(_read_textfile_from_filter(p) == 'Descubre algo ' for p in parts)
+        highlight_parts = [p for p in parts if _read_textfile_from_filter(p) == 'nuevo']
         assert len(highlight_parts) == 1
         assert 'box=1' in highlight_parts[0]
         assert 'boxcolor=0x002951@1.0' in highlight_parts[0]
         assert 'fontcolor=white' in highlight_parts[0]  # #002951 es oscuro, texto blanco para contraste
         assert last_label == 'hook0b'
 
-    def test_wraps_long_hook_into_multiple_lines(self):
+    def test_wraps_long_hook_into_multiple_lines(self, tmp_path):
         long_hook = 'Una frase mucho mas larga que el limite de caracteres permitido'
-        parts, last_label = _build_hook_filter_parts(long_hook, 'inexistente', '#002951', '0:v')
+        parts, last_label = _build_hook_filter_parts(
+            long_hook, 'inexistente', '#002951', '0:v', str(tmp_path),
+        )
         assert len(parts) >= 2
 
-    def test_all_filters_enabled_only_during_first_three_seconds(self):
-        parts, _ = _build_hook_filter_parts('Descubre algo nuevo', 'nuevo', '#002951', '0:v')
+    def test_all_filters_enabled_only_during_first_three_seconds(self, tmp_path):
+        parts, _ = _build_hook_filter_parts(
+            'Descubre algo nuevo', 'nuevo', '#002951', '0:v', str(tmp_path),
+        )
         assert all("enable='between(t,0,3)'" in p for p in parts)
+
+    def test_hook_text_with_apostrophe_writes_intact_textfile(self, tmp_path):
+        # HALLAZGO (analisisPipeline.md, 2026-07-22): con text='...' inline
+        # esto rompia ffmpeg (exit 8) o renderizaba vacio segun el escape
+        # probado — ver comentario en TestEscapeDrawtext. Con textfile=, el
+        # apostrofe no necesita ningun tratamiento especial.
+        parts, _ = _build_hook_filter_parts(
+            "Maika Pet's", 'inexistente', '#002951', '0:v', str(tmp_path),
+        )
+        assert _read_textfile_from_filter(parts[0]) == "Maika Pet's"
 
 
 class TestBuildCtaFilterParts:
-    def test_builds_single_filter_with_box_and_enable_window(self):
+    def test_builds_single_filter_with_box_and_enable_window(self, tmp_path):
         parts, last_label = _build_cta_filter_parts(
-            'Compra ahora', '#002951', 'hook0b', 21.0, 24.0,
+            'Compra ahora', '#002951', 'hook0b', 21.0, 24.0, str(tmp_path),
         )
         assert len(parts) == 1
         assert parts[0].startswith('[hook0b]drawtext=')
-        assert "text='Compra ahora'" in parts[0]
+        assert _read_textfile_from_filter(parts[0]) == 'Compra ahora'
         assert 'box=1' in parts[0]
         assert 'boxcolor=0x002951@1.0' in parts[0]
         assert 'fontcolor=white' in parts[0]  # #002951 es oscuro, texto blanco para contraste
         assert "enable='between(t,21.0,24.0)'" in parts[0]
         assert last_label == 'cta0'
 
-    def test_light_primary_color_gets_black_text(self):
-        parts, _ = _build_cta_filter_parts('Compra ahora', '#f5f5f5', '0:v', 21.0, 24.0)
+    def test_light_primary_color_gets_black_text(self, tmp_path):
+        parts, _ = _build_cta_filter_parts(
+            'Compra ahora', '#f5f5f5', '0:v', 21.0, 24.0, str(tmp_path),
+        )
         assert 'fontcolor=black' in parts[0]
 
-    def test_scale_shrinks_fontsize_and_box_border(self):
-        parts_full, _ = _build_cta_filter_parts('Compra ahora', '#002951', '0:v', 21.0, 24.0, scale=1.0)
-        parts_scaled, _ = _build_cta_filter_parts('Compra ahora', '#002951', '0:v', 21.0, 24.0, scale=0.5)
+    def test_scale_shrinks_fontsize_and_box_border(self, tmp_path):
+        parts_full, _ = _build_cta_filter_parts(
+            'Compra ahora', '#002951', '0:v', 21.0, 24.0, str(tmp_path), scale=1.0,
+        )
+        parts_scaled, _ = _build_cta_filter_parts(
+            'Compra ahora', '#002951', '0:v', 21.0, 24.0, str(tmp_path), scale=0.5,
+        )
         assert f'fontsize={_CTA_FONTSIZE}' in parts_full[0]
         assert f'fontsize={_CTA_FONTSIZE // 2}' in parts_scaled[0]
 
@@ -908,8 +955,11 @@ class TestAssembleReel:
         assert overlay_cmd.count('-i') == 1  # solo concat_path, sin PNGs de hook/cta como input
         filter_complex_idx = overlay_cmd.index('-filter_complex')
         filter_complex = overlay_cmd[filter_complex_idx + 1]
-        assert "text='Compra ahora'" in filter_complex
-        assert "text='nuevo'" in filter_complex
+        # el texto ahora viaja por textfile= (ver TestBuildHookFilterParts/
+        # TestBuildCtaFilterParts para la verificacion del contenido real
+        # escrito a disco) — aqui solo se confirma que ambos filtros existen.
+        assert 'textfile=' in filter_complex and 'cta0.txt' in filter_complex
+        assert 'textfile=' in filter_complex and 'hook0b.txt' in filter_complex
         map_idx = overlay_cmd.index('-map')
         assert overlay_cmd[map_idx + 1] == '[cta0]'
 
@@ -933,7 +983,7 @@ class TestAssembleReel:
         filter_complex = overlay_cmd[overlay_cmd.index('-filter_complex') + 1]
         # con ancho real 720 el cursor de 'nuevo' (resaltado, al final de la
         # linea) debe quedar bien a la izquierda de 720, nunca cerca de 1080
-        highlight_filter = [p for p in filter_complex.split(';') if "text='nuevo'" in p][0]
+        highlight_filter = [p for p in filter_complex.split(';') if 'hook0b.txt' in p][0]
         x_value = int(highlight_filter.split('x=')[1].split(':')[0])
         assert x_value < 720
 
@@ -959,8 +1009,8 @@ class TestAssembleReel:
         overlay_cmd = mock_run.call_args_list[3].args[0]
         filter_complex_idx = overlay_cmd.index('-filter_complex')
         filter_complex = overlay_cmd[filter_complex_idx + 1]
-        assert "text='Tu negocio en linea.'" in filter_complex
-        assert "text='Contactanos hoy.'" in filter_complex
+        assert 'textfile=' in filter_complex and 'sub0.txt' in filter_complex
+        assert 'textfile=' in filter_complex and 'sub1.txt' in filter_complex
         assert "enable='between(t,0.0,2.5)'" in filter_complex
         assert "enable='between(t,2.5,5.0)'" in filter_complex
         map_idx = overlay_cmd.index('-map')
@@ -1035,7 +1085,7 @@ class TestAssembleReel:
         overlay_cmd = mock_run.call_args_list[3].args[0]
         filter_complex_idx = overlay_cmd.index('-filter_complex')
         filter_complex = overlay_cmd[filter_complex_idx + 1]
-        assert "text='Hola.'" in filter_complex
+        assert 'textfile=' in filter_complex and 'sub0.txt' in filter_complex
         map_idx = overlay_cmd.index('-map')
         assert overlay_cmd[map_idx + 1] == '[sub0]'
 
@@ -1109,7 +1159,7 @@ class TestAssembleReelPlaywrightEngine:
         overlay_cmd = mock_run.call_args_list[3].args[0]
         assert overlay_cmd.count('-i') == 2  # concat + cta.png (hook no genero PNG)
         filter_complex = overlay_cmd[overlay_cmd.index('-filter_complex') + 1]
-        assert "text='nuevo'" in filter_complex  # hook cayo a drawtext
+        assert 'hook0b.txt' in filter_complex  # hook cayo a drawtext
         assert filter_complex.count('overlay=0:0') == 1  # solo cta via PNG
 
 
@@ -1127,6 +1177,24 @@ class TestExtractPosterFrame:
         with patch('core.content_pipeline.generators.reel_generator.subprocess.run', side_effect=fake_run):
             result = gen._extract_poster_frame(b'fake-video-bytes')
         assert result == fake_frame
+
+    def test_uses_custom_offset_seconds(self):
+        # HALLAZGO (analisisPipeline.md, 2026-07-22): con portada HyperFrames el
+        # default de 1s caia dentro de la animacion de fade-in del hook (0.5-2.0s
+        # en la plantilla mas lenta) -> poster palido. generate() pasa un offset
+        # mayor cuando hay portada (has_branding=True), ver test en TestGenerate.
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+
+        def fake_run(cmd, *args, **kwargs):
+            with open(cmd[-1], 'wb') as f:
+                f.write(b'frame')
+            return MagicMock(returncode=0)
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=fake_run) as mock_run:
+            gen._extract_poster_frame(b'fake-video-bytes', offset_seconds=2.5)
+        assert mock_run.call_args.args[0][mock_run.call_args.args[0].index('-ss') + 1] == '2.5'
 
 
 _FAKE_SCRIPT = {
@@ -1165,6 +1233,38 @@ class TestGenerate:
             [{'text': 'Hola.', 'start': 0.0, 'end': 1.0}],
             skip_hook_cta_overlay=False,
         )
+
+    def test_extracts_poster_later_when_branding_present(self):
+        # HALLAZGO (analisisPipeline.md, 2026-07-22): con portada HyperFrames
+        # (has_branding=True), 1s cae dentro de la animacion de fade-in del
+        # hook -> poster palido. offset debe ser 2.5s (despues del fade-in mas
+        # lento de las 3 plantillas, dentro de los 3s de la portada).
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'p', b'c1', b'c2', b'c3', b'c'], True)), \
+             patch.object(gen, '_generate_music', return_value=None), \
+             patch.object(gen, '_generate_narration', return_value=None), \
+             patch.object(gen, '_assemble_reel', return_value=b'final-mp4'), \
+             patch.object(gen, '_extract_poster_frame', return_value=b'poster-png') as mock_poster, \
+             patch.object(gen, '_upload_video_to_storage', return_value='url1'), \
+             patch.object(gen, '_upload_to_storage', return_value='url2'):
+            gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
+
+        assert mock_poster.call_args.kwargs['offset_seconds'] == 2.5
+
+    def test_extracts_poster_at_default_offset_without_branding(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2', b'c3'], False)), \
+             patch.object(gen, '_generate_music', return_value=None), \
+             patch.object(gen, '_generate_narration', return_value=None), \
+             patch.object(gen, '_assemble_reel', return_value=b'final-mp4'), \
+             patch.object(gen, '_extract_poster_frame', return_value=b'poster-png') as mock_poster, \
+             patch.object(gen, '_upload_video_to_storage', return_value='url1'), \
+             patch.object(gen, '_upload_to_storage', return_value='url2'):
+            gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
+
+        assert mock_poster.call_args.kwargs['offset_seconds'] == 1.0
 
     def test_passes_skip_flag_when_branding_succeeds(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
