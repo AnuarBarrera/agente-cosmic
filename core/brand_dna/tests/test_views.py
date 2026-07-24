@@ -665,6 +665,37 @@ def test_calendar_feedback_api_yes_blocked_when_trial_expired(client, user, job_
     assert calendar.next_week_generating is False
 
 
+@override_settings(STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/test123')
+def test_calendar_feedback_api_yes_blocked_when_canceled(client, user, job_with_calendar):
+    user.tenant.subscription.status = 'canceled'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+    with patch('core.brand_dna.views.django_rq') as mock_rq:
+        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
+            'rating': '5',
+            'continue_decision': 'yes',
+        })
+    assert response.status_code == 200
+    data = response.json()
+    assert data['status'] == 'payment_required'
+    mock_rq.enqueue.assert_not_called()
+
+
+def test_calendar_feedback_api_yes_allowed_when_past_due(client, user, job_with_calendar):
+    user.tenant.subscription.status = 'past_due'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+    with patch('core.brand_dna.views.django_rq') as mock_rq:
+        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
+            'rating': '5',
+            'continue_decision': 'yes',
+        })
+    assert response.status_code == 200
+    data = response.json()
+    assert data['continue_decision'] == 'yes'
+    mock_rq.enqueue.assert_called_once()
+
+
 def test_calendar_review_shows_banner_again_after_payment_blocked(client, user, job_with_calendar, settings):
     settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
     user.tenant.subscription.status = 'trial_expired'

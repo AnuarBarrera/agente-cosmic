@@ -548,7 +548,7 @@ def calendar_feedback_api(request, job_id):
 
     if continue_decision == WeeklyFeedback.CONTINUE_YES:
         subscription = getattr(getattr(job.user, 'tenant', None), 'subscription', None)
-        if subscription and subscription.status == 'trial_expired':
+        if subscription and subscription.status in ('trial_expired', 'canceled'):
             feedback.save(update_fields=['rating', 'comment'])
             payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={job.user.tenant_id}"
             return JsonResponse({'status': 'payment_required', 'payment_url': payment_url})
