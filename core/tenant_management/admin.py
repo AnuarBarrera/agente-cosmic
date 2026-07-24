@@ -11,7 +11,7 @@ from django_otp.plugins.otp_totp.models import TOTPDevice
 from core.brand_dna.models import AnalysisJob
 from core.content_pipeline.models import WeeklyFeedback
 from core.tenant_management.models import (
-    InvitationCode, Plan, SecurityEvent, User,
+    InvitationCode, Plan, SecurityEvent, Subscription, User,
 )
 
 
@@ -140,6 +140,22 @@ class WeeklyFeedbackAdmin(admin.ModelAdmin):
         return False
 
 
+class SubscriptionAdmin(admin.ModelAdmin):
+    list_display = ('tenant', 'plan', 'status', 'trial_ends_at', 'cancel_at_period_end', 'stripe_customer_id')
+    list_filter = ('status', 'plan')
+    search_fields = ('tenant__name', 'stripe_customer_id', 'stripe_subscription_id')
+    readonly_fields = (
+        'id', 'tenant', 'plan', 'start_date', 'end_date', 'status',
+        'trial_ends_at', 'cancel_at_period_end', 'stripe_customer_id', 'stripe_subscription_id',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 class TOTPDeviceAdmin(OTPTOTPDeviceAdmin):
     def qrcode_link(self, device):
         try:
@@ -157,6 +173,7 @@ cosmic_admin.register(InvitationCode, InvitationCodeAdmin)
 cosmic_admin.register(Plan, PlanAdmin)
 cosmic_admin.register(AnalysisJob, AnalysisJobAdmin)
 cosmic_admin.register(WeeklyFeedback, WeeklyFeedbackAdmin)
+cosmic_admin.register(Subscription, SubscriptionAdmin)
 cosmic_admin.register(SecurityEvent, SecurityEventAdmin)
 cosmic_admin.register(TOTPDevice, TOTPDeviceAdmin)
 cosmic_admin.register(Group)
