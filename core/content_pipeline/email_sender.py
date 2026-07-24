@@ -11,6 +11,16 @@ from core.shared.metrics import EMAILS_SENT
 logger = logging.getLogger(__name__)
 
 
+_MESES_ES = [
+    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+]
+
+
+def _fecha_es(dt) -> str:
+    return f"{dt.day} de {_MESES_ES[dt.month - 1]}"
+
+
 class EmailSender:
     def send_initial(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
         calendar_url = settings.COSMIC_BASE_URL + reverse('calendar_review', args=[job.id])
@@ -52,21 +62,22 @@ class EmailSender:
         EMAILS_SENT.labels(type='month_ready').inc()
         logger.info(f"Email de mes listo enviado a {job.email} para job {job.id}")
 
-
     def send_daily(self, post: ContentPost) -> None:
         calendar_review_url = settings.COSMIC_BASE_URL + reverse(
             'calendar_review', args=[post.calendar.brand_dna.job.id]
         )
+        fecha = _fecha_es(post.scheduled_at)
         html = render_to_string('content_pipeline/email_daily.html', {
             'post': post,
             'calendar_review_url': calendar_review_url,
+            'fecha': fecha,
         })
         business_name = (post.calendar.brand_dna.business_name or '').strip()
         email = post.calendar.brand_dna.job.email
-        subject = f'🔔 Hoy es tu Día {post.day_number} — {business_name}' if business_name else f'🔔 Hoy es tu Día {post.day_number} — Agente Cosmic'
+        subject = f'🔔 No se te olvide publicar hoy ({fecha}) — {business_name}' if business_name else f'🔔 No se te olvide publicar hoy ({fecha}) — Agente Cosmic'
         send_mail(
             subject,
-            f'Tu post del día {post.day_number} ya está listo para publicar.',
+            f'No se te olvide publicar el día de hoy ({fecha}).',
             settings.DEFAULT_FROM_EMAIL,
             recipient_list=[email],
             html_message=html,

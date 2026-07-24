@@ -694,5 +694,28 @@ def test_expire_stale_trials_ignores_active_with_future_paid_until(job_with_dna_
     assert sub.status == 'active'
 
 
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
+def test_send_daily_email_task_skips_when_already_downloaded(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 3, downloaded_at=timezone.now())
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        from core.content_pipeline.tasks import send_daily_email_task
+        send_daily_email_task(str(post.id))
+    mock_send.assert_not_called()
+    post.refresh_from_db()
+    assert post.status == ContentPost.STATUS_PENDING
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
+def test_send_daily_email_task_sends_when_not_downloaded(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 3)
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        from core.content_pipeline.tasks import send_daily_email_task
+        send_daily_email_task(str(post.id))
+    mock_send.assert_called_once()
+    post.refresh_from_db()
+    assert post.status == ContentPost.STATUS_SENT
+
+
+
 
 

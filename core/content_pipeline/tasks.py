@@ -236,6 +236,9 @@ def send_daily_email_task(post_id: str) -> None:
     if post.calendar.brand_dna.job.deleted_at is not None:
         logger.info(f"Post {post_id} omitido — calendario eliminado por el usuario")
         return
+    if post.downloaded_at is not None:
+        logger.info(f"Post {post_id} ya descargado — se omite el correo diario")
+        return
     # Fallback defensivo: las imágenes ya se generan todas en content_generation_task,
     # esto solo cubre el caso raro de que una generación individual haya fallado.
     if not post.image_url:

@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>Recordatorio Día {{ post.day_number }} — Agente Cosmic</title></head>
+<head><meta charset="utf-8"><title>No se te olvide publicar — Agente Cosmic</title></head>
 <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
   <p style="margin: 0 0 16px; font-size: 0.72rem; color: #999; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;">📬 Recordatorio automático</p>
 
-  <h1 style="color: #1a1a2e;">Hoy es tu Día {{ post.day_number }}</h1>
+  <h1 style="color: #1a1a2e;">No se te olvide publicar el día de hoy ({{ fecha }})</h1>
   <p>Tu post para <strong>{{ post.calendar.brand_dna.business_name }}</strong> ya está listo — solo falta que lo publiques.</p>
 
   <div style="text-align: center; margin: 28px 0;">
@@ -14,15 +14,6 @@
       Ver mi post de hoy →
     </a>
   </div>
-
-  {% if post.day_number|divisibleby:7 %}
-  <div style="margin-top:24px;padding:16px;background:#1a1a2e;border-radius:8px;text-align:center;">
-    <p style="color:#f0f0f0;margin:0 0 12px;">🎉 ¡Esta fue tu última pieza de esta semana!</p>
-    <a href="{{ calendar_review_url }}" style="display:inline-block;padding:12px 24px;background:#e94560;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;">
-      Dar feedback y ver mi próxima semana →
-    </a>
-  </div>
-  {% endif %}
 
   <hr>
   <p style="font-size: 12px; color: #999;">Agente Cosmic — Powered by Google Cloud</p>
