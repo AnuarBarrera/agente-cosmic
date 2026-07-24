@@ -20,8 +20,8 @@ def test_reports_safe_when_no_jobs_running():
 def test_exits_nonzero_when_job_running():
     out = StringIO()
     fake_job = MagicMock()
-    fake_job.func_name = 'core.content_pipeline.tasks.generate_next_week'
-    fake_job.args = ('calendar-id', 2)
+    fake_job.func_name = 'core.content_pipeline.tasks.generate_next_month'
+    fake_job.args = ('calendar-id',)
 
     with patch(f'{CMD_MODULE}.django_rq') as mock_rq, \
          patch(f'{CMD_MODULE}.StartedJobRegistry') as MockRegistry, \
@@ -34,4 +34,5 @@ def test_exits_nonzero_when_job_running():
 
     assert exc_info.value.code == 1
     assert 'NO reinicies' in out.getvalue()
-    assert 'generate_next_week' in out.getvalue()
+    assert 'generate_next_month' in out.getvalue()
+

@@ -6,7 +6,7 @@ from django.utils import timezone
 
 MEXICO_TZ = dt_timezone(timedelta(hours=-6))  # UTC-6 sin DST (desde 2023)
 from core.brand_dna.models import AnalysisJob
-from core.content_pipeline.models import ContentCalendar, ContentPost, WeeklyFeedback
+from core.content_pipeline.models import ContentCalendar, ContentPost
 from core.tenant_management.models import Subscription
 from core.content_pipeline.generators.text_generator import TextGenerator
 from core.content_pipeline.generators.image_generator import ImageGenerator
@@ -242,75 +242,75 @@ def send_daily_email_task(post_id: str) -> None:
         _generate_missing_image(post)
     EmailSender().send_daily(post=post)
 
-    if post.day_number % 7 == 0:
-        week_number = post.day_number // 7
-        WeeklyFeedback.objects.get_or_create(calendar=post.calendar, week_number=week_number)
 
 
-def generate_next_week(calendar_id: str, week_number: int) -> None:
+def generate_next_month(calendar_id: str) -> None:
     calendar = ContentCalendar.objects.get(id=calendar_id)
     brand_dna = calendar.brand_dna
     job_id = str(brand_dna.job.id)
     try:
-        text_gen = TextGenerator()
-        posts_data = text_gen.generate(brand_dna)
-
         now = timezone.now()
         mexico_today = now.astimezone(MEXICO_TZ).date()
         last_post = calendar.posts.order_by('-day_number').first()
+        base_day = last_post.day_number if last_post else 0
         if last_post:
             day_after_last = last_post.scheduled_at.astimezone(MEXICO_TZ).date() + timedelta(days=1)
             base_date = max(mexico_today, day_after_last)
         else:
             base_date = mexico_today
-        scheduled_dates = smart_schedule_dates(brand_dna, base_date=base_date, count=len(posts_data))
 
-        base_day = (week_number - 1) * 7
+        scheduled_dates = smart_schedule_dates(brand_dna, base_date=base_date, count=28)
+
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
         reel_script_gen = ReelScriptGenerator()
         reel_gen = ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+        text_gen = TextGenerator()
 
-        for i, post_data in enumerate(posts_data, start=1):
-            scheduled = scheduled_dates[i - 1]
-            image_url, image_urls, video_url = _generate_post_media(
-                image_gen, reel_script_gen, reel_gen,
-                fmt=post_data.get('format', ContentPost.FORMAT_SINGLE),
-                filename=f"{job_id}-day{base_day + i}",
-                caption=post_data['caption'],
-                colors=brand_dna.primary_colors,
-                tone=brand_dna.tone,
-                brand_name=brand_dna.business_name,
-                keywords=brand_dna.keywords,
-                description=brand_dna.description,
-                audience=brand_dna.audience,
-                business_url=brand_dna.business_url,
-                brand_dna=brand_dna,
-                post_data=post_data,
-            )
-            ContentPost.objects.create(
-                calendar=calendar,
-                day_number=base_day + i,
-                caption=post_data['caption'],
-                image_url=image_url,
-                image_urls=image_urls,
-                video_url=video_url,
-                format=post_data.get('format', ContentPost.FORMAT_SINGLE),
-                suggested_time=scheduled.astimezone(MEXICO_TZ).time(),
-                hashtags=post_data.get('hashtags', []),
-                scheduled_at=scheduled,
-            )
+        for batch in range(4):
+            posts_data = text_gen.generate(brand_dna)
+            for i, post_data in enumerate(posts_data, start=1):
+                day_number = base_day + (batch * 7) + i
+                scheduled = scheduled_dates[batch * 7 + i - 1]
+                image_url, image_urls, video_url = _generate_post_media(
+                    image_gen, reel_script_gen, reel_gen,
+                    fmt=post_data.get('format', ContentPost.FORMAT_SINGLE),
+                    filename=f"{job_id}-day{day_number}",
+                    caption=post_data['caption'],
+                    colors=brand_dna.primary_colors,
+                    tone=brand_dna.tone,
+                    brand_name=brand_dna.business_name,
+                    keywords=brand_dna.keywords,
+                    description=brand_dna.description,
+                    audience=brand_dna.audience,
+                    business_url=brand_dna.business_url,
+                    brand_dna=brand_dna,
+                    post_data=post_data,
+                )
+                ContentPost.objects.create(
+                    calendar=calendar,
+                    day_number=day_number,
+                    caption=post_data['caption'],
+                    image_url=image_url,
+                    image_urls=image_urls,
+                    video_url=video_url,
+                    format=post_data.get('format', ContentPost.FORMAT_SINGLE),
+                    suggested_time=scheduled.astimezone(MEXICO_TZ).time(),
+                    hashtags=post_data.get('hashtags', []),
+                    scheduled_at=scheduled,
+                )
 
         schedule_daily_emails(calendar)
 
         try:
-            EmailSender().send_week_ready(job=brand_dna.job, brand_dna=brand_dna, week_number=week_number)
+            EmailSender().send_month_ready(job=brand_dna.job, brand_dna=brand_dna)
         except Exception as email_err:
-            logger.error(f"Email de semana lista falló para calendar {calendar_id} (no fatal): {email_err}")
+            logger.error(f"Email de mes listo falló para calendar {calendar_id} (no fatal): {email_err}")
     except Exception as e:
-        logger.error(f"generate_next_week error para calendar {calendar_id}, semana {week_number}: {e}")
+        logger.error(f"generate_next_month error para calendar {calendar_id}: {e}")
     finally:
         calendar.next_week_generating = False
         calendar.save(update_fields=['next_week_generating'])
+
 
 
 def expire_stale_trials_task() -> None:

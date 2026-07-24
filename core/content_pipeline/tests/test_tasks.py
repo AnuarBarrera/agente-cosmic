@@ -4,7 +4,7 @@ from django.test import override_settings
 from django.utils import timezone
 from datetime import timedelta
 from core.brand_dna.models import AnalysisJob, BrandDNA
-from core.content_pipeline.models import ContentCalendar, ContentPost, WeeklyFeedback
+from core.content_pipeline.models import ContentCalendar, ContentPost
 
 pytestmark = pytest.mark.django_db
 
@@ -449,35 +449,6 @@ def _make_post(calendar, day_number, **kwargs):
     return ContentPost.objects.create(calendar=calendar, day_number=day_number, **defaults)
 
 
-@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
-def test_send_daily_email_task_creates_weekly_feedback_on_day_7(calendar_with_dna):
-    post = _make_post(calendar_with_dna, 7)
-    with patch('core.content_pipeline.tasks.EmailSender'):
-        from core.content_pipeline.tasks import send_daily_email_task
-        send_daily_email_task(str(post.id))
-
-    assert WeeklyFeedback.objects.filter(calendar=calendar_with_dna, week_number=1).exists()
-
-
-@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
-def test_send_daily_email_task_no_feedback_on_other_days(calendar_with_dna):
-    post = _make_post(calendar_with_dna, 5)
-    with patch('core.content_pipeline.tasks.EmailSender'):
-        from core.content_pipeline.tasks import send_daily_email_task
-        send_daily_email_task(str(post.id))
-
-    assert not WeeklyFeedback.objects.filter(calendar=calendar_with_dna).exists()
-
-
-@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
-def test_send_daily_email_task_weekly_feedback_idempotent(calendar_with_dna):
-    post = _make_post(calendar_with_dna, 14)
-    with patch('core.content_pipeline.tasks.EmailSender'):
-        from core.content_pipeline.tasks import send_daily_email_task
-        send_daily_email_task(str(post.id))
-        send_daily_email_task(str(post.id))
-
-    assert WeeklyFeedback.objects.filter(calendar=calendar_with_dna, week_number=2).count() == 1
 
 
 def test_backfill_image_task_generates_missing_image(calendar_with_dna):
@@ -542,28 +513,26 @@ def test_backfill_image_task_skips_deleted_calendar(calendar_with_dna):
     VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
     VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
     GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    DEFAULT_FROM_EMAIL='noreply@test.com',
 )
-def test_generate_next_week_creates_posts_for_week_2(job_with_dna):
-    calendar = ContentCalendar.objects.create(
-        brand_dna=job_with_dna.brand_dna, next_week_generating=True,
-    )
-
+def test_generate_next_month_creates_28_posts(job_with_dna):
+    from core.content_pipeline.tasks import content_generation_task, generate_next_month
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.schedule_daily_emails') as mock_schedule, \
-         patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
         MockText.return_value.generate.return_value = _MOCK_POSTS
         MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+        content_generation_task(str(job_with_dna.id))
 
-        from core.content_pipeline.tasks import generate_next_week
-        generate_next_week(str(calendar.id), week_number=2)
+        calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
+        generate_next_month(str(calendar.id))
 
-    days = sorted(p.day_number for p in calendar.posts.all())
-    assert days == list(range(8, 15))
-    assert all(p.image_url for p in calendar.posts.all())
-    MockEmail.return_value.send_week_ready.assert_called_once()
-    calendar.refresh_from_db()
-    assert calendar.next_week_generating is False
+    posts = ContentPost.objects.filter(calendar=calendar).order_by('day_number')
+    assert posts.count() == 35  # 7 del trial + 28 del mes
+    day_numbers = list(posts.values_list('day_number', flat=True))
+    assert day_numbers == list(range(1, 36))
+    assert MockText.return_value.generate.call_count == 5  # 1 del trial + 4 del mes
 
 
 @override_settings(
@@ -573,54 +542,52 @@ def test_generate_next_week_creates_posts_for_week_2(job_with_dna):
     VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
     VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
     GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    DEFAULT_FROM_EMAIL='noreply@test.com',
 )
-def test_generate_next_week_does_not_collide_with_last_post_date(job_with_dna):
-    from core.content_pipeline.tasks import MEXICO_TZ
-    calendar = ContentCalendar.objects.create(
-        brand_dna=job_with_dna.brand_dna, next_week_generating=True,
-    )
-    now_mexico = timezone.now().astimezone(MEXICO_TZ)
-    # Simula que el dia 7 se programo "hoy" — igual que cuando el usuario responde
-    # la encuesta de fin de semana el mismo dia en que le llego el ultimo post.
-    ContentPost.objects.create(
-        calendar=calendar, day_number=7, caption='Post 7', hashtags=[],
-        scheduled_at=now_mexico, suggested_time=now_mexico.time(),
-    )
-
+def test_generate_next_month_sends_month_ready_email(job_with_dna):
+    from core.content_pipeline.tasks import content_generation_task, generate_next_month
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'), \
-         patch('core.content_pipeline.tasks.EmailSender'):
+         patch('core.content_pipeline.tasks.EmailSender') as MockEmail, \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
         MockText.return_value.generate.return_value = _MOCK_POSTS
         MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+        content_generation_task(str(job_with_dna.id))
+        calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
+        MockEmail.reset_mock()
 
-        from core.content_pipeline.tasks import generate_next_week
-        generate_next_week(str(calendar.id), week_number=2)
+        generate_next_month(str(calendar.id))
 
-    day7 = calendar.posts.get(day_number=7)
-    day8 = calendar.posts.get(day_number=8)
-    assert day8.scheduled_at.astimezone(MEXICO_TZ).date() > day7.scheduled_at.astimezone(MEXICO_TZ).date()
+    MockEmail.return_value.send_month_ready.assert_called_once()
 
 
 @override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
     GOOGLE_CLOUD_LOCATION='us-central1',
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    DEFAULT_FROM_EMAIL='noreply@test.com',
 )
-def test_generate_next_week_resets_flag_even_on_failure(job_with_dna):
-    calendar = ContentCalendar.objects.create(
-        brand_dna=job_with_dna.brand_dna, next_week_generating=True,
-    )
+def test_generate_next_month_resets_flag_even_on_failure(job_with_dna):
+    from core.content_pipeline.tasks import content_generation_task, generate_next_month
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+        content_generation_task(str(job_with_dna.id))
+        calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
+        calendar.next_week_generating = True
+        calendar.save(update_fields=['next_week_generating'])
 
-    with patch('core.content_pipeline.tasks.TextGenerator') as MockText:
-        MockText.return_value.generate.side_effect = Exception('Gemini caido')
-
-        from core.content_pipeline.tasks import generate_next_week
-        generate_next_week(str(calendar.id), week_number=2)
+        MockText.return_value.generate.side_effect = Exception('Gemini error')
+        generate_next_month(str(calendar.id))
 
     calendar.refresh_from_db()
     assert calendar.next_week_generating is False
-    assert calendar.posts.count() == 0
 
 
 @override_settings(
