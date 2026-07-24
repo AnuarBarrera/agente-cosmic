@@ -311,3 +311,23 @@ def generate_next_week(calendar_id: str, week_number: int) -> None:
     finally:
         calendar.next_week_generating = False
         calendar.save(update_fields=['next_week_generating'])
+
+
+def expire_stale_trials_task() -> None:
+    expired = Subscription.objects.filter(
+        status='trialing', trial_ends_at__lte=timezone.now()
+    ).select_related('tenant')
+    for sub in expired:
+        job = AnalysisJob.objects.filter(
+            user__tenant=sub.tenant, generation_mode=AnalysisJob.MODE_FULL,
+        ).order_by('-created_at').first()
+        if job and hasattr(job, 'brand_dna'):
+            try:
+                EmailSender().send_trial_expired(job=job, brand_dna=job.brand_dna)
+            except Exception as email_err:
+                logger.error(f"Email de trial expirado falló para tenant {sub.tenant_id} (no fatal): {email_err}")
+        else:
+            logger.warning(f"No se encontró AnalysisJob completo para tenant {sub.tenant_id} — trial expira sin correo")
+        sub.status = 'trial_expired'
+        sub.save(update_fields=['status'])
+

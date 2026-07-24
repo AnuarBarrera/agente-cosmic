@@ -49,6 +49,16 @@ def job_with_dna_and_tenant(job_with_dna):
     return job_with_dna
 
 
+@pytest.fixture
+def trialing_job_with_tenant(job_with_dna_and_tenant):
+    from core.tenant_management.models import Subscription
+    Subscription.objects.filter(tenant=job_with_dna_and_tenant.user.tenant).update(
+        status='trialing', trial_ends_at=timezone.now() - timedelta(hours=1),
+    )
+    return job_with_dna_and_tenant
+
+
+
 @override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
     GOOGLE_CLOUD_LOCATION='us-central1',
@@ -635,5 +645,53 @@ def test_content_generation_passes_business_url_to_image_gen(job_with_dna):
 
     call_kwargs = MockImage.return_value.generate.call_args_list[0].kwargs
     assert call_kwargs['business_url'] == 'https://tuwebmx.com'
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/test123')
+def test_expire_stale_trials_sends_email_and_expires_subscription(trialing_job_with_tenant):
+    from core.tenant_management.models import Subscription
+    from core.content_pipeline.models import ContentCalendar
+    ContentCalendar.objects.create(brand_dna=trialing_job_with_tenant.brand_dna)
+
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import expire_stale_trials_task
+        expire_stale_trials_task()
+
+    MockEmail.return_value.send_trial_expired.assert_called_once()
+    call_kwargs = MockEmail.return_value.send_trial_expired.call_args[1]
+    assert call_kwargs['job'] == trialing_job_with_tenant
+
+    sub = Subscription.objects.get(tenant=trialing_job_with_tenant.user.tenant)
+    assert sub.status == 'trial_expired'
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/test123')
+def test_expire_stale_trials_ignores_active_subscriptions(job_with_dna_and_tenant):
+    from core.tenant_management.models import Subscription
+    Subscription.objects.filter(tenant=job_with_dna_and_tenant.user.tenant).update(
+        status='active', trial_ends_at=None,
+    )
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import expire_stale_trials_task
+        expire_stale_trials_task()
+
+    MockEmail.return_value.send_trial_expired.assert_not_called()
+    sub = Subscription.objects.get(tenant=job_with_dna_and_tenant.user.tenant)
+    assert sub.status == 'active'
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/test123')
+def test_expire_stale_trials_is_idempotent(trialing_job_with_tenant):
+    from core.tenant_management.models import Subscription
+    from core.content_pipeline.models import ContentCalendar
+    ContentCalendar.objects.create(brand_dna=trialing_job_with_tenant.brand_dna)
+
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import expire_stale_trials_task
+        expire_stale_trials_task()
+        expire_stale_trials_task()
+
+    assert MockEmail.return_value.send_trial_expired.call_count == 1
+
 
 
