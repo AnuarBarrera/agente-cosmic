@@ -143,6 +143,17 @@
     {% endif %}
   </div>
 
+  {% if user.tenant.subscription.stripe_customer_id %}
+  <div style="max-width:700px;margin:32px auto;text-align:center;">
+    <form method="POST" action="{% url 'manage_subscription' %}">
+      {% csrf_token %}
+      <button type="submit" style="background:#4a9eff;color:#fff;border:none;padding:12px 28px;border-radius:8px;cursor:pointer;font-weight:600;">
+        Administrar mi suscripción
+      </button>
+    </form>
+  </div>
+  {% endif %}
+
   <details style="max-width:700px;margin:48px auto 32px;border:1px solid #c0392b;border-radius:12px;background:#1a1215;">
     <summary style="padding:16px 28px;cursor:pointer;color:#e74c3c;font-weight:600;font-size:1.1rem;list-style:none;display:flex;align-items:center;gap:8px;">
       <span style="transition:transform 0.2s;display:inline-block;" id="dangerArrow">&#9654;</span> Zona de peligro

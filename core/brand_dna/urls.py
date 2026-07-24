@@ -32,4 +32,5 @@ urlpatterns = [
     path('api/brand-dna/<uuid:job_id>/field/', views.brand_dna_field_action_api, name='brand_dna_field_action_api'),
     path('api/calendar/<uuid:job_id>/regenerate/', views.regenerate_calendar_api, name='regenerate_calendar_api'),
     path('stripe/webhook/', stripe_views.stripe_webhook_view, name='stripe_webhook'),
+    path('dashboard/suscripcion/', stripe_views.manage_subscription_view, name='manage_subscription'),
 ]

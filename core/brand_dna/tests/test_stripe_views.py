@@ -211,3 +211,50 @@ def test_webhook_payment_succeeded_restores_active(tenant_with_subscription):
     assert sub.status == 'active'
 
 
+@pytest.fixture
+def user_with_customer_id(django_user_model, tenant_with_subscription):
+    tenant_with_subscription.subscription.stripe_customer_id = 'cus_test1'
+    tenant_with_subscription.subscription.save(update_fields=['stripe_customer_id'])
+    user = django_user_model.objects.create_user(
+        username='portal@test.com', email='portal@test.com', password='pass1234'
+    )
+    user.tenant = tenant_with_subscription
+    user.save(update_fields=['tenant'])
+    return user
+
+
+def test_manage_subscription_redirects_to_portal_session(user_with_customer_id):
+    c = Client()
+    c.force_login(user_with_customer_id)
+    fake_session = SimpleNamespace(url='https://billing.stripe.com/p/session/test_abc')
+    with patch('core.brand_dna.stripe_views.stripe.billing_portal.Session.create',
+               return_value=fake_session) as mock_create:
+        response = c.post('/dashboard/suscripcion/')
+    assert response.status_code == 302
+    assert response.url == 'https://billing.stripe.com/p/session/test_abc'
+    mock_create.assert_called_once()
+    assert mock_create.call_args[1]['customer'] == 'cus_test1'
+
+
+def test_manage_subscription_without_customer_id_redirects_to_dashboard(django_user_model, tenant_with_subscription):
+    user = django_user_model.objects.create_user(
+        username='noportal@test.com', email='noportal@test.com', password='pass1234'
+    )
+    user.tenant = tenant_with_subscription
+    user.save(update_fields=['tenant'])
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.stripe_views.stripe.billing_portal.Session.create') as mock_create:
+        response = c.post('/dashboard/suscripcion/')
+    assert response.status_code == 302
+    assert response.url == '/dashboard/'
+    mock_create.assert_not_called()
+
+
+def test_manage_subscription_requires_login():
+    c = Client()
+    response = c.post('/dashboard/suscripcion/')
+    assert response.status_code == 302
+    assert '/auth/login/' in response.url
+
+

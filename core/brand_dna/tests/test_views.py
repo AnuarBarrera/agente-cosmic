@@ -853,3 +853,17 @@ def test_regenerate_action_blocked_for_reel_posts(client, user, job_with_calenda
     assert response.status_code == 400
     post.refresh_from_db()
     assert post.video_url == 'https://example.com/reel.mp4'
+
+
+def test_dashboard_shows_manage_subscription_button_with_customer_id(client, user):
+    user.tenant.subscription.stripe_customer_id = 'cus_test1'
+    user.tenant.subscription.save(update_fields=['stripe_customer_id'])
+    client.force_login(user)
+    response = client.get('/dashboard/')
+    assert b'Administrar mi suscripci\xc3\xb3n' in response.content
+
+
+def test_dashboard_hides_manage_subscription_button_without_customer_id(client, user):
+    client.force_login(user)
+    response = client.get('/dashboard/')
+    assert b'Administrar mi suscripci\xc3\xb3n' not in response.content

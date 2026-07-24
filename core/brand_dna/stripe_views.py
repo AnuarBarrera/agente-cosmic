@@ -1,7 +1,10 @@
 import logging
 import stripe
 from django.conf import settings
+from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, HttpResponseBadRequest
+from django.shortcuts import redirect
+from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from core.tenant_management.models import Subscription
@@ -98,4 +101,17 @@ def stripe_webhook_view(request):
             logger.error(f"Webhook de Stripe: no se encontro suscripcion para customer {customer_id} en evento {event['id']}")
 
     return HttpResponse(status=200)
+
+
+@login_required
+@require_POST
+def manage_subscription_view(request):
+    subscription = getattr(getattr(request.user, 'tenant', None), 'subscription', None)
+    if not subscription or not subscription.stripe_customer_id:
+        return redirect('dashboard')
+    portal_session = stripe.billing_portal.Session.create(
+        customer=subscription.stripe_customer_id,
+        return_url=settings.COSMIC_BASE_URL + reverse('dashboard'),
+    )
+    return redirect(portal_session.url)
 
