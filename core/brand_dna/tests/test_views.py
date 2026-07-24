@@ -617,7 +617,7 @@ def test_dashboard_shows_manage_subscription_button_with_customer_id(client, use
     user.tenant.subscription.save(update_fields=['stripe_customer_id'])
     client.force_login(user)
     response = client.get('/dashboard/')
-    assert b'Administrar mi suscripci\xc3\xb3n' in response.content
+    assert 'Administrar mi método de pago'.encode() in response.content
 
 
 def test_dashboard_hides_manage_subscription_button_without_customer_id(client, user):
@@ -683,4 +683,30 @@ def test_calendar_review_url_no_longer_exists(client, user, job_with_calendar):
     client.force_login(user)
     response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {})
     assert response.status_code == 404
+
+
+def test_dashboard_shows_early_cta_when_trialing(client, user, settings):
+    settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
+    user.tenant.subscription.status = 'trialing'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+    response = client.get('/dashboard/')
+    assert b'mes completo' in response.content
+    assert f'https://buy.stripe.com/test123?client_reference_id={user.tenant_id}'.encode() in response.content
+
+
+def test_dashboard_hides_early_cta_when_active(client, user):
+    client.force_login(user)
+    response = client.get('/dashboard/')
+    assert b'mes completo' not in response.content
+
+
+def test_dashboard_manage_payment_method_button_renamed(client, user):
+    user.tenant.subscription.stripe_customer_id = 'cus_test1'
+    user.tenant.subscription.save(update_fields=['stripe_customer_id'])
+    client.force_login(user)
+    response = client.get('/dashboard/')
+    assert 'Administrar mi método de pago'.encode() in response.content
+    assert b'Administrar mi suscripci\xc3\xb3n' not in response.content
+
 

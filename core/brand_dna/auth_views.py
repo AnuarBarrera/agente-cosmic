@@ -504,6 +504,11 @@ def dashboard_view(request):
             has_next_week_generating = True
     used_total = AnalysisJob.objects.filter(user=request.user).count()
     plan = get_user_plan(request.user)
+    subscription = getattr(getattr(request.user, 'tenant', None), 'subscription', None)
+    early_cta = bool(subscription and subscription.status == 'trialing')
+    payment_url = ''
+    if early_cta:
+        payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={request.user.tenant_id}"
     return render(request, 'brand_dna/dashboard.html', {
         'jobs': jobs,
         'user': request.user,
@@ -511,6 +516,8 @@ def dashboard_view(request):
         'max_calendars': plan.max_calendars_per_week,
         'has_processing': has_processing,
         'has_next_week_generating': has_next_week_generating,
+        'early_cta': early_cta,
+        'payment_url': payment_url,
     })
 
 
