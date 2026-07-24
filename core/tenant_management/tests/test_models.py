@@ -46,3 +46,21 @@ def test_subscription_stripe_fields_accept_values():
     assert sub.stripe_subscription_id == 'sub_123'
     assert sub.cancel_at_period_end is True
 
+
+def test_subscription_paid_until_defaults_to_none():
+    plan = Plan.objects.create(name='Plan Test Paid Until')
+    tenant = TenantModel.objects.create(name='Tenant Paid Until', status='active')
+    sub = Subscription.objects.create(tenant=tenant, plan=plan)
+    assert sub.paid_until is None
+
+
+def test_subscription_paid_until_accepts_datetime():
+    plan = Plan.objects.create(name='Plan Test Paid Until 2')
+    tenant = TenantModel.objects.create(name='Tenant Paid Until 2', status='active')
+    paid_until = timezone.now() + timezone.timedelta(days=28)
+    sub = Subscription.objects.create(tenant=tenant, plan=plan, status='active', paid_until=paid_until)
+    sub.refresh_from_db()
+    assert sub.status == 'active'
+    assert sub.paid_until == paid_until
+
+
