@@ -121,3 +121,34 @@ def test_send_trial_expired_email_calls_django_send(full_setup):
     html = call_kwargs[1]['html_message']
     assert f'https://buy.stripe.com/test123?client_reference_id={tenant.id}' in html
 
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
+def test_send_payment_failed_email_calls_django_send(full_setup):
+    from core.content_pipeline.email_sender import EmailSender
+    from core.tenant_management.models import TenantModel, Subscription, Plan
+    job, dna, calendar, posts = full_setup
+    plan, _ = Plan.objects.get_or_create(name='User', defaults={
+        'max_calendars_per_week': 2, 'max_post_regenerations': 2,
+        'max_post_edits': 2, 'price': 0,
+    })
+    from django.contrib.auth import get_user_model
+    UserModel = get_user_model()
+    user = UserModel.objects.create_user(username=job.email, email=job.email, password='pass1234')
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    Subscription.objects.create(tenant=tenant, plan=plan, status='past_due', stripe_customer_id='cus_test1')
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+    job.user = user
+    job.save(update_fields=['user'])
+
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        sender = EmailSender()
+        sender.send_payment_failed(job=job, brand_dna=dna)
+
+    mock_send.assert_called_once()
+    call_kwargs = mock_send.call_args
+    assert job.email in call_kwargs[1]['recipient_list']
+    html = call_kwargs[1]['html_message']
+    assert 'https://cosmic.anuarbarrera.dev' in html
+
+

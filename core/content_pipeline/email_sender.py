@@ -100,3 +100,26 @@ class EmailSender:
         EMAILS_SENT.labels(type='trial_expired').inc()
         logger.info(f"Email de trial expirado enviado a {job.email} para job {job.id}")
 
+    def send_payment_failed(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
+        dashboard_url = settings.COSMIC_BASE_URL + reverse('dashboard')
+        html = render_to_string('content_pipeline/email_payment_failed.html', {
+            'brand_dna': brand_dna,
+            'dashboard_url': dashboard_url,
+        })
+        name = brand_dna.business_name.strip() if brand_dna.business_name else ''
+        subject = f'⚠️ No pudimos cobrar tu suscripción — {name}' if name else '⚠️ No pudimos cobrar tu suscripción'
+        plain = (
+            f'No pudimos cobrar tu suscripción de {name}. Actualiza tu método de pago: {dashboard_url}'
+        ) if name else f'No pudimos cobrar tu suscripción. Actualiza tu método de pago: {dashboard_url}'
+        send_mail(
+            subject,
+            plain,
+            settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[job.email],
+            html_message=html,
+            fail_silently=False,
+        )
+        EMAILS_SENT.labels(type='payment_failed').inc()
+        logger.info(f"Email de cobro fallido enviado a {job.email} para job {job.id}")
+
+

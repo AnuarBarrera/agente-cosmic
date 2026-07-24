@@ -151,3 +151,63 @@ def test_webhook_subscription_updated_unknown_customer_returns_200_and_logs(tena
         )
     assert response.status_code == 200
 
+
+def _fake_invoice_event(event_id, event_type, customer_id):
+    return {
+        'id': event_id,
+        'type': event_type,
+        'data': {'object': SimpleNamespace(customer=customer_id)},
+    }
+
+
+@override_settings(STRIPE_WEBHOOK_SECRET='whsec_test123')
+def test_webhook_payment_failed_marks_past_due_and_sends_email(tenant_with_subscription):
+    from core.brand_dna.models import AnalysisJob, BrandDNA
+    from django.contrib.auth import get_user_model
+    tenant_with_subscription.subscription.stripe_customer_id = 'cus_test1'
+    tenant_with_subscription.subscription.status = 'active'
+    tenant_with_subscription.subscription.save(update_fields=['stripe_customer_id', 'status'])
+    UserModel = get_user_model()
+    user = UserModel.objects.create_user(username='t@t.com', email='t@t.com', password='pass1234')
+    user.tenant = tenant_with_subscription
+    user.save(update_fields=['tenant'])
+    job = AnalysisJob.objects.create(
+        email=user.email, business_url='https://tuwebmx.com', user=user,
+        status=AnalysisJob.STATUS_DONE, generation_mode=AnalysisJob.MODE_FULL,
+    )
+    BrandDNA.objects.create(
+        job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
+        description='Agencia digital', keywords=['diseno'], audience='PYMEs',
+        tone='profesional', primary_colors=['#1a1a2e'],
+    )
+    c = Client()
+    with patch('core.brand_dna.stripe_views.stripe.Webhook.construct_event',
+               return_value=_fake_invoice_event('evt_7', 'invoice.payment_failed', 'cus_test1')), \
+         patch('core.brand_dna.stripe_views.EmailSender') as MockEmail:
+        response = c.post(
+            '/stripe/webhook/', data=b'{}', content_type='application/json',
+            HTTP_STRIPE_SIGNATURE='t=1,v1=fake',
+        )
+    assert response.status_code == 200
+    sub = Subscription.objects.get(tenant=tenant_with_subscription)
+    assert sub.status == 'past_due'
+    MockEmail.return_value.send_payment_failed.assert_called_once()
+
+
+@override_settings(STRIPE_WEBHOOK_SECRET='whsec_test123')
+def test_webhook_payment_succeeded_restores_active(tenant_with_subscription):
+    tenant_with_subscription.subscription.stripe_customer_id = 'cus_test1'
+    tenant_with_subscription.subscription.status = 'past_due'
+    tenant_with_subscription.subscription.save(update_fields=['stripe_customer_id', 'status'])
+    c = Client()
+    with patch('core.brand_dna.stripe_views.stripe.Webhook.construct_event',
+               return_value=_fake_invoice_event('evt_8', 'invoice.payment_succeeded', 'cus_test1')):
+        response = c.post(
+            '/stripe/webhook/', data=b'{}', content_type='application/json',
+            HTTP_STRIPE_SIGNATURE='t=1,v1=fake',
+        )
+    assert response.status_code == 200
+    sub = Subscription.objects.get(tenant=tenant_with_subscription)
+    assert sub.status == 'active'
+
+

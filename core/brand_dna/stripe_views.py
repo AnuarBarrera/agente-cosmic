@@ -5,6 +5,8 @@ from django.http import HttpResponse, HttpResponseBadRequest
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from core.tenant_management.models import Subscription
+from core.brand_dna.models import AnalysisJob
+from core.content_pipeline.email_sender import EmailSender
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +15,12 @@ def _subscription_for_customer(customer_id):
     if not customer_id:
         return None
     return Subscription.objects.filter(stripe_customer_id=customer_id).first()
+
+
+def _job_for_tenant(tenant):
+    return AnalysisJob.objects.filter(
+        user__tenant=tenant, generation_mode=AnalysisJob.MODE_FULL,
+    ).order_by('-created_at').first()
 
 
 @csrf_exempt
@@ -63,4 +71,31 @@ def stripe_webhook_view(request):
         else:
             logger.error(f"Webhook de Stripe: no se encontro suscripcion para customer {customer_id} en evento {event['id']}")
 
+    elif event_type == 'invoice.payment_failed':
+        invoice = event['data']['object']
+        customer_id = getattr(invoice, 'customer', None)
+        sub = _subscription_for_customer(customer_id)
+        if sub:
+            sub.status = 'past_due'
+            sub.save(update_fields=['status'])
+            job = _job_for_tenant(sub.tenant)
+            if job and hasattr(job, 'brand_dna'):
+                try:
+                    EmailSender().send_payment_failed(job=job, brand_dna=job.brand_dna)
+                except Exception as email_err:
+                    logger.error(f"Email de cobro fallido fallo para tenant {sub.tenant_id} (no fatal): {email_err}")
+        else:
+            logger.error(f"Webhook de Stripe: no se encontro suscripcion para customer {customer_id} en evento {event['id']}")
+
+    elif event_type == 'invoice.payment_succeeded':
+        invoice = event['data']['object']
+        customer_id = getattr(invoice, 'customer', None)
+        sub = _subscription_for_customer(customer_id)
+        if sub:
+            sub.status = 'active'
+            sub.save(update_fields=['status'])
+        else:
+            logger.error(f"Webhook de Stripe: no se encontro suscripcion para customer {customer_id} en evento {event['id']}")
+
     return HttpResponse(status=200)
+
