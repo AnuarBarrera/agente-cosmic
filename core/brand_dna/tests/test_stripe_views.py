@@ -20,15 +20,21 @@ def tenant_with_subscription():
     return tenant
 
 
-def _fake_event(event_id, tenant_id):
-    # SimpleNamespace (no .get()) en vez de dict: el stripe.StripeObject real
-    # solo soporta acceso por atributo/__getitem__, NO .get() — un dict aqui
-    # esconde bugs reales (confirmado en vivo: session.get(...) lanzaba
-    # AttributeError contra un stripe.checkout.Session de verdad).
+def _fake_event(event_id, tenant_id, event_type='checkout.session.completed', customer='cus_test1', subscription='sub_test1'):
     return {
         'id': event_id,
-        'type': 'checkout.session.completed',
-        'data': {'object': SimpleNamespace(client_reference_id=str(tenant_id))},
+        'type': event_type,
+        'data': {'object': SimpleNamespace(
+            client_reference_id=str(tenant_id), customer=customer, subscription=subscription,
+        )},
+    }
+
+
+def _fake_subscription_event(event_id, customer_id, cancel_at_period_end=False):
+    return {
+        'id': event_id,
+        'type': 'customer.subscription.updated',
+        'data': {'object': SimpleNamespace(customer=customer_id, cancel_at_period_end=cancel_at_period_end)},
     }
 
 
@@ -45,6 +51,8 @@ def test_webhook_valid_signature_activates_subscription(tenant_with_subscription
     sub = Subscription.objects.get(tenant=tenant_with_subscription)
     assert sub.status == 'active'
     assert sub.trial_ends_at is None
+    assert sub.stripe_customer_id == 'cus_test1'
+    assert sub.stripe_subscription_id == 'sub_test1'
 
 
 @override_settings(STRIPE_WEBHOOK_SECRET='whsec_test123')
@@ -85,3 +93,61 @@ def test_webhook_repeated_event_is_idempotent(tenant_with_subscription):
     assert response.status_code == 200
     sub = Subscription.objects.get(tenant=tenant_with_subscription)
     assert sub.status == 'active'
+
+
+@override_settings(STRIPE_WEBHOOK_SECRET='whsec_test123')
+def test_webhook_subscription_updated_syncs_cancel_at_period_end(tenant_with_subscription):
+    tenant_with_subscription.subscription.stripe_customer_id = 'cus_test1'
+    tenant_with_subscription.subscription.status = 'active'
+    tenant_with_subscription.subscription.save(update_fields=['stripe_customer_id', 'status'])
+    c = Client()
+    with patch('core.brand_dna.stripe_views.stripe.Webhook.construct_event',
+               return_value=_fake_subscription_event('evt_4', 'cus_test1', cancel_at_period_end=True)):
+        response = c.post(
+            '/stripe/webhook/', data=b'{}', content_type='application/json',
+            HTTP_STRIPE_SIGNATURE='t=1,v1=fake',
+        )
+    assert response.status_code == 200
+    sub = Subscription.objects.get(tenant=tenant_with_subscription)
+    assert sub.cancel_at_period_end is True
+    assert sub.status == 'active'
+
+
+@override_settings(STRIPE_WEBHOOK_SECRET='whsec_test123')
+def test_webhook_subscription_deleted_cancels(tenant_with_subscription):
+    tenant_with_subscription.subscription.stripe_customer_id = 'cus_test1'
+    tenant_with_subscription.subscription.status = 'active'
+    tenant_with_subscription.subscription.cancel_at_period_end = True
+    tenant_with_subscription.subscription.save(update_fields=['stripe_customer_id', 'status', 'cancel_at_period_end'])
+    fake_event = {
+        'id': 'evt_5',
+        'type': 'customer.subscription.deleted',
+        'data': {'object': SimpleNamespace(customer='cus_test1')},
+    }
+    c = Client()
+    with patch('core.brand_dna.stripe_views.stripe.Webhook.construct_event', return_value=fake_event):
+        response = c.post(
+            '/stripe/webhook/', data=b'{}', content_type='application/json',
+            HTTP_STRIPE_SIGNATURE='t=1,v1=fake',
+        )
+    assert response.status_code == 200
+    sub = Subscription.objects.get(tenant=tenant_with_subscription)
+    assert sub.status == 'canceled'
+    assert sub.cancel_at_period_end is False
+
+
+@override_settings(STRIPE_WEBHOOK_SECRET='whsec_test123')
+def test_webhook_subscription_updated_unknown_customer_returns_200_and_logs(tenant_with_subscription):
+    fake_event = {
+        'id': 'evt_6',
+        'type': 'customer.subscription.updated',
+        'data': {'object': SimpleNamespace(customer='cus_unknown', cancel_at_period_end=True)},
+    }
+    c = Client()
+    with patch('core.brand_dna.stripe_views.stripe.Webhook.construct_event', return_value=fake_event):
+        response = c.post(
+            '/stripe/webhook/', data=b'{}', content_type='application/json',
+            HTTP_STRIPE_SIGNATURE='t=1,v1=fake',
+        )
+    assert response.status_code == 200
+
