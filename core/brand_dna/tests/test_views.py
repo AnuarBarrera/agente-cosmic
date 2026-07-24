@@ -658,9 +658,44 @@ def test_calendar_feedback_api_yes_blocked_when_trial_expired(client, user, job_
     mock_rq.enqueue.assert_not_called()
 
     feedback = calendar.feedback_entries.get(week_number=1)
-    assert feedback.continue_decision == WeeklyFeedback.CONTINUE_YES
+    assert feedback.rating == 5
+    assert feedback.continue_decision == WeeklyFeedback.CONTINUE_PENDING
+    assert feedback.responded_at is None
     calendar.refresh_from_db()
     assert calendar.next_week_generating is False
+
+
+def test_calendar_review_shows_banner_again_after_payment_blocked(client, user, job_with_calendar, settings):
+    settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
+    user.tenant.subscription.status = 'trial_expired'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+    with patch('core.brand_dna.views.django_rq'):
+        client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
+            'rating': '5',
+            'continue_decision': 'yes',
+        })
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert response.context['pending_feedback'] is not None
+    assert response.context['pending_feedback'].week_number == 1
+
+
+def test_calendar_feedback_api_yes_without_tenant_does_not_crash(client, django_user_model, job_with_calendar):
+    orphan_job = job_with_calendar
+    orphan_user = orphan_job.user
+    orphan_user.tenant = None
+    orphan_user.is_superuser = True
+    orphan_user.save(update_fields=['tenant', 'is_superuser'])
+    client.force_login(orphan_user)
+    with patch('core.brand_dna.views.django_rq') as mock_rq:
+        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
+            'rating': '5',
+            'continue_decision': 'yes',
+        })
+    assert response.status_code == 200
+    data = response.json()
+    assert data['continue_decision'] == 'yes'
+    mock_rq.enqueue.assert_called_once()
 
 
 def test_calendar_review_feedback_js_handles_payment_required(client, user, job_with_calendar):
