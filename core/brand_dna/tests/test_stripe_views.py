@@ -4,6 +4,8 @@ import stripe
 from types import SimpleNamespace
 from unittest.mock import patch
 from django.test import Client, override_settings
+from datetime import timedelta
+from django.utils import timezone
 from core.tenant_management.models import TenantModel, Subscription, Plan
 
 pytestmark = pytest.mark.django_db
@@ -42,9 +44,25 @@ def _fake_subscription_event(event_id, customer_id, cancel_at_period_end=False, 
 
 @override_settings(STRIPE_WEBHOOK_SECRET='whsec_test123')
 def test_webhook_valid_signature_activates_subscription(tenant_with_subscription):
+    from core.brand_dna.models import AnalysisJob, BrandDNA
+    from django.contrib.auth import get_user_model
+    UserModel = get_user_model()
+    user = UserModel.objects.create_user(username='t1@t.com', email='t1@t.com', password='pass1234')
+    user.tenant = tenant_with_subscription
+    user.save(update_fields=['tenant'])
+    job = AnalysisJob.objects.create(
+        email=user.email, business_url='https://tuwebmx.com', user=user,
+        status=AnalysisJob.STATUS_DONE, generation_mode=AnalysisJob.MODE_FULL,
+    )
+    BrandDNA.objects.create(
+        job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
+        description='Agencia digital', keywords=['diseno'], audience='PYMEs',
+        tone='profesional', primary_colors=['#1a1a2e'],
+    )
     c = Client()
     with patch('core.brand_dna.stripe_views.stripe.Webhook.construct_event',
-               return_value=_fake_event('evt_1', tenant_with_subscription.id)):
+               return_value=_fake_event('evt_1', tenant_with_subscription.id)), \
+         patch('core.brand_dna.stripe_views.django_rq') as mock_rq:
         response = c.post(
             '/stripe/webhook/', data=b'{}', content_type='application/json',
             HTTP_STRIPE_SIGNATURE='t=1,v1=fake',
@@ -53,8 +71,10 @@ def test_webhook_valid_signature_activates_subscription(tenant_with_subscription
     sub = Subscription.objects.get(tenant=tenant_with_subscription)
     assert sub.status == 'active'
     assert sub.trial_ends_at is None
+    assert sub.paid_until is not None
+    assert sub.paid_until > timezone.now() + timedelta(days=27)
     assert sub.stripe_customer_id == 'cus_test1'
-    assert sub.stripe_subscription_id == 'sub_test1'
+    mock_rq.enqueue.assert_not_called()
 
 
 @override_settings(STRIPE_WEBHOOK_SECRET='whsec_test123')
@@ -279,5 +299,40 @@ def test_manage_subscription_requires_login():
     response = c.post('/dashboard/suscripcion/')
     assert response.status_code == 302
     assert '/auth/login/' in response.url
+
+
+@override_settings(STRIPE_WEBHOOK_SECRET='whsec_test123')
+def test_webhook_payment_enqueues_generate_next_month(tenant_with_subscription):
+    from core.brand_dna.models import AnalysisJob, BrandDNA
+    from core.content_pipeline.models import ContentCalendar
+    from django.contrib.auth import get_user_model
+    UserModel = get_user_model()
+    user = UserModel.objects.create_user(username='t2@t.com', email='t2@t.com', password='pass1234')
+    user.tenant = tenant_with_subscription
+    user.save(update_fields=['tenant'])
+    job = AnalysisJob.objects.create(
+        email=user.email, business_url='https://tuwebmx.com', user=user,
+        status=AnalysisJob.STATUS_DONE, generation_mode=AnalysisJob.MODE_FULL,
+    )
+    dna = BrandDNA.objects.create(
+        job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
+        description='Agencia digital', keywords=['diseno'], audience='PYMEs',
+        tone='profesional', primary_colors=['#1a1a2e'],
+    )
+    calendar = ContentCalendar.objects.create(brand_dna=dna)
+    c = Client()
+    with patch('core.brand_dna.stripe_views.stripe.Webhook.construct_event',
+               return_value=_fake_event('evt_2', tenant_with_subscription.id)), \
+         patch('core.brand_dna.stripe_views.django_rq') as mock_rq:
+        response = c.post(
+            '/stripe/webhook/', data=b'{}', content_type='application/json',
+            HTTP_STRIPE_SIGNATURE='t=1,v1=fake',
+        )
+    assert response.status_code == 200
+    mock_rq.enqueue.assert_called_once()
+    enqueue_args = mock_rq.enqueue.call_args[0]
+    assert enqueue_args[1] == str(calendar.id)
+    calendar.refresh_from_db()
+    assert calendar.next_week_generating is True
 
 

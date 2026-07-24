@@ -1,5 +1,8 @@
 import logging
 import stripe
+import django_rq
+from datetime import timedelta
+from django.utils import timezone
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, HttpResponseBadRequest
@@ -22,9 +25,9 @@ def _subscription_for_customer(customer_id):
     return Subscription.objects.filter(stripe_customer_id=customer_id).first()
 
 
-def _job_for_tenant(tenant):
+def _job_for_tenant(tenant_id):
     return AnalysisJob.objects.filter(
-        user__tenant=tenant, generation_mode=AnalysisJob.MODE_FULL,
+        user__tenant_id=tenant_id, generation_mode=AnalysisJob.MODE_FULL,
     ).order_by('-created_at').first()
 
 
@@ -47,13 +50,23 @@ def stripe_webhook_view(request):
         updated = Subscription.objects.filter(tenant_id=tenant_id).update(
             status='active',
             trial_ends_at=None,
+            paid_until=timezone.now() + timedelta(days=28),
             stripe_customer_id=getattr(session, 'customer', '') or '',
             stripe_subscription_id=getattr(session, 'subscription', '') or '',
         )
         if not updated:
             logger.error(f"Webhook de Stripe: no se encontro tenant {tenant_id} para el evento {event['id']}")
         else:
-            logger.info(f"Suscripcion activada para tenant {tenant_id} via Stripe")
+            logger.info(f"Pago confirmado para tenant {tenant_id} via Stripe")
+            from core.content_pipeline.tasks import generate_next_month
+            job = _job_for_tenant(tenant_id)
+            if job and hasattr(job, 'brand_dna') and hasattr(job.brand_dna, 'calendar'):
+                calendar = job.brand_dna.calendar
+                calendar.next_week_generating = True
+                calendar.save(update_fields=['next_week_generating'])
+                django_rq.enqueue(generate_next_month, str(calendar.id), job_timeout=2400)
+            else:
+                logger.warning(f"No se encontro calendario para tenant {tenant_id} — pago confirmado sin generar mes")
 
     elif event_type == 'customer.subscription.updated':
         subscription_obj = event['data']['object']
@@ -88,7 +101,7 @@ def stripe_webhook_view(request):
         if sub:
             sub.status = 'past_due'
             sub.save(update_fields=['status'])
-            job = _job_for_tenant(sub.tenant)
+            job = _job_for_tenant(sub.tenant_id)
             if job and hasattr(job, 'brand_dna'):
                 try:
                     EmailSender().send_payment_failed(job=job, brand_dna=job.brand_dna)
