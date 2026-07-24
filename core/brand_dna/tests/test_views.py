@@ -3,7 +3,7 @@ import io
 import json
 import os
 from unittest.mock import patch, MagicMock
-from django.test import Client
+from django.test import Client, override_settings
 from django.utils import timezone
 from datetime import timedelta
 from core.brand_dna.models import AnalysisJob, BrandDNA
@@ -622,6 +622,51 @@ def test_calendar_feedback_api_yes_triggers_generate_next_week(client, user, job
 
     calendar.refresh_from_db()
     assert calendar.next_week_generating is True
+
+
+def test_calendar_feedback_api_yes_allowed_when_trialing(client, user, job_with_calendar):
+    user.tenant.subscription.status = 'trialing'
+    user.tenant.subscription.trial_ends_at = timezone.now() + timedelta(days=2)
+    user.tenant.subscription.save(update_fields=['status', 'trial_ends_at'])
+    client.force_login(user)
+    with patch('core.brand_dna.views.django_rq') as mock_rq:
+        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
+            'rating': '5',
+            'continue_decision': 'yes',
+        })
+    assert response.status_code == 200
+    data = response.json()
+    assert data['continue_decision'] == 'yes'
+    mock_rq.enqueue.assert_called_once()
+
+
+@override_settings(STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/test123')
+def test_calendar_feedback_api_yes_blocked_when_trial_expired(client, user, job_with_calendar):
+    user.tenant.subscription.status = 'trial_expired'
+    user.tenant.subscription.save(update_fields=['status'])
+    calendar = job_with_calendar.brand_dna.calendar
+    client.force_login(user)
+    with patch('core.brand_dna.views.django_rq') as mock_rq:
+        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
+            'rating': '5',
+            'continue_decision': 'yes',
+        })
+    assert response.status_code == 200
+    data = response.json()
+    assert data['status'] == 'payment_required'
+    assert data['payment_url'] == f'https://buy.stripe.com/test123?client_reference_id={user.tenant_id}'
+    mock_rq.enqueue.assert_not_called()
+
+    feedback = calendar.feedback_entries.get(week_number=1)
+    assert feedback.continue_decision == WeeklyFeedback.CONTINUE_YES
+    calendar.refresh_from_db()
+    assert calendar.next_week_generating is False
+
+
+def test_calendar_review_feedback_js_handles_payment_required(client, user, job_with_calendar):
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert b"data.status === 'payment_required'" in response.content
 
 
 def test_calendar_feedback_api_requires_ownership(client, django_user_model, job_with_calendar, free_plan):

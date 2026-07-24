@@ -449,6 +449,12 @@
         banner.innerHTML = '<div style="color:#7ec8a4;font-size:0.9rem;line-height:1.6;">☕ <strong style="color:#a8e6c8;">Tu próxima semana se está generando.</strong> No hace falta que esperes aquí — te avisamos por correo en cuanto esté lista.</div>';
         banner.style.border = '1px solid #2d6a4f';
         banner.style.background = '#0d2218';
+      } else if (data.status === 'payment_required') {
+        banner.innerHTML = `<div style="color:#f0c040;font-size:0.9rem;line-height:1.6;">
+          💳 <strong style="color:#ffda6a;">Tu semana gratis terminó.</strong> Activa tu suscripción para generar tu próxima semana.
+          <a href="${data.payment_url}" style="display:inline-block;margin-top:12px;padding:10px 20px;background:#e94560;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;">Activar mi suscripción →</a>
+        </div>`;
+        banner.style.border = '1px solid #e94560';
       } else {
         showToast('Error al enviar feedback', '#e74c3c', 5000);
         buttons.forEach(b => b.disabled = false);

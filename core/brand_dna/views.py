@@ -550,6 +550,10 @@ def calendar_feedback_api(request, job_id):
     feedback.save(update_fields=['rating', 'comment', 'continue_decision', 'responded_at'])
 
     if feedback.continue_decision == WeeklyFeedback.CONTINUE_YES:
+        subscription = job.user.tenant.subscription
+        if subscription.status == 'trial_expired':
+            payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={job.user.tenant_id}"
+            return JsonResponse({'status': 'payment_required', 'payment_url': payment_url})
         next_week = feedback.week_number + 1
         calendar.next_week_generating = True
         calendar.save(update_fields=['next_week_generating'])
