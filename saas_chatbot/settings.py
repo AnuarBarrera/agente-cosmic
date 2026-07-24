@@ -163,6 +163,10 @@ MAILGUN_DOMAIN = get_env('MAILGUN_DOMAIN')
 MAILGUN_SENDER_EMAIL = get_env('MAILGUN_SENDER_EMAIL', default='noreply@yourdomain.com')
 DEFAULT_TENANT_NOTIFICATION_EMAIL = get_env('DEFAULT_TENANT_NOTIFICATION_EMAIL', default='admin@example.com')
 
+# Stripe Settings
+STRIPE_WEBHOOK_SECRET = get_env('STRIPE_WEBHOOK_SECRET', default='')
+STRIPE_PAYMENT_LINK_URL = get_env('STRIPE_PAYMENT_LINK_URL', default='')
+
 # Google Cloud — Vertex AI ADC (Application Default Credentials)
 GOOGLE_CLOUD_PROJECT = get_env('GOOGLE_CLOUD_PROJECT', default='agente-cosmic')
 GOOGLE_CLOUD_STORAGE_BUCKET = get_env('GOOGLE_CLOUD_STORAGE_BUCKET', default='agente-cosmic-assets')

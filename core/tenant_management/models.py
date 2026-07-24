@@ -70,7 +70,8 @@ class Subscription(models.Model):
     plan = models.ForeignKey(Plan, on_delete=models.PROTECT)
     start_date = models.DateTimeField(auto_now_add=True)
     end_date = models.DateTimeField(null=True, blank=True)
-    status = models.CharField(max_length=50, default='active') # e.g., active, canceled, past_due
+    status = models.CharField(max_length=50, default='active')  # e.g., active, trialing, trial_expired, canceled, past_due
+    trial_ends_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.tenant.name} - {self.plan.name}"
