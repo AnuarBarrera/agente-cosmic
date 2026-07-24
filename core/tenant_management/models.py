@@ -72,6 +72,9 @@ class Subscription(models.Model):
     end_date = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=50, default='active')  # e.g., active, trialing, trial_expired, canceled, past_due
     trial_ends_at = models.DateTimeField(null=True, blank=True)
+    stripe_customer_id = models.CharField(max_length=255, blank=True, default='')
+    stripe_subscription_id = models.CharField(max_length=255, blank=True, default='')
+    cancel_at_period_end = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.tenant.name} - {self.plan.name}"

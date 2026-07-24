@@ -22,3 +22,27 @@ def test_subscription_trial_ends_at_accepts_datetime():
     sub.refresh_from_db()
     assert sub.status == 'trialing'
     assert sub.trial_ends_at == ends_at
+
+
+def test_subscription_stripe_fields_default_empty():
+    plan = Plan.objects.create(name='Plan Test Stripe Fields')
+    tenant = TenantModel.objects.create(name='Tenant Stripe Fields', status='active')
+    sub = Subscription.objects.create(tenant=tenant, plan=plan)
+    assert sub.stripe_customer_id == ''
+    assert sub.stripe_subscription_id == ''
+    assert sub.cancel_at_period_end is False
+
+
+def test_subscription_stripe_fields_accept_values():
+    plan = Plan.objects.create(name='Plan Test Stripe Fields 2')
+    tenant = TenantModel.objects.create(name='Tenant Stripe Fields 2', status='active')
+    sub = Subscription.objects.create(
+        tenant=tenant, plan=plan,
+        stripe_customer_id='cus_123', stripe_subscription_id='sub_123',
+        cancel_at_period_end=True,
+    )
+    sub.refresh_from_db()
+    assert sub.stripe_customer_id == 'cus_123'
+    assert sub.stripe_subscription_id == 'sub_123'
+    assert sub.cancel_at_period_end is True
+
