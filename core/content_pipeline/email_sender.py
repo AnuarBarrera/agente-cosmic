@@ -76,3 +76,27 @@ class EmailSender:
         post.save(update_fields=['status', 'sent_at'])
         EMAILS_SENT.labels(type='daily_post').inc()
         logger.info(f"Email dia {post.day_number} enviado a {email}")
+
+    def send_trial_expired(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
+        payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={job.user.tenant_id}"
+        html = render_to_string('content_pipeline/email_trial_expired.html', {
+            'brand_dna': brand_dna,
+            'payment_url': payment_url,
+        })
+        name = brand_dna.business_name.strip() if brand_dna.business_name else ''
+        subject = f'⏳ Tu semana gratis de {name} terminó' if name else '⏳ Tu semana gratis terminó'
+        plain = (
+            f'Tu semana gratis de contenido para {name} terminó. '
+            f'Paga para seguir generando contenido: {payment_url}'
+        ) if name else f'Tu semana gratis terminó. Paga para seguir generando contenido: {payment_url}'
+        send_mail(
+            subject,
+            plain,
+            settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[job.email],
+            html_message=html,
+            fail_silently=False,
+        )
+        EMAILS_SENT.labels(type='trial_expired').inc()
+        logger.info(f"Email de trial expirado enviado a {job.email} para job {job.id}")
+
