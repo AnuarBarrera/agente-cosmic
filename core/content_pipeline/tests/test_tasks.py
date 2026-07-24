@@ -28,6 +28,27 @@ def job_with_dna():
     return job
 
 
+@pytest.fixture
+def job_with_dna_and_tenant(job_with_dna):
+    from django.contrib.auth import get_user_model
+    from core.tenant_management.models import TenantModel, Subscription, Plan
+    UserModel = get_user_model()
+    plan, _ = Plan.objects.get_or_create(name='User', defaults={
+        'max_calendars_per_week': 2, 'max_post_regenerations': 2,
+        'max_post_edits': 2, 'price': 0,
+    })
+    user = UserModel.objects.create_user(
+        username='trial@test.com', email='trial@test.com', password='pass1234'
+    )
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    Subscription.objects.create(tenant=tenant, plan=plan)
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+    job_with_dna.user = user
+    job_with_dna.save(update_fields=['user'])
+    return job_with_dna
+
+
 @override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
     GOOGLE_CLOUD_LOCATION='us-central1',
@@ -50,6 +71,58 @@ def test_content_generation_creates_calendar(job_with_dna):
 
     assert ContentCalendar.objects.filter(brand_dna__job=job_with_dna).exists()
     assert ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna).count() == 7
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    DEFAULT_FROM_EMAIL='noreply@test.com',
+)
+def test_content_generation_starts_trial_for_tenant(job_with_dna_and_tenant):
+    from core.tenant_management.models import Subscription
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+
+        from core.content_pipeline.tasks import content_generation_task
+        content_generation_task(str(job_with_dna_and_tenant.id))
+
+    sub = Subscription.objects.get(tenant=job_with_dna_and_tenant.user.tenant)
+    assert sub.status == 'trialing'
+    assert sub.trial_ends_at is not None
+    assert sub.trial_ends_at > timezone.now() + timedelta(days=6)
+    assert sub.trial_ends_at < timezone.now() + timedelta(days=8)
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    DEFAULT_FROM_EMAIL='noreply@test.com',
+)
+def test_content_generation_without_user_does_not_crash(job_with_dna):
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+
+        from core.content_pipeline.tasks import content_generation_task
+        content_generation_task(str(job_with_dna.id))
+
+    job_with_dna.refresh_from_db()
+    assert job_with_dna.status == AnalysisJob.STATUS_DONE
 
 
 @override_settings(

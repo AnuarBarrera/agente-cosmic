@@ -7,6 +7,7 @@ from django.utils import timezone
 MEXICO_TZ = dt_timezone(timedelta(hours=-6))  # UTC-6 sin DST (desde 2023)
 from core.brand_dna.models import AnalysisJob
 from core.content_pipeline.models import ContentCalendar, ContentPost, WeeklyFeedback
+from core.tenant_management.models import Subscription
 from core.content_pipeline.generators.text_generator import TextGenerator
 from core.content_pipeline.generators.image_generator import ImageGenerator
 from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
@@ -55,6 +56,11 @@ def content_generation_task(job_id: str) -> None:
 
         calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
         CALENDARS_CREATED.inc()
+        if job.user and job.user.tenant:
+            Subscription.objects.filter(tenant=job.user.tenant).update(
+                status='trialing',
+                trial_ends_at=timezone.now() + timedelta(days=7),
+            )
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
         now = timezone.now()
         mexico_today = now.astimezone(MEXICO_TZ).date()
