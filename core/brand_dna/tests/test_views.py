@@ -710,3 +710,20 @@ def test_dashboard_manage_payment_method_button_renamed(client, user):
     assert b'Administrar mi suscripci\xc3\xb3n' not in response.content
 
 
+def test_calendar_review_single_image_has_no_zoom_link(client, user, job_with_calendar):
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert b'title="Ver imagen completa"' not in response.content
+
+
+def test_calendar_review_video_keeps_controls(client, user, job_with_calendar):
+    post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
+    post.format = 'reel'
+    post.video_url = 'https://storage.googleapis.com/agente-cosmic-assets/reel.mp4'
+    post.save(update_fields=['format', 'video_url'])
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert b'<video controls' in response.content
+
+
+

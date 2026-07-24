@@ -192,15 +192,11 @@
           <div class="reel-badge">🎬 Reel</div>
         {% elif post.format == 'carousel' and post.image_urls %}
           {% for slide_url in post.image_urls %}
-          <a href="{{ slide_url }}" target="_blank" rel="noopener" title="Slide {{ forloop.counter }}">
-            <img src="{{ slide_url }}" alt="Slide {{ forloop.counter }} del día {{ post.day_number }}" loading="lazy" style="cursor:zoom-in;">
-          </a>
+          <img src="{{ slide_url }}" alt="Slide {{ forloop.counter }} del día {{ post.day_number }}" loading="lazy">
           {% endfor %}
           <div class="carousel-badge">🎠 Carrusel</div>
         {% elif post.image_url %}
-          <a href="{{ post.image_url }}" target="_blank" rel="noopener" title="Ver imagen completa" style="display:block;width:100%;height:100%;">
-            <img src="{{ post.image_url }}" alt="Día {{ post.day_number }}" loading="lazy" style="cursor:zoom-in;">
-          </a>
+          <img src="{{ post.image_url }}" alt="Día {{ post.day_number }}" loading="lazy">
         {% else %}
           📸
         {% endif %}
@@ -389,16 +385,13 @@
         if (data.image_urls && data.image_urls.length) {
           imgContainer.classList.add('carousel-grid');
           imgContainer.innerHTML = data.image_urls.map(function(url, i) {
-            return '<a href="' + url + '" target="_blank" rel="noopener" title="Slide ' + (i + 1) + '">'
-              + '<img src="' + url + '?t=' + t + '" alt="Slide ' + (i + 1) + '" loading="lazy" style="cursor:zoom-in;"></a>';
+            return '<img src="' + url + '?t=' + t + '" alt="Slide ' + (i + 1) + '" loading="lazy">';
           }).join('') + '<div class="carousel-badge">🎠 Carrusel</div>';
         } else {
           imgContainer.classList.remove('carousel-grid');
           const imgEl = imgContainer.querySelector('img');
-          const linkEl = imgContainer.querySelector('a');
           const freshUrl = data.image_url + '?t=' + t;
           if (imgEl) imgEl.src = freshUrl;
-          if (linkEl) linkEl.href = data.image_url;
         }
       }
       document.getElementById('regen-' + postId).style.display = 'none';
