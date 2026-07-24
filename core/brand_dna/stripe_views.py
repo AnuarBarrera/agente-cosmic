@@ -13,6 +13,8 @@ from core.content_pipeline.email_sender import EmailSender
 
 logger = logging.getLogger(__name__)
 
+stripe.api_key = settings.STRIPE_SECRET_KEY
+
 
 def _subscription_for_customer(customer_id):
     if not customer_id:
@@ -58,7 +60,12 @@ def stripe_webhook_view(request):
         customer_id = getattr(subscription_obj, 'customer', None)
         sub = _subscription_for_customer(customer_id)
         if sub:
-            sub.cancel_at_period_end = bool(getattr(subscription_obj, 'cancel_at_period_end', False))
+            # Stripe representa "va a cancelar" de 2 formas segun el flujo: el booleano
+            # cancel_at_period_end, o un timestamp en cancel_at (confirmado en vivo via
+            # Customer Portal real — cancel_at_period_end se quedo en False mientras
+            # cancel_at traia el timestamp real de fin de periodo). Cubrimos ambas.
+            cancel_scheduled = bool(getattr(subscription_obj, 'cancel_at_period_end', False)) or bool(getattr(subscription_obj, 'cancel_at', None))
+            sub.cancel_at_period_end = cancel_scheduled
             sub.save(update_fields=['cancel_at_period_end'])
         else:
             logger.error(f"Webhook de Stripe: no se encontro suscripcion para customer {customer_id} en evento {event['id']}")

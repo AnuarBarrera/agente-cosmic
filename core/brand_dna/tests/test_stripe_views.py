@@ -30,11 +30,13 @@ def _fake_event(event_id, tenant_id, event_type='checkout.session.completed', cu
     }
 
 
-def _fake_subscription_event(event_id, customer_id, cancel_at_period_end=False):
+def _fake_subscription_event(event_id, customer_id, cancel_at_period_end=False, cancel_at=None):
     return {
         'id': event_id,
         'type': 'customer.subscription.updated',
-        'data': {'object': SimpleNamespace(customer=customer_id, cancel_at_period_end=cancel_at_period_end)},
+        'data': {'object': SimpleNamespace(
+            customer=customer_id, cancel_at_period_end=cancel_at_period_end, cancel_at=cancel_at,
+        )},
     }
 
 
@@ -103,6 +105,27 @@ def test_webhook_subscription_updated_syncs_cancel_at_period_end(tenant_with_sub
     c = Client()
     with patch('core.brand_dna.stripe_views.stripe.Webhook.construct_event',
                return_value=_fake_subscription_event('evt_4', 'cus_test1', cancel_at_period_end=True)):
+        response = c.post(
+            '/stripe/webhook/', data=b'{}', content_type='application/json',
+            HTTP_STRIPE_SIGNATURE='t=1,v1=fake',
+        )
+    assert response.status_code == 200
+    sub = Subscription.objects.get(tenant=tenant_with_subscription)
+    assert sub.cancel_at_period_end is True
+    assert sub.status == 'active'
+
+
+@override_settings(STRIPE_WEBHOOK_SECRET='whsec_test123')
+def test_webhook_subscription_updated_syncs_via_cancel_at_timestamp(tenant_with_subscription):
+    # Confirmado en vivo contra el Customer Portal real: al cancelar ahi, Stripe deja
+    # cancel_at_period_end en False pero pone un timestamp real en cancel_at. Sin este
+    # fallback la cancelacion real nunca se hubiera sincronizado.
+    tenant_with_subscription.subscription.stripe_customer_id = 'cus_test1'
+    tenant_with_subscription.subscription.status = 'active'
+    tenant_with_subscription.subscription.save(update_fields=['stripe_customer_id', 'status'])
+    c = Client()
+    with patch('core.brand_dna.stripe_views.stripe.Webhook.construct_event',
+               return_value=_fake_subscription_event('evt_4b', 'cus_test1', cancel_at_period_end=False, cancel_at=1787549561)):
         response = c.post(
             '/stripe/webhook/', data=b'{}', content_type='application/json',
             HTTP_STRIPE_SIGNATURE='t=1,v1=fake',
