@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, auth_views
+from . import views, auth_views, stripe_views
 
 urlpatterns = [
     path('', views.home, name='landing'),
@@ -31,4 +31,5 @@ urlpatterns = [
     path('api/calendar/<uuid:job_id>/feedback/', views.calendar_feedback_api, name='calendar_feedback_api'),
     path('api/brand-dna/<uuid:job_id>/field/', views.brand_dna_field_action_api, name='brand_dna_field_action_api'),
     path('api/calendar/<uuid:job_id>/regenerate/', views.regenerate_calendar_api, name='regenerate_calendar_api'),
+    path('stripe/webhook/', stripe_views.stripe_webhook_view, name='stripe_webhook'),
 ]
