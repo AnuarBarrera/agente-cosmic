@@ -22,7 +22,7 @@ def stripe_webhook_view(request):
 
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
-        tenant_id = session.get('client_reference_id')
+        tenant_id = getattr(session, 'client_reference_id', None)
         updated = Subscription.objects.filter(tenant_id=tenant_id).update(
             status='active', trial_ends_at=None,
         )

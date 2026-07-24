@@ -1,6 +1,7 @@
 import uuid
 import pytest
 import stripe
+from types import SimpleNamespace
 from unittest.mock import patch
 from django.test import Client, override_settings
 from core.tenant_management.models import TenantModel, Subscription, Plan
@@ -20,10 +21,14 @@ def tenant_with_subscription():
 
 
 def _fake_event(event_id, tenant_id):
+    # SimpleNamespace (no .get()) en vez de dict: el stripe.StripeObject real
+    # solo soporta acceso por atributo/__getitem__, NO .get() — un dict aqui
+    # esconde bugs reales (confirmado en vivo: session.get(...) lanzaba
+    # AttributeError contra un stripe.checkout.Session de verdad).
     return {
         'id': event_id,
         'type': 'checkout.session.completed',
-        'data': {'object': {'client_reference_id': str(tenant_id)}},
+        'data': {'object': SimpleNamespace(client_reference_id=str(tenant_id))},
     }
 
 
