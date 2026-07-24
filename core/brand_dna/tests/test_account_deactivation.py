@@ -41,6 +41,50 @@ def test_deactivate_account_sets_inactive(user_with_tenant):
     assert user_with_tenant.tenant.subscription.status == 'canceled'
 
 
+def test_deactivate_account_cancels_real_stripe_subscription(user_with_tenant):
+    from unittest.mock import patch
+    user_with_tenant.tenant.subscription.stripe_subscription_id = 'sub_test1'
+    user_with_tenant.tenant.subscription.status = 'active'
+    user_with_tenant.tenant.subscription.save(update_fields=['stripe_subscription_id', 'status'])
+    c = Client()
+    c.force_login(user_with_tenant)
+    with patch('stripe.Subscription.modify') as mock_modify:
+        response = c.post('/dashboard/delete-account/', {'confirmation': 'ELIMINAR'})
+    assert response.status_code == 302
+    mock_modify.assert_called_once_with('sub_test1', cancel_at_period_end=True)
+
+    user_with_tenant.refresh_from_db()
+    assert user_with_tenant.tenant.subscription.status == 'canceled'
+
+
+def test_deactivate_account_without_stripe_subscription_does_not_call_stripe(user_with_tenant):
+    from unittest.mock import patch
+    c = Client()
+    c.force_login(user_with_tenant)
+    with patch('stripe.Subscription.modify') as mock_modify:
+        response = c.post('/dashboard/delete-account/', {'confirmation': 'ELIMINAR'})
+    assert response.status_code == 302
+    mock_modify.assert_not_called()
+
+
+def test_deactivate_account_survives_stripe_api_error(user_with_tenant):
+    from unittest.mock import patch
+    user_with_tenant.tenant.subscription.stripe_subscription_id = 'sub_test1'
+    user_with_tenant.tenant.subscription.status = 'active'
+    user_with_tenant.tenant.subscription.save(update_fields=['stripe_subscription_id', 'status'])
+    c = Client()
+    c.force_login(user_with_tenant)
+    with patch('stripe.Subscription.modify', side_effect=Exception('Stripe down')):
+        response = c.post('/dashboard/delete-account/', {'confirmation': 'ELIMINAR'})
+    assert response.status_code == 302
+    assert '/auth/login/' in response.url
+
+    user_with_tenant.refresh_from_db()
+    assert user_with_tenant.is_active is False
+    assert user_with_tenant.tenant.subscription.status == 'canceled'
+
+
+
 def test_deactivate_without_confirmation_rejected(user_with_tenant):
     c = Client()
     c.force_login(user_with_tenant)

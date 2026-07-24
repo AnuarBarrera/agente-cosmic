@@ -572,6 +572,12 @@ def deactivate_account_view(request):
         user.tenant.save(update_fields=['status'])
         try:
             sub = user.tenant.subscription
+            if sub.stripe_subscription_id and sub.status not in ('canceled', 'trial_expired'):
+                import stripe
+                try:
+                    stripe.Subscription.modify(sub.stripe_subscription_id, cancel_at_period_end=True)
+                except Exception:
+                    pass
             sub.status = 'canceled'
             sub.save(update_fields=['status'])
         except Exception:
