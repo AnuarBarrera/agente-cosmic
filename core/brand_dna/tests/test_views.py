@@ -7,7 +7,7 @@ from django.test import Client, override_settings
 from django.utils import timezone
 from datetime import timedelta
 from core.brand_dna.models import AnalysisJob, BrandDNA
-from core.content_pipeline.models import ContentCalendar, ContentPost, WeeklyFeedback
+from core.content_pipeline.models import ContentCalendar, ContentPost
 
 pytestmark = pytest.mark.django_db
 
@@ -357,7 +357,6 @@ def job_with_calendar(user):
             image_url='https://example.com/img.jpg', suggested_time='19:00',
             hashtags=[], scheduled_at=timezone.now() + timedelta(days=i),
         )
-    WeeklyFeedback.objects.create(calendar=calendar, week_number=1)
     return job
 
 
@@ -497,43 +496,7 @@ def test_mark_downloaded_sets_timestamp(client, user, job_with_calendar):
     assert post.downloaded_at is not None
 
 
-def test_calendar_feedback_api_no_rating_is_valid(client, user, job_with_calendar):
-    calendar = job_with_calendar.brand_dna.calendar
-    client.force_login(user)
-    with patch('core.content_pipeline.tasks.generate_next_week') as mock_gen:
-        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
-            'comment': 'Estuvo bien',
-            'continue_decision': 'no',
-        })
-    assert response.status_code == 200
-    data = response.json()
-    assert data['continue_decision'] == 'no'
 
-    feedback = calendar.feedback_entries.get(week_number=1)
-    assert feedback.rating is None
-    assert feedback.comment == 'Estuvo bien'
-
-
-def test_calendar_review_exposes_pending_feedback(client, user, job_with_calendar):
-    client.force_login(user)
-    response = client.get(f'/calendar/{job_with_calendar.id}/')
-    assert response.status_code == 200
-    assert response.context['pending_feedback'] is not None
-    assert response.context['pending_feedback'].week_number == 1
-
-
-def test_calendar_review_no_pending_feedback_when_none_exists(client, user, job_with_calendar):
-    calendar = job_with_calendar.brand_dna.calendar
-    calendar.feedback_entries.update(continue_decision=WeeklyFeedback.CONTINUE_NO)
-    client.force_login(user)
-    response = client.get(f'/calendar/{job_with_calendar.id}/')
-    assert response.context['pending_feedback'] is None
-
-
-def test_calendar_review_shows_feedback_banner_when_pending(client, user, job_with_calendar):
-    client.force_login(user)
-    response = client.get(f'/calendar/{job_with_calendar.id}/')
-    assert b'feedback-banner' in response.content
 
 
 def test_calendar_review_shows_reel_upload_tip_for_reel_posts(client, user, job_with_calendar):
@@ -579,213 +542,7 @@ def test_calendar_review_groups_posts_by_week(client, user, job_with_calendar):
     assert len(week_groups[1]['posts']) == 7
 
 
-def test_calendar_feedback_api_no_decision_does_not_generate(client, user, job_with_calendar):
-    calendar = job_with_calendar.brand_dna.calendar
-    client.force_login(user)
-    with patch('core.content_pipeline.tasks.generate_next_week') as mock_gen:
-        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
-            'rating': '3',
-            'comment': 'Estuvo bien',
-            'continue_decision': 'no',
-        })
-    assert response.status_code == 200
-    data = response.json()
-    assert data['continue_decision'] == 'no'
 
-    feedback = calendar.feedback_entries.get(week_number=1)
-    assert feedback.rating == 3
-    assert feedback.comment == 'Estuvo bien'
-    assert feedback.continue_decision == WeeklyFeedback.CONTINUE_NO
-    assert feedback.responded_at is not None
-    mock_gen.assert_not_called()
-
-
-def test_calendar_feedback_api_yes_triggers_generate_next_week(client, user, job_with_calendar):
-    calendar = job_with_calendar.brand_dna.calendar
-    client.force_login(user)
-    with patch('core.brand_dna.views.django_rq') as mock_rq:
-        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
-            'rating': '5',
-            'comment': '',
-            'continue_decision': 'yes',
-        })
-    assert response.status_code == 200
-    data = response.json()
-    assert data['continue_decision'] == 'yes'
-
-    feedback = calendar.feedback_entries.get(week_number=1)
-    assert feedback.continue_decision == WeeklyFeedback.CONTINUE_YES
-    mock_rq.enqueue.assert_called_once()
-    enqueue_args = mock_rq.enqueue.call_args[0]
-    assert enqueue_args[1] == str(calendar.id)
-    assert enqueue_args[2] == 2
-
-    calendar.refresh_from_db()
-    assert calendar.next_week_generating is True
-
-
-def test_calendar_feedback_api_yes_allowed_when_trialing(client, user, job_with_calendar):
-    user.tenant.subscription.status = 'trialing'
-    user.tenant.subscription.trial_ends_at = timezone.now() + timedelta(days=2)
-    user.tenant.subscription.save(update_fields=['status', 'trial_ends_at'])
-    client.force_login(user)
-    with patch('core.brand_dna.views.django_rq') as mock_rq:
-        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
-            'rating': '5',
-            'continue_decision': 'yes',
-        })
-    assert response.status_code == 200
-    data = response.json()
-    assert data['continue_decision'] == 'yes'
-    mock_rq.enqueue.assert_called_once()
-
-
-@override_settings(STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/test123')
-def test_calendar_feedback_api_yes_blocked_when_trial_expired(client, user, job_with_calendar):
-    user.tenant.subscription.status = 'trial_expired'
-    user.tenant.subscription.save(update_fields=['status'])
-    calendar = job_with_calendar.brand_dna.calendar
-    client.force_login(user)
-    with patch('core.brand_dna.views.django_rq') as mock_rq:
-        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
-            'rating': '5',
-            'continue_decision': 'yes',
-        })
-    assert response.status_code == 200
-    data = response.json()
-    assert data['status'] == 'payment_required'
-    assert data['payment_url'] == f'https://buy.stripe.com/test123?client_reference_id={user.tenant_id}'
-    mock_rq.enqueue.assert_not_called()
-
-    feedback = calendar.feedback_entries.get(week_number=1)
-    assert feedback.rating == 5
-    assert feedback.continue_decision == WeeklyFeedback.CONTINUE_PENDING
-    assert feedback.responded_at is None
-    calendar.refresh_from_db()
-    assert calendar.next_week_generating is False
-
-
-@override_settings(STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/test123')
-def test_calendar_feedback_api_yes_blocked_when_canceled(client, user, job_with_calendar):
-    user.tenant.subscription.status = 'canceled'
-    user.tenant.subscription.save(update_fields=['status'])
-    client.force_login(user)
-    with patch('core.brand_dna.views.django_rq') as mock_rq:
-        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
-            'rating': '5',
-            'continue_decision': 'yes',
-        })
-    assert response.status_code == 200
-    data = response.json()
-    assert data['status'] == 'payment_required'
-    mock_rq.enqueue.assert_not_called()
-
-
-def test_calendar_feedback_api_yes_allowed_when_past_due(client, user, job_with_calendar):
-    user.tenant.subscription.status = 'past_due'
-    user.tenant.subscription.save(update_fields=['status'])
-    client.force_login(user)
-    with patch('core.brand_dna.views.django_rq') as mock_rq:
-        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
-            'rating': '5',
-            'continue_decision': 'yes',
-        })
-    assert response.status_code == 200
-    data = response.json()
-    assert data['continue_decision'] == 'yes'
-    mock_rq.enqueue.assert_called_once()
-
-
-def test_calendar_review_shows_banner_again_after_payment_blocked(client, user, job_with_calendar, settings):
-    settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
-    user.tenant.subscription.status = 'trial_expired'
-    user.tenant.subscription.save(update_fields=['status'])
-    client.force_login(user)
-    with patch('core.brand_dna.views.django_rq'):
-        client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
-            'rating': '5',
-            'continue_decision': 'yes',
-        })
-    response = client.get(f'/calendar/{job_with_calendar.id}/')
-    assert response.context['pending_feedback'] is not None
-    assert response.context['pending_feedback'].week_number == 1
-
-
-def test_calendar_feedback_api_yes_without_tenant_does_not_crash(client, django_user_model, job_with_calendar):
-    orphan_job = job_with_calendar
-    orphan_user = orphan_job.user
-    orphan_user.tenant = None
-    orphan_user.is_superuser = True
-    orphan_user.save(update_fields=['tenant', 'is_superuser'])
-    client.force_login(orphan_user)
-    with patch('core.brand_dna.views.django_rq') as mock_rq:
-        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
-            'rating': '5',
-            'continue_decision': 'yes',
-        })
-    assert response.status_code == 200
-    data = response.json()
-    assert data['continue_decision'] == 'yes'
-    mock_rq.enqueue.assert_called_once()
-
-
-def test_calendar_review_feedback_js_handles_payment_required(client, user, job_with_calendar):
-    client.force_login(user)
-    response = client.get(f'/calendar/{job_with_calendar.id}/')
-    assert b"data.status === 'payment_required'" in response.content
-
-
-def test_calendar_feedback_api_requires_ownership(client, django_user_model, job_with_calendar, free_plan):
-    from core.tenant_management.models import TenantModel, Subscription
-    other_user = django_user_model.objects.create_user(
-        username='other@test.com', email='other@test.com', password='pass1234'
-    )
-    t = TenantModel.objects.create(name=other_user.email, status='active')
-    Subscription.objects.create(tenant=t, plan=free_plan)
-    other_user.tenant = t
-    other_user.save(update_fields=['tenant'])
-    client.force_login(other_user)
-    response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
-        'rating': '4',
-        'continue_decision': 'no',
-    })
-    assert response.status_code == 404
-
-
-def test_calendar_feedback_api_invalid_rating_returns_400(client, user, job_with_calendar):
-    calendar = job_with_calendar.brand_dna.calendar
-    client.force_login(user)
-    with patch('core.content_pipeline.tasks.generate_next_week') as mock_gen:
-        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
-            'rating': 'not-a-number',
-            'comment': 'Estuvo bien',
-            'continue_decision': 'no',
-        })
-    assert response.status_code == 400
-    data = response.json()
-    assert 'error' in data
-
-    feedback = calendar.feedback_entries.get(week_number=1)
-    assert feedback.continue_decision == WeeklyFeedback.CONTINUE_PENDING
-    mock_gen.assert_not_called()
-
-
-def test_calendar_feedback_api_invalid_continue_decision_returns_400(client, user, job_with_calendar):
-    calendar = job_with_calendar.brand_dna.calendar
-    client.force_login(user)
-    with patch('core.content_pipeline.tasks.generate_next_week') as mock_gen:
-        response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {
-            'rating': '5',
-            'comment': 'Estuvo bien',
-            'continue_decision': 'maybe',
-        })
-    assert response.status_code == 400
-    data = response.json()
-    assert 'error' in data
-
-    feedback = calendar.feedback_entries.get(week_number=1)
-    assert feedback.continue_decision == WeeklyFeedback.CONTINUE_PENDING
-    mock_gen.assert_not_called()
 
 
 
@@ -867,3 +624,63 @@ def test_dashboard_hides_manage_subscription_button_without_customer_id(client, 
     client.force_login(user)
     response = client.get('/dashboard/')
     assert b'Administrar mi suscripci\xc3\xb3n' not in response.content
+
+
+def test_calendar_review_shows_payment_banner_when_trial_expired(client, user, job_with_calendar, settings):
+    settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
+    user.tenant.subscription.status = 'trial_expired'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert response.context['payment_needed'] is True
+    assert response.context['payment_url'] == f'https://buy.stripe.com/test123?client_reference_id={user.tenant_id}'
+
+
+def test_calendar_review_shows_payment_banner_when_paid_until_passed(client, user, job_with_calendar, settings):
+    settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
+    user.tenant.subscription.status = 'active'
+    user.tenant.subscription.paid_until = timezone.now() - timedelta(hours=1)
+    user.tenant.subscription.save(update_fields=['status', 'paid_until'])
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert response.context['payment_needed'] is True
+
+
+def test_calendar_review_no_payment_banner_when_paid_until_future(client, user, job_with_calendar):
+    user.tenant.subscription.status = 'active'
+    user.tenant.subscription.paid_until = timezone.now() + timedelta(days=10)
+    user.tenant.subscription.save(update_fields=['status', 'paid_until'])
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert response.context['payment_needed'] is False
+
+
+def test_calendar_review_no_payment_banner_when_past_due(client, user, job_with_calendar):
+    user.tenant.subscription.status = 'past_due'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert response.context['payment_needed'] is False
+
+
+def test_calendar_review_shows_early_cta_when_trialing(client, user, job_with_calendar, settings):
+    settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
+    user.tenant.subscription.status = 'trialing'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert response.context['early_cta'] is True
+    assert response.context['payment_needed'] is False
+
+
+def test_calendar_review_no_early_cta_when_active(client, user, job_with_calendar):
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert response.context['early_cta'] is False
+
+
+def test_calendar_review_url_no_longer_exists(client, user, job_with_calendar):
+    client.force_login(user)
+    response = client.post(f'/api/calendar/{job_with_calendar.id}/feedback/', {})
+    assert response.status_code == 404
+

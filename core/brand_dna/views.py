@@ -11,6 +11,7 @@ from google.genai import types
 from PIL import Image
 from core.shared.metrics_utils import track_external_api, record_tokens, vertex_labels
 from django.conf import settings
+from django.utils import timezone
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, FileResponse, HttpResponse, Http404
 from django.shortcuts import render, redirect, get_object_or_404
@@ -238,7 +239,6 @@ def status_api(request, job_id):
 @login_required
 def calendar_review_view(request, job_id):
     from core.brand_dna.rate_limits import get_user_plan
-    from core.content_pipeline.models import WeeklyFeedback
     job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
     brand_dna = getattr(job, 'brand_dna', None)
     calendar = getattr(brand_dna, 'calendar', None) if brand_dna else None
@@ -247,11 +247,15 @@ def calendar_review_view(request, job_id):
     total_regens = sum(p.regen_count for p in posts)
     total_edits = sum(p.edit_count for p in posts)
 
-    pending_feedback = None
-    if calendar:
-        pending_feedback = calendar.feedback_entries.filter(
-            continue_decision=WeeklyFeedback.CONTINUE_PENDING
-        ).order_by('-week_number').first()
+    subscription = getattr(getattr(job.user, 'tenant', None), 'subscription', None)
+    payment_needed = bool(subscription and (
+        subscription.status == 'trial_expired'
+        or (subscription.paid_until and subscription.paid_until <= timezone.now())
+    ))
+    early_cta = bool(subscription and not payment_needed and subscription.status == 'trialing')
+    payment_url = ''
+    if payment_needed or early_cta:
+        payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={job.user.tenant_id}"
 
     from core.brand_dna.rate_limits import can_create_calendar
     can_create, _ = can_create_calendar(request.user)
@@ -284,7 +288,9 @@ def calendar_review_view(request, job_id):
         'total_regens': total_regens,
         'total_edits': total_edits,
         'can_create_calendar': can_create,
-        'pending_feedback': pending_feedback,
+        'payment_needed': payment_needed,
+        'early_cta': early_cta,
+        'payment_url': payment_url,
     })
 
 
@@ -515,55 +521,6 @@ def post_action_api(request, post_id):
 
     return JsonResponse({'error': 'Acción desconocida'}, status=400)
 
-
-@login_required
-@require_POST
-def calendar_feedback_api(request, job_id):
-    from django.utils import timezone
-    from core.content_pipeline.models import WeeklyFeedback
-    from core.content_pipeline.tasks import generate_next_week
-
-    job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
-    calendar = job.brand_dna.calendar
-    feedback = get_object_or_404(
-        WeeklyFeedback, calendar=calendar, continue_decision=WeeklyFeedback.CONTINUE_PENDING
-    )
-
-    rating_raw = request.POST.get('rating', '').strip()
-    rating = None
-    if rating_raw:
-        try:
-            rating = int(rating_raw)
-        except ValueError:
-            return JsonResponse({'error': 'Rating inválido'}, status=400)
-        if not (1 <= rating <= 5):
-            return JsonResponse({'error': 'Rating inválido'}, status=400)
-
-    continue_decision = request.POST.get('continue_decision')
-    if continue_decision not in (WeeklyFeedback.CONTINUE_YES, WeeklyFeedback.CONTINUE_NO):
-        return JsonResponse({'error': 'Decisión inválida'}, status=400)
-
-    feedback.rating = rating
-    feedback.comment = request.POST.get('comment', '')
-
-    if continue_decision == WeeklyFeedback.CONTINUE_YES:
-        subscription = getattr(getattr(job.user, 'tenant', None), 'subscription', None)
-        if subscription and subscription.status in ('trial_expired', 'canceled'):
-            feedback.save(update_fields=['rating', 'comment'])
-            payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={job.user.tenant_id}"
-            return JsonResponse({'status': 'payment_required', 'payment_url': payment_url})
-
-    feedback.continue_decision = continue_decision
-    feedback.responded_at = timezone.now()
-    feedback.save(update_fields=['rating', 'comment', 'continue_decision', 'responded_at'])
-
-    if feedback.continue_decision == WeeklyFeedback.CONTINUE_YES:
-        next_week = feedback.week_number + 1
-        calendar.next_week_generating = True
-        calendar.save(update_fields=['next_week_generating'])
-        django_rq.enqueue(generate_next_week, str(calendar.id), next_week, job_timeout=2400)
-
-    return JsonResponse({'status': 'ok', 'continue_decision': feedback.continue_decision})
 
 
 def _regenerate_caption(post, feedback: str) -> str:
