@@ -123,4 +123,28 @@ class EmailSender:
         EMAILS_SENT.labels(type='payment_failed').inc()
         logger.info(f"Email de cobro fallido enviado a {job.email} para job {job.id}")
 
+    def send_month_expired(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
+        payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={job.user.tenant_id}"
+        html = render_to_string('content_pipeline/email_month_expired.html', {
+            'brand_dna': brand_dna,
+            'payment_url': payment_url,
+        })
+        name = brand_dna.business_name.strip() if brand_dna.business_name else ''
+        subject = f'⏳ Ya pasó un mes — {name}' if name else '⏳ Ya pasó un mes desde tu última generación'
+        plain = (
+            f'Ya pasó un mes desde tu última generación de contenido para {name}. '
+            f'Genera un mes nuevo ahora: {payment_url}'
+        ) if name else f'Ya pasó un mes desde tu última generación de contenido. Genera un mes nuevo ahora: {payment_url}'
+        send_mail(
+            subject,
+            plain,
+            settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[job.email],
+            html_message=html,
+            fail_silently=False,
+        )
+        EMAILS_SENT.labels(type='month_expired').inc()
+        logger.info(f"Email de mes vencido enviado a {job.email} para job {job.id}")
+
+
 

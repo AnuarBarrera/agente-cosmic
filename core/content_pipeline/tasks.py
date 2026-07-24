@@ -314,20 +314,27 @@ def generate_next_month(calendar_id: str) -> None:
 
 
 def expire_stale_trials_task() -> None:
-    expired = Subscription.objects.filter(
-        status='trialing', trial_ends_at__lte=timezone.now()
+    now = timezone.now()
+    expired_trials = Subscription.objects.filter(
+        status='trialing', trial_ends_at__lte=now
     ).select_related('tenant')
-    for sub in expired:
+    expired_months = Subscription.objects.filter(
+        status='active', paid_until__lte=now
+    ).select_related('tenant')
+
+    for sub, email_method in [(s, 'send_trial_expired') for s in expired_trials] + \
+                              [(s, 'send_month_expired') for s in expired_months]:
         job = AnalysisJob.objects.filter(
             user__tenant=sub.tenant, generation_mode=AnalysisJob.MODE_FULL,
         ).order_by('-created_at').first()
         if job and hasattr(job, 'brand_dna'):
             try:
-                EmailSender().send_trial_expired(job=job, brand_dna=job.brand_dna)
+                getattr(EmailSender(), email_method)(job=job, brand_dna=job.brand_dna)
             except Exception as email_err:
-                logger.error(f"Email de trial expirado falló para tenant {sub.tenant_id} (no fatal): {email_err}")
+                logger.error(f"Email de vencimiento falló para tenant {sub.tenant_id} (no fatal): {email_err}")
         else:
-            logger.warning(f"No se encontró AnalysisJob completo para tenant {sub.tenant_id} — trial expira sin correo")
+            logger.warning(f"No se encontró AnalysisJob completo para tenant {sub.tenant_id} — vence sin correo")
         sub.status = 'trial_expired'
         sub.save(update_fields=['status'])
+
 

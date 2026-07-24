@@ -661,4 +661,38 @@ def test_expire_stale_trials_is_idempotent(trialing_job_with_tenant):
     assert MockEmail.return_value.send_trial_expired.call_count == 1
 
 
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/test123')
+def test_expire_stale_trials_expires_lapsed_paid_month(job_with_dna_and_tenant):
+    from core.tenant_management.models import Subscription
+    from core.content_pipeline.models import ContentCalendar
+    Subscription.objects.filter(tenant=job_with_dna_and_tenant.user.tenant).update(
+        status='active', paid_until=timezone.now() - timedelta(hours=1),
+    )
+    ContentCalendar.objects.create(brand_dna=job_with_dna_and_tenant.brand_dna)
+
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import expire_stale_trials_task
+        expire_stale_trials_task()
+
+    MockEmail.return_value.send_month_expired.assert_called_once()
+    MockEmail.return_value.send_trial_expired.assert_not_called()
+    sub = Subscription.objects.get(tenant=job_with_dna_and_tenant.user.tenant)
+    assert sub.status == 'trial_expired'
+
+
+def test_expire_stale_trials_ignores_active_with_future_paid_until(job_with_dna_and_tenant):
+    from core.tenant_management.models import Subscription
+    Subscription.objects.filter(tenant=job_with_dna_and_tenant.user.tenant).update(
+        status='active', paid_until=timezone.now() + timedelta(days=10),
+    )
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import expire_stale_trials_task
+        expire_stale_trials_task()
+
+    MockEmail.return_value.send_month_expired.assert_not_called()
+    sub = Subscription.objects.get(tenant=job_with_dna_and_tenant.user.tenant)
+    assert sub.status == 'active'
+
+
+
 
