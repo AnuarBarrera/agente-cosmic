@@ -9,7 +9,6 @@ from django_otp.plugins.otp_totp.admin import TOTPDeviceAdmin as OTPTOTPDeviceAd
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from core.brand_dna.models import AnalysisJob
-from core.content_pipeline.models import WeeklyFeedback
 from core.tenant_management.models import (
     InvitationCode, Plan, SecurityEvent, Subscription, User,
 )
@@ -123,23 +122,6 @@ class SecurityEventAdmin(admin.ModelAdmin):
         return False
 
 
-class WeeklyFeedbackAdmin(admin.ModelAdmin):
-    list_display = ('get_business_name', 'week_number', 'rating', 'continue_decision', 'responded_at')
-    list_filter = ('continue_decision', 'rating', 'week_number')
-    search_fields = ('comment', 'calendar__brand_dna__business_name')
-    readonly_fields = ('id', 'calendar', 'week_number', 'rating', 'comment', 'continue_decision', 'created_at', 'responded_at')
-
-    def get_business_name(self, obj):
-        return obj.calendar.brand_dna.business_name
-    get_business_name.short_description = 'Negocio'
-
-    def has_add_permission(self, request):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
-
 class SubscriptionAdmin(admin.ModelAdmin):
     list_display = ('tenant', 'plan', 'status', 'trial_ends_at', 'cancel_at_period_end', 'stripe_customer_id')
     list_filter = ('status', 'plan')
@@ -172,7 +154,6 @@ cosmic_admin.register(User, UserAdmin)
 cosmic_admin.register(InvitationCode, InvitationCodeAdmin)
 cosmic_admin.register(Plan, PlanAdmin)
 cosmic_admin.register(AnalysisJob, AnalysisJobAdmin)
-cosmic_admin.register(WeeklyFeedback, WeeklyFeedbackAdmin)
 cosmic_admin.register(Subscription, SubscriptionAdmin)
 cosmic_admin.register(SecurityEvent, SecurityEventAdmin)
 cosmic_admin.register(TOTPDevice, TOTPDeviceAdmin)
