@@ -60,7 +60,7 @@ def content_generation_task(job_id: str) -> None:
         calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
         CALENDARS_CREATED.inc()
         if job.user and job.user.tenant:
-            Subscription.objects.filter(tenant=job.user.tenant).update(
+            Subscription.objects.filter(tenant=job.user.tenant, plan__name='User').update(
                 status='trialing',
                 trial_ends_at=timezone.now() + timedelta(days=7),
             )

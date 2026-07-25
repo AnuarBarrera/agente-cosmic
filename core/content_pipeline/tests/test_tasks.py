@@ -121,6 +121,49 @@ def test_content_generation_starts_trial_for_tenant(job_with_dna_and_tenant):
     GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
     DEFAULT_FROM_EMAIL='noreply@test.com',
 )
+def test_content_generation_does_not_start_trial_for_tester_plan(job_with_dna):
+    from django.contrib.auth import get_user_model
+    from core.tenant_management.models import TenantModel, Subscription, Plan
+    UserModel = get_user_model()
+    tester_plan, _ = Plan.objects.get_or_create(name='Tester', defaults={
+        'max_calendars_per_week': 999, 'max_post_regenerations': 999,
+        'max_post_edits': 999, 'price': 0,
+    })
+    user = UserModel.objects.create_user(
+        username='tester@test.com', email='tester@test.com', password='pass1234'
+    )
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    Subscription.objects.create(tenant=tenant, plan=tester_plan, status='active')
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+    job_with_dna.user = user
+    job_with_dna.save(update_fields=['user'])
+
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+
+        from core.content_pipeline.tasks import content_generation_task
+        content_generation_task(str(job_with_dna.id))
+
+    sub = Subscription.objects.get(tenant=tenant)
+    assert sub.status == 'active'
+    assert sub.trial_ends_at is None
+
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    DEFAULT_FROM_EMAIL='noreply@test.com',
+)
 def test_content_generation_without_user_does_not_crash(job_with_dna):
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
