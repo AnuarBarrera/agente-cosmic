@@ -507,21 +507,13 @@ def test_backfill_image_task_skips_deleted_calendar(calendar_with_dna):
     MockImage.assert_not_called()
 
 
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
-def test_generate_next_month_creates_28_posts(job_with_dna):
+def test_generate_next_month_creates_28_posts_without_images(job_with_dna):
     from core.content_pipeline.tasks import content_generation_task, generate_next_month
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
          patch('core.content_pipeline.tasks.EmailSender'), \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+         patch('core.content_pipeline.tasks.schedule_daily_emails'), \
+         patch('core.content_pipeline.tasks._enqueue_week_images') as mock_enqueue_week:
         MockText.return_value.generate.return_value = _MOCK_POSTS
         MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
         content_generation_task(str(job_with_dna.id))
@@ -534,44 +526,14 @@ def test_generate_next_month_creates_28_posts(job_with_dna):
     day_numbers = list(posts.values_list('day_number', flat=True))
     assert day_numbers == list(range(1, 36))
     assert MockText.return_value.generate.call_count == 5  # 1 del trial + 4 del mes
+    new_posts = posts.filter(day_number__gte=8)
+    assert all(p.image_url == '' for p in new_posts)
+    assert all(p.image_urls == [] for p in new_posts)
+    assert all(p.video_url == '' for p in new_posts)
+    mock_enqueue_week.assert_called_once_with(str(calendar.id), week_index=0)
 
 
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
-def test_generate_next_month_sends_month_ready_email(job_with_dna):
-    from core.content_pipeline.tasks import content_generation_task, generate_next_month
-    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.EmailSender') as MockEmail, \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
-        MockText.return_value.generate.return_value = _MOCK_POSTS
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
-        content_generation_task(str(job_with_dna.id))
-        calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
-        MockEmail.reset_mock()
-
-        generate_next_month(str(calendar.id))
-
-    MockEmail.return_value.send_month_ready.assert_called_once()
-
-
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
-def test_generate_next_month_resets_flag_even_on_failure(job_with_dna):
+def test_generate_next_month_resets_flag_on_text_failure(job_with_dna):
     from core.content_pipeline.tasks import content_generation_task, generate_next_month
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
@@ -589,6 +551,27 @@ def test_generate_next_month_resets_flag_even_on_failure(job_with_dna):
 
     calendar.refresh_from_db()
     assert calendar.next_week_generating is False
+
+
+def test_generate_next_month_keeps_flag_true_on_success(job_with_dna):
+    from core.content_pipeline.tasks import content_generation_task, generate_next_month
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'), \
+         patch('core.content_pipeline.tasks._enqueue_week_images'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+        content_generation_task(str(job_with_dna.id))
+        calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
+        calendar.next_week_generating = True
+        calendar.save(update_fields=['next_week_generating'])
+
+        generate_next_month(str(calendar.id))
+
+    calendar.refresh_from_db()
+    assert calendar.next_week_generating is True
+
 
 
 @override_settings(

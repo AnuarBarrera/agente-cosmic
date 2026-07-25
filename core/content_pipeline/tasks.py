@@ -301,7 +301,6 @@ def _week_closing_task(calendar_id: str, week_index: int) -> None:
 def generate_next_month(calendar_id: str) -> None:
     calendar = ContentCalendar.objects.get(id=calendar_id)
     brand_dna = calendar.brand_dna
-    job_id = str(brand_dna.job.id)
     try:
         now = timezone.now()
         mexico_today = now.astimezone(MEXICO_TZ).date()
@@ -314,10 +313,6 @@ def generate_next_month(calendar_id: str) -> None:
             base_date = mexico_today
 
         scheduled_dates = smart_schedule_dates(brand_dna, base_date=base_date, count=28)
-
-        image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
-        reel_script_gen = ReelScriptGenerator()
-        reel_gen = ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
         text_gen = TextGenerator()
 
         for batch in range(4):
@@ -325,28 +320,13 @@ def generate_next_month(calendar_id: str) -> None:
             for i, post_data in enumerate(posts_data, start=1):
                 day_number = base_day + (batch * 7) + i
                 scheduled = scheduled_dates[batch * 7 + i - 1]
-                image_url, image_urls, video_url = _generate_post_media(
-                    image_gen, reel_script_gen, reel_gen,
-                    fmt=post_data.get('format', ContentPost.FORMAT_SINGLE),
-                    filename=f"{job_id}-day{day_number}",
-                    caption=post_data['caption'],
-                    colors=brand_dna.primary_colors,
-                    tone=brand_dna.tone,
-                    brand_name=brand_dna.business_name,
-                    keywords=brand_dna.keywords,
-                    description=brand_dna.description,
-                    audience=brand_dna.audience,
-                    business_url=brand_dna.business_url,
-                    brand_dna=brand_dna,
-                    post_data=post_data,
-                )
                 ContentPost.objects.create(
                     calendar=calendar,
                     day_number=day_number,
                     caption=post_data['caption'],
-                    image_url=image_url,
-                    image_urls=image_urls,
-                    video_url=video_url,
+                    image_url='',
+                    image_urls=[],
+                    video_url='',
                     format=post_data.get('format', ContentPost.FORMAT_SINGLE),
                     suggested_time=scheduled.astimezone(MEXICO_TZ).time(),
                     hashtags=post_data.get('hashtags', []),
@@ -354,14 +334,9 @@ def generate_next_month(calendar_id: str) -> None:
                 )
 
         schedule_daily_emails(calendar)
-
-        try:
-            EmailSender().send_month_ready(job=brand_dna.job, brand_dna=brand_dna)
-        except Exception as email_err:
-            logger.error(f"Email de mes listo falló para calendar {calendar_id} (no fatal): {email_err}")
+        _enqueue_week_images(calendar_id, week_index=0)
     except Exception as e:
         logger.error(f"generate_next_month error para calendar {calendar_id}: {e}")
-    finally:
         calendar.next_week_generating = False
         calendar.save(update_fields=['next_week_generating'])
 
