@@ -264,20 +264,47 @@ def calendar_review_view(request, job_id):
     can_create, _ = can_create_calendar(request.user)
 
     week_groups = []
+    month_groups = []
     if posts:
         posts_by_week = {}
         for p in posts:
             week_num = ((p.day_number - 1) // 7) + 1
             posts_by_week.setdefault(week_num, []).append(p)
-        current_week = max(posts_by_week)
-        for week_num in sorted(posts_by_week, reverse=True):
+
+        now = timezone.now()
+        week_end_dates = {w: max(p.scheduled_at for p in ps) for w, ps in posts_by_week.items()}
+        upcoming_weeks = [w for w, end in week_end_dates.items() if end >= now]
+        current_week = min(upcoming_weeks) if upcoming_weeks else max(posts_by_week)
+
+        def _week_group_dict(week_num):
             week_posts = posts_by_week[week_num]
-            week_groups.append({
+            return {
                 'week_number': week_num,
                 'posts': week_posts,
                 'is_current': week_num == current_week,
                 'start_iso': min(p.scheduled_at for p in week_posts).isoformat(),
                 'end_iso': max(p.scheduled_at for p in week_posts).isoformat(),
+            }
+
+        individual_weeks = sorted(w for w in posts_by_week if w < 8)
+        week_groups = [_week_group_dict(w) for w in individual_weeks]
+
+        grouped_weeks = sorted(w for w in posts_by_week if w >= 8)
+        month_buckets = {}
+        for week_num in grouped_weeks:
+            month_index = (week_num - 8) // 4
+            month_buckets.setdefault(month_index, []).append(week_num)
+
+        for month_index in sorted(month_buckets):
+            weeks_in_month = sorted(month_buckets[month_index])
+            month_week_groups = [_week_group_dict(w) for w in weeks_in_month]
+            month_posts = [p for w in weeks_in_month for p in posts_by_week[w]]
+            month_groups.append({
+                'month_label': f"Mes {month_index + 1}",
+                'weeks': month_week_groups,
+                'start_iso': min(p.scheduled_at for p in month_posts).isoformat(),
+                'end_iso': max(p.scheduled_at for p in month_posts).isoformat(),
+                'is_current': any(w['is_current'] for w in month_week_groups),
             })
 
     return render(request, 'brand_dna/calendar_review.html', {
@@ -286,6 +313,7 @@ def calendar_review_view(request, job_id):
         'calendar': calendar,
         'posts': posts,
         'week_groups': week_groups,
+        'month_groups': month_groups,
         'max_regenerations': plan.max_post_regenerations,
         'max_edits': plan.max_post_edits,
         'total_regens': total_regens,

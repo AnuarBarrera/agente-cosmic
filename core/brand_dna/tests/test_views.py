@@ -523,7 +523,7 @@ def test_calendar_review_omits_reel_upload_tip_when_no_reel_posts(client, user, 
     assert 'no lo subas como publicación normal del feed' not in response.content.decode('utf-8')
 
 
-def test_calendar_review_groups_posts_by_week(client, user, job_with_calendar):
+def test_calendar_review_orders_weeks_ascending_by_date(client, user, job_with_calendar):
     calendar = job_with_calendar.brand_dna.calendar
     for i in range(8, 15):
         ContentPost.objects.create(
@@ -535,11 +535,64 @@ def test_calendar_review_groups_posts_by_week(client, user, job_with_calendar):
     response = client.get(f'/calendar/{job_with_calendar.id}/')
 
     week_groups = response.context['week_groups']
-    assert [w['week_number'] for w in week_groups] == [2, 1]
+    # job_with_calendar programa los dias 1-7 en el futuro (now + timedelta(days=i)),
+    # igual que los dias 8-14 agregados aqui -- todas las semanas siguen "vigentes"
+    # (su fecha de fin no ha pasado), asi que la semana 1 (la mas antigua/cercana)
+    # debe ser la actual, y el orden debe ser ascendente [1, 2], no [2, 1].
+    assert [w['week_number'] for w in week_groups] == [1, 2]
     assert week_groups[0]['is_current'] is True
     assert week_groups[1]['is_current'] is False
     assert len(week_groups[0]['posts']) == 7
     assert len(week_groups[1]['posts']) == 7
+    assert response.context['month_groups'] == []
+
+
+def test_calendar_review_marks_current_week_by_todays_date_not_latest_generated(client, user, job_with_calendar):
+    """La semana 1 de job_with_calendar ya paso (fechas en el pasado); la semana 2
+    (agregada aqui) sigue vigente. 'Actual' debe ser la 2 -- la primera semana cuyo
+    fin todavia no llego -- no la semana con el numero mas alto por definicion."""
+    calendar = job_with_calendar.brand_dna.calendar
+    for p in calendar.posts.filter(day_number__lte=7):
+        p.scheduled_at = timezone.now() - timedelta(days=10 - p.day_number)
+        p.save(update_fields=['scheduled_at'])
+    for i in range(8, 15):
+        ContentPost.objects.create(
+            calendar=calendar, day_number=i, caption=f'Post {i}',
+            image_url='https://example.com/img.jpg', suggested_time='19:00',
+            hashtags=[], scheduled_at=timezone.now() + timedelta(days=i - 7),
+        )
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+
+    week_groups = response.context['week_groups']
+    assert [w['week_number'] for w in week_groups] == [1, 2]
+    assert week_groups[0]['is_current'] is False
+    assert week_groups[1]['is_current'] is True
+
+
+def test_calendar_review_groups_week_8_plus_into_month_accordion(client, user, job_with_calendar):
+    calendar = job_with_calendar.brand_dna.calendar
+    # Semanas 2-11 (dias 8-77) -- suficientes para llenar el "Mes 1" (semanas 8-11)
+    # completo y confirmar que se agrupan juntas, separadas de las semanas 1-7 sueltas.
+    for i in range(8, 78):
+        ContentPost.objects.create(
+            calendar=calendar, day_number=i, caption=f'Post {i}',
+            image_url='https://example.com/img.jpg', suggested_time='19:00',
+            hashtags=[], scheduled_at=timezone.now() + timedelta(days=i),
+        )
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+
+    week_groups = response.context['week_groups']
+    assert [w['week_number'] for w in week_groups] == [1, 2, 3, 4, 5, 6, 7]
+
+    month_groups = response.context['month_groups']
+    assert len(month_groups) == 1
+    assert month_groups[0]['month_label'] == 'Mes 1'
+    assert [w['week_number'] for w in month_groups[0]['weeks']] == [8, 9, 10, 11]
+    # La semana actual (la 1, mas antigua vigente) no esta en este mes.
+    assert month_groups[0]['is_current'] is False
+
 
 
 
