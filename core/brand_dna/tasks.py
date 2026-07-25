@@ -65,11 +65,14 @@ def analyze_brand_task(job_id: str) -> None:
         ANALYSIS_JOBS_TOTAL.labels(status='completed').inc()
 
         from core.content_pipeline.tasks import content_generation_task, generate_sample_task
-        # Genera 7 imagenes con reintentos de QC (o 1 sola pieza en modo
-        # muestra) — el timeout global (360s) se queda corto. 25 min da
-        # margen amplio incluso con reintentos en varios dias.
-        task = content_generation_task if job.generation_mode == AnalysisJob.MODE_FULL else generate_sample_task
-        django_rq.enqueue(task, str(job_id), job_timeout=2400)
+        if job.generation_mode == AnalysisJob.MODE_FULL:
+            # content_generation_task ahora solo genera texto (rápido) y encadena
+            # la generación de imagen/reel en jobs paralelos — ver
+            # docs/superpowers/specs/2026-07-25-trial-week-chunking-design.md
+            django_rq.enqueue(content_generation_task, str(job_id), job_timeout=300)
+        else:
+            # generate_sample_task sigue siendo monolítico (1 sola pieza, prospección)
+            django_rq.enqueue(generate_sample_task, str(job_id), job_timeout=2400)
 
     except Exception as e:
         ANALYSIS_DURATION.observe(time.monotonic() - start)

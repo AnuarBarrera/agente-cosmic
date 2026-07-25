@@ -96,6 +96,7 @@ def test_task_enqueues_content_generation_for_full_mode(pending_job):
 
     from core.content_pipeline.tasks import content_generation_task
     assert mock_rq.enqueue.call_args.args[0] is content_generation_task
+    assert mock_rq.enqueue.call_args.kwargs['job_timeout'] == 300
 
 
 @override_settings(
@@ -122,6 +123,7 @@ def test_task_enqueues_sample_generation_for_sample_mode(pending_job):
 
     from core.content_pipeline.tasks import generate_sample_task
     assert mock_rq.enqueue.call_args.args[0] is generate_sample_task
+    assert mock_rq.enqueue.call_args.kwargs['job_timeout'] == 2400
 
 
 @override_settings(
