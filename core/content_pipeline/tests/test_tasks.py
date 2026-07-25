@@ -1,5 +1,6 @@
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+from rq.job import Job, Dependency
 from django.test import override_settings
 from django.utils import timezone
 from datetime import timedelta
@@ -714,6 +715,136 @@ def test_send_daily_email_task_sends_when_not_downloaded(calendar_with_dna):
     mock_send.assert_called_once()
     post.refresh_from_db()
     assert post.status == ContentPost.STATUS_SENT
+
+
+def _make_calendar_with_month(job_with_dna, reel_day_number=None):
+    """Crea un calendar con 7 posts de trial + 28 del mes, todos sin imagen (image_url='')."""
+    from core.content_pipeline.models import ContentCalendar, ContentPost
+    calendar = ContentCalendar.objects.create(brand_dna=job_with_dna.brand_dna)
+    for day in range(1, 36):
+        fmt = ContentPost.FORMAT_REEL if day == reel_day_number else ContentPost.FORMAT_SINGLE
+        ContentPost.objects.create(
+            calendar=calendar, day_number=day, caption=f'Post {day}',
+            image_url='', image_urls=[], video_url='', format=fmt,
+            suggested_time='19:00', hashtags=[],
+            scheduled_at=timezone.now() + timedelta(days=day),
+        )
+    return calendar
+
+
+def test_enqueue_week_images_enqueues_7_jobs_plus_closing(job_with_dna):
+    from core.content_pipeline.tasks import _enqueue_week_images
+    calendar = _make_calendar_with_month(job_with_dna)
+    with patch('core.content_pipeline.tasks.django_rq') as mock_rq:
+        mock_rq.enqueue.side_effect = lambda *a, **kw: MagicMock(spec=Job)
+        _enqueue_week_images(str(calendar.id), week_index=0)
+    assert mock_rq.enqueue.call_count == 8  # 7 backfill_image_task + 1 _week_closing_task
+    closing_call = mock_rq.enqueue.call_args_list[-1]
+    assert closing_call.kwargs['job_timeout'] == 120
+    dependency = closing_call.kwargs['depends_on']
+    assert isinstance(dependency, Dependency)
+    assert len(dependency.dependencies) == 7
+    assert dependency.allow_failure is True
+
+
+def test_enqueue_week_images_uses_longer_timeout_for_reel(job_with_dna):
+    from core.content_pipeline.tasks import _enqueue_week_images
+    calendar = _make_calendar_with_month(job_with_dna, reel_day_number=8)
+    with patch('core.content_pipeline.tasks.django_rq') as mock_rq:
+        mock_rq.enqueue.side_effect = lambda *a, **kw: MagicMock(spec=Job)
+        _enqueue_week_images(str(calendar.id), week_index=0)
+    backfill_calls = mock_rq.enqueue.call_args_list[:7]
+    timeouts_by_post_id = {call.args[1]: call.kwargs['job_timeout'] for call in backfill_calls}
+    reel_post = calendar.posts.get(day_number=8)
+    single_post = calendar.posts.get(day_number=9)
+    assert timeouts_by_post_id[str(reel_post.id)] == 600
+    assert timeouts_by_post_id[str(single_post.id)] == 300
+
+
+def test_enqueue_week_images_selects_correct_day_range_for_week_index(job_with_dna):
+    from core.content_pipeline.tasks import _enqueue_week_images
+    calendar = _make_calendar_with_month(job_with_dna)
+    with patch('core.content_pipeline.tasks.django_rq') as mock_rq:
+        mock_rq.enqueue.side_effect = lambda *a, **kw: MagicMock(spec=Job)
+        _enqueue_week_images(str(calendar.id), week_index=2)  # dias 22-28
+    backfill_post_ids = {call.args[1] for call in mock_rq.enqueue.call_args_list[:7]}
+    expected_ids = {str(p.id) for p in calendar.posts.filter(day_number__gte=22, day_number__lte=28)}
+    assert backfill_post_ids == expected_ids
+
+
+def test_week_closing_task_week_0_sends_week_ready_and_advances(job_with_dna):
+    from core.content_pipeline.tasks import _week_closing_task
+    calendar = _make_calendar_with_month(job_with_dna)
+    calendar.next_week_generating = True
+    calendar.save(update_fields=['next_week_generating'])
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail, \
+         patch('core.content_pipeline.tasks._enqueue_week_images') as mock_enqueue:
+        _week_closing_task(str(calendar.id), week_index=0)
+    MockEmail.return_value.send_week_ready.assert_called_once()
+    MockEmail.return_value.send_month_ready.assert_not_called()
+    mock_enqueue.assert_called_once_with(str(calendar.id), 1)
+    calendar.refresh_from_db()
+    assert calendar.next_week_generating is True
+
+
+def test_week_closing_task_middle_weeks_silent(job_with_dna):
+    from core.content_pipeline.tasks import _week_closing_task
+    calendar = _make_calendar_with_month(job_with_dna)
+    calendar.next_week_generating = True
+    calendar.save(update_fields=['next_week_generating'])
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail, \
+         patch('core.content_pipeline.tasks._enqueue_week_images') as mock_enqueue:
+        _week_closing_task(str(calendar.id), week_index=1)
+    MockEmail.return_value.send_week_ready.assert_not_called()
+    MockEmail.return_value.send_month_ready.assert_not_called()
+    mock_enqueue.assert_called_once_with(str(calendar.id), 2)
+    calendar.refresh_from_db()
+    assert calendar.next_week_generating is True
+
+
+def test_week_closing_task_week_3_sends_month_ready_and_resets_flag(job_with_dna):
+    from core.content_pipeline.tasks import _week_closing_task
+    calendar = _make_calendar_with_month(job_with_dna)
+    calendar.next_week_generating = True
+    calendar.save(update_fields=['next_week_generating'])
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail, \
+         patch('core.content_pipeline.tasks._enqueue_week_images') as mock_enqueue:
+        _week_closing_task(str(calendar.id), week_index=3)
+    MockEmail.return_value.send_month_ready.assert_called_once()
+    MockEmail.return_value.send_week_ready.assert_not_called()
+    mock_enqueue.assert_not_called()
+    calendar.refresh_from_db()
+    assert calendar.next_week_generating is False
+
+
+def test_week_closing_task_advances_despite_partial_failure_is_implicit_in_dependency(job_with_dna):
+    """No hay logica propia de _week_closing_task para fallos parciales — RQ ya
+    dispara el job aunque algun dependiente haya fallado (allow_failure=True, probado
+    en test_enqueue_week_images_enqueues_7_jobs_plus_closing). Este test solo confirma
+    que _week_closing_task no revisa el estado de los 7 posts antes de avanzar."""
+    from core.content_pipeline.tasks import _week_closing_task
+    calendar = _make_calendar_with_month(job_with_dna)
+    calendar.next_week_generating = True
+    calendar.save(update_fields=['next_week_generating'])
+    # Ningun post de esta semana tiene imagen (todos image_url='') — si _week_closing_task
+    # revisara el estado, se bloquearia. Debe avanzar de todos modos.
+    with patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks._enqueue_week_images') as mock_enqueue:
+        _week_closing_task(str(calendar.id), week_index=0)
+    mock_enqueue.assert_called_once_with(str(calendar.id), 1)
+
+
+def test_week_closing_task_resets_flag_on_internal_error(job_with_dna):
+    from core.content_pipeline.tasks import _week_closing_task
+    calendar = _make_calendar_with_month(job_with_dna)
+    calendar.next_week_generating = True
+    calendar.save(update_fields=['next_week_generating'])
+    with patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks._enqueue_week_images', side_effect=Exception('redis down')):
+        _week_closing_task(str(calendar.id), week_index=0)
+    calendar.refresh_from_db()
+    assert calendar.next_week_generating is False
+
 
 
 

@@ -3,6 +3,9 @@ import time
 from datetime import datetime as dt_datetime, timedelta, timezone as dt_timezone
 from django.conf import settings
 from django.utils import timezone
+import django_rq
+from rq import Retry
+from rq.job import Dependency
 
 MEXICO_TZ = dt_timezone(timedelta(hours=-6))  # UTC-6 sin DST (desde 2023)
 from core.brand_dna.models import AnalysisJob
@@ -245,6 +248,54 @@ def send_daily_email_task(post_id: str) -> None:
         _generate_missing_image(post)
     EmailSender().send_daily(post=post)
 
+
+def _enqueue_week_images(calendar_id: str, week_index: int) -> None:
+    calendar = ContentCalendar.objects.get(id=calendar_id)
+    base_day = calendar.posts.count() - 28
+    week_start = base_day + (week_index * 7) + 1
+    week_end = week_start + 6
+    week_posts = list(
+        calendar.posts.filter(day_number__gte=week_start, day_number__lte=week_end).order_by('day_number')
+    )
+    jobs = []
+    for post in week_posts:
+        timeout = 600 if post.format == ContentPost.FORMAT_REEL else 300
+        job = django_rq.enqueue(
+            backfill_image_task, str(post.id),
+            job_timeout=timeout,
+            retry=Retry(max=3, interval=[10, 20, 40]),
+        )
+        jobs.append(job)
+    django_rq.enqueue(
+        _week_closing_task, calendar_id, week_index,
+        job_timeout=120,
+        retry=Retry(max=2, interval=[10, 30]),
+        depends_on=Dependency(jobs=jobs, allow_failure=True),
+    )
+
+
+def _week_closing_task(calendar_id: str, week_index: int) -> None:
+    calendar = ContentCalendar.objects.get(id=calendar_id)
+    brand_dna = calendar.brand_dna
+    try:
+        if week_index == 0:
+            try:
+                EmailSender().send_week_ready(job=brand_dna.job, brand_dna=brand_dna)
+            except Exception as email_err:
+                logger.error(f"Email de semana 1 lista falló para calendar {calendar_id} (no fatal): {email_err}")
+        if week_index < 3:
+            _enqueue_week_images(calendar_id, week_index + 1)
+        else:
+            try:
+                EmailSender().send_month_ready(job=brand_dna.job, brand_dna=brand_dna)
+            except Exception as email_err:
+                logger.error(f"Email de mes listo falló para calendar {calendar_id} (no fatal): {email_err}")
+            calendar.next_week_generating = False
+            calendar.save(update_fields=['next_week_generating'])
+    except Exception as e:
+        logger.error(f"_week_closing_task error para calendar {calendar_id}, semana {week_index}: {e}")
+        calendar.next_week_generating = False
+        calendar.save(update_fields=['next_week_generating'])
 
 
 def generate_next_month(calendar_id: str) -> None:
