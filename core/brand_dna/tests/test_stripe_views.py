@@ -338,3 +338,37 @@ def test_webhook_payment_enqueues_generate_next_month(tenant_with_subscription):
     assert calendar.next_week_generating is True
 
 
+@override_settings(STRIPE_WEBHOOK_SECRET='whsec_test123')
+def test_webhook_payment_duplicate_event_skips_reenqueue(tenant_with_subscription):
+    from core.brand_dna.models import AnalysisJob, BrandDNA
+    from core.content_pipeline.models import ContentCalendar
+    from django.contrib.auth import get_user_model
+    UserModel = get_user_model()
+    user = UserModel.objects.create_user(username='t3@t.com', email='t3@t.com', password='pass1234')
+    user.tenant = tenant_with_subscription
+    user.save(update_fields=['tenant'])
+    job = AnalysisJob.objects.create(
+        email=user.email, business_url='https://tuwebmx.com', user=user,
+        status=AnalysisJob.STATUS_DONE, generation_mode=AnalysisJob.MODE_FULL,
+    )
+    dna = BrandDNA.objects.create(
+        job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
+        description='Agencia digital', keywords=['diseno'], audience='PYMEs',
+        tone='profesional', primary_colors=['#1a1a2e'],
+    )
+    calendar = ContentCalendar.objects.create(brand_dna=dna, next_week_generating=True)
+    c = Client()
+    with patch('core.brand_dna.stripe_views.stripe.Webhook.construct_event',
+               return_value=_fake_event('evt_dup', tenant_with_subscription.id)), \
+         patch('core.brand_dna.stripe_views.django_rq') as mock_rq:
+        response = c.post(
+            '/stripe/webhook/', data=b'{}', content_type='application/json',
+            HTTP_STRIPE_SIGNATURE='t=1,v1=fake',
+        )
+    assert response.status_code == 200
+    mock_rq.enqueue.assert_not_called()
+    calendar.refresh_from_db()
+    assert calendar.next_week_generating is True
+
+
+

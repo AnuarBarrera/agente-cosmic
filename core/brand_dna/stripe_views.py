@@ -62,9 +62,12 @@ def stripe_webhook_view(request):
             job = _job_for_tenant(tenant_id)
             if job and hasattr(job, 'brand_dna') and hasattr(job.brand_dna, 'calendar'):
                 calendar = job.brand_dna.calendar
-                calendar.next_week_generating = True
-                calendar.save(update_fields=['next_week_generating'])
-                django_rq.enqueue(generate_next_month, str(calendar.id), job_timeout=900)
+                if calendar.next_week_generating:
+                    logger.info(f"generate_next_month ya en curso para calendar {calendar.id} — se ignora evento duplicado de Stripe")
+                else:
+                    calendar.next_week_generating = True
+                    calendar.save(update_fields=['next_week_generating'])
+                    django_rq.enqueue(generate_next_month, str(calendar.id), job_timeout=900)
             else:
                 logger.warning(f"No se encontro calendario para tenant {tenant_id} — pago confirmado sin generar mes")
 
