@@ -332,6 +332,8 @@ def test_webhook_payment_enqueues_generate_next_month(tenant_with_subscription):
     mock_rq.enqueue.assert_called_once()
     enqueue_args = mock_rq.enqueue.call_args[0]
     assert enqueue_args[1] == str(calendar.id)
+    enqueue_kwargs = mock_rq.enqueue.call_args[1]
+    assert enqueue_kwargs['job_timeout'] == 900
     calendar.refresh_from_db()
     assert calendar.next_week_generating is True
 

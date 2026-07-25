@@ -64,7 +64,7 @@ def stripe_webhook_view(request):
                 calendar = job.brand_dna.calendar
                 calendar.next_week_generating = True
                 calendar.save(update_fields=['next_week_generating'])
-                django_rq.enqueue(generate_next_month, str(calendar.id), job_timeout=2400)
+                django_rq.enqueue(generate_next_month, str(calendar.id), job_timeout=900)
             else:
                 logger.warning(f"No se encontro calendario para tenant {tenant_id} — pago confirmado sin generar mes")
 
