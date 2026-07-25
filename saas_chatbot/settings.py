@@ -110,21 +110,6 @@ GEMINI_API_KEY = get_env('GEMINI_API_KEY', default='')
 SERPER_API_KEY = get_env('SERPER_API_KEY', default='')
 PEXELS_API_KEY = get_env('PEXELS_API_KEY', default='')
 
-# --- n8n + Maps Settings ---
-N8N_WEBHOOK_URL = get_env('N8N_WEBHOOK_URL', default='http://172.17.0.1:5678/webhook/prospector')
-N8N_BASE_URL = get_env('N8N_BASE_URL', default='http://172.17.0.1:5678/webhook')
-N8N_CALLBACK_TOKEN = get_env('N8N_CALLBACK_TOKEN', default='')
-N8N_API_KEY = get_env('N8N_API_KEY', default='')
-N8N_WORKFLOW_CALENDAR_CREATE = get_env('N8N_WORKFLOW_CALENDAR_CREATE', default='')
-N8N_WORKFLOW_CALENDAR_LIST = get_env('N8N_WORKFLOW_CALENDAR_LIST', default='')
-N8N_WORKFLOW_SHEETS_EXPORT = get_env('N8N_WORKFLOW_SHEETS_EXPORT', default='')
-N8N_WORKFLOW_SHEETS_READ = get_env('N8N_WORKFLOW_SHEETS_READ', default='')
-GOOGLE_SHEETS_LEADS_ID = get_env('GOOGLE_SHEETS_LEADS_ID', default='')
-GOOGLE_SHEET_ID = get_env('GOOGLE_SHEET_ID', default='')
-N8N_WORKFLOW_DRIVE_SEARCH = get_env('N8N_WORKFLOW_DRIVE_SEARCH', default='')
-GOOGLE_DRIVE_FOLDER_ID = get_env('GOOGLE_DRIVE_FOLDER_ID', default='')
-GOOGLE_PLACES_API_KEY = get_env('GOOGLE_PLACES_API_KEY', default='')
-
 # --- Agent Settings ---
 TELEGRAM_BOT_TOKEN = get_env('TELEGRAM_BOT_TOKEN', default='')
 TELEGRAM_CHAT_ID = get_env('TELEGRAM_CHAT_ID', default='')
