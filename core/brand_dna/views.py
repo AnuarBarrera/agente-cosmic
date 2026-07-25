@@ -252,7 +252,10 @@ def calendar_review_view(request, job_id):
         subscription.status == 'trial_expired'
         or (subscription.paid_until and subscription.paid_until <= timezone.now())
     ))
-    early_cta = bool(subscription and not payment_needed and subscription.status == 'trialing')
+    early_cta = bool(
+        subscription and not payment_needed and subscription.status == 'trialing'
+        and job.status == AnalysisJob.STATUS_DONE
+    )
     payment_url = ''
     if payment_needed or early_cta:
         payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={job.user.tenant_id}"

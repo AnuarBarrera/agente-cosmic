@@ -829,6 +829,68 @@ def test_week_closing_task_resets_flag_on_internal_error(job_with_dna):
     assert calendar.next_week_generating is False
 
 
+def test_generate_next_month_defers_when_trial_job_not_done(job_with_dna):
+    from core.content_pipeline.tasks import generate_next_month
+    from core.content_pipeline.models import ContentCalendar
+    job_with_dna.status = AnalysisJob.STATUS_PROCESSING
+    job_with_dna.save(update_fields=['status'])
+    calendar = ContentCalendar.objects.create(brand_dna=job_with_dna.brand_dna)
+    with patch('core.content_pipeline.tasks.django_rq') as mock_rq, \
+         patch('core.content_pipeline.tasks.TextGenerator') as MockText:
+        generate_next_month(str(calendar.id))
+    MockText.assert_not_called()
+    mock_rq.get_queue.return_value.enqueue_in.assert_called_once_with(
+        timedelta(seconds=60), generate_next_month, str(calendar.id), 1
+    )
+    assert calendar.posts.count() == 0
+
+
+def test_generate_next_month_gives_up_when_trial_job_failed(job_with_dna):
+    from core.content_pipeline.tasks import generate_next_month
+    from core.content_pipeline.models import ContentCalendar
+    job_with_dna.status = AnalysisJob.STATUS_FAILED
+    job_with_dna.save(update_fields=['status'])
+    calendar = ContentCalendar.objects.create(brand_dna=job_with_dna.brand_dna, next_week_generating=True)
+    with patch('core.content_pipeline.tasks.django_rq') as mock_rq, \
+         patch('core.content_pipeline.tasks.TextGenerator') as MockText:
+        generate_next_month(str(calendar.id))
+    MockText.assert_not_called()
+    mock_rq.get_queue.return_value.enqueue_in.assert_not_called()
+    calendar.refresh_from_db()
+    assert calendar.next_week_generating is False
+
+
+def test_generate_next_month_gives_up_after_max_attempts(job_with_dna):
+    from core.content_pipeline.tasks import generate_next_month, _MAX_TRIAL_WAIT_ATTEMPTS
+    from core.content_pipeline.models import ContentCalendar
+    job_with_dna.status = AnalysisJob.STATUS_PROCESSING
+    job_with_dna.save(update_fields=['status'])
+    calendar = ContentCalendar.objects.create(brand_dna=job_with_dna.brand_dna, next_week_generating=True)
+    with patch('core.content_pipeline.tasks.django_rq') as mock_rq, \
+         patch('core.content_pipeline.tasks.TextGenerator') as MockText:
+        generate_next_month(str(calendar.id), attempt=_MAX_TRIAL_WAIT_ATTEMPTS)
+    MockText.assert_not_called()
+    mock_rq.get_queue.return_value.enqueue_in.assert_not_called()
+    calendar.refresh_from_db()
+    assert calendar.next_week_generating is False
+
+
+def test_generate_next_month_proceeds_when_trial_job_done(job_with_dna):
+    from core.content_pipeline.tasks import content_generation_task, generate_next_month
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'), \
+         patch('core.content_pipeline.tasks._enqueue_week_images') as mock_enqueue_week:
+        MockText.return_value.generate.return_value = _MOCK_POSTS
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+        content_generation_task(str(job_with_dna.id))
+        calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
+        generate_next_month(str(calendar.id))
+    mock_enqueue_week.assert_called_once_with(str(calendar.id), week_index=0)
+
+
+
 
 
 

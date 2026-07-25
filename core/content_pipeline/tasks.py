@@ -298,9 +298,29 @@ def _week_closing_task(calendar_id: str, week_index: int) -> None:
         calendar.save(update_fields=['next_week_generating'])
 
 
-def generate_next_month(calendar_id: str) -> None:
+_MAX_TRIAL_WAIT_ATTEMPTS = 30  # 30 x 60s = 30 min de margen sobre los ~10-15 min medidos
+
+
+def generate_next_month(calendar_id: str, attempt: int = 0) -> None:
     calendar = ContentCalendar.objects.get(id=calendar_id)
     brand_dna = calendar.brand_dna
+    job = brand_dna.job
+    if job.status != AnalysisJob.STATUS_DONE:
+        if job.status == AnalysisJob.STATUS_FAILED or attempt >= _MAX_TRIAL_WAIT_ATTEMPTS:
+            logger.error(
+                f"generate_next_month: job {job.id} no llego a status=done "
+                f"(status={job.status}, intento={attempt}) — se cancela la generacion del mes"
+            )
+            calendar.next_week_generating = False
+            calendar.save(update_fields=['next_week_generating'])
+            return
+        logger.info(
+            f"generate_next_month: job {job.id} aun generando el trial "
+            f"(status={job.status}, intento={attempt}) — reintentando en 60s"
+        )
+        queue = django_rq.get_queue('default')
+        queue.enqueue_in(timedelta(seconds=60), generate_next_month, calendar_id, attempt + 1)
+        return
     try:
         now = timezone.now()
         mexico_today = now.astimezone(MEXICO_TZ).date()

@@ -505,7 +505,7 @@ def dashboard_view(request):
     used_total = AnalysisJob.objects.filter(user=request.user).count()
     plan = get_user_plan(request.user)
     subscription = getattr(getattr(request.user, 'tenant', None), 'subscription', None)
-    early_cta = bool(subscription and subscription.status == 'trialing')
+    early_cta = bool(subscription and subscription.status == 'trialing' and not has_processing)
     payment_url = ''
     if early_cta:
         payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={request.user.tenant_id}"

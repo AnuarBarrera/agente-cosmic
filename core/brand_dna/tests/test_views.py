@@ -726,4 +726,28 @@ def test_calendar_review_video_keeps_controls(client, user, job_with_calendar):
     assert b'<video controls' in response.content
 
 
+def test_calendar_review_no_early_cta_while_trial_still_generating(client, user, job_with_calendar):
+    job_with_calendar.status = AnalysisJob.STATUS_PROCESSING
+    job_with_calendar.save(update_fields=['status'])
+    user.tenant.subscription.status = 'trialing'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert response.context['early_cta'] is False
+
+
+def test_dashboard_hides_early_cta_while_job_processing(client, user, settings):
+    settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
+    user.tenant.subscription.status = 'trialing'
+    user.tenant.subscription.save(update_fields=['status'])
+    AnalysisJob.objects.create(
+        email=user.email, business_url='https://tuwebmx.com', user=user,
+        status=AnalysisJob.STATUS_PROCESSING,
+    )
+    client.force_login(user)
+    response = client.get('/dashboard/')
+    assert b'mes completo' not in response.content
+
+
+
 
