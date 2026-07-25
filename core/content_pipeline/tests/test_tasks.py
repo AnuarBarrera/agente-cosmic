@@ -1,3 +1,4 @@
+import time
 import pytest
 from unittest.mock import patch, MagicMock
 from rq.job import Job, Dependency
@@ -870,6 +871,67 @@ def test_week_closing_task_resets_flag_on_internal_error(job_with_dna):
         _week_closing_task(str(calendar.id), week_index=0)
     calendar.refresh_from_db()
     assert calendar.next_week_generating is False
+
+
+def test_enqueue_trial_images_enqueues_7_jobs_plus_closing(calendar_with_dna):
+    job_id = str(calendar_with_dna.brand_dna.job.id)
+    for i in range(1, 8):
+        _make_post(calendar_with_dna, i, image_url='')
+    with patch('core.content_pipeline.tasks.django_rq') as mock_rq:
+        mock_rq.enqueue.side_effect = lambda *a, **kw: MagicMock(spec=Job)
+        from core.content_pipeline.tasks import _enqueue_trial_images
+        _enqueue_trial_images(job_id, str(calendar_with_dna.id), 1234.5)
+    assert mock_rq.enqueue.call_count == 8  # 7 backfill_image_task + 1 _trial_closing_task
+    closing_call = mock_rq.enqueue.call_args_list[-1]
+    assert closing_call.args[1:] == (job_id, str(calendar_with_dna.id), 1234.5)
+    assert closing_call.kwargs['job_timeout'] == 120
+    dependency = closing_call.kwargs['depends_on']
+    assert isinstance(dependency, Dependency)
+    assert len(dependency.dependencies) == 7
+    assert dependency.allow_failure is True
+
+
+def test_trial_closing_task_sends_initial_email_and_marks_job_done(job_with_dna):
+    calendar = ContentCalendar.objects.create(brand_dna=job_with_dna.brand_dna)
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail, \
+         patch('core.content_pipeline.tasks.schedule_daily_emails') as mock_schedule, \
+         patch('core.content_pipeline.tasks.CONTENT_GENERATION_DURATION') as mock_duration:
+        from core.content_pipeline.tasks import _trial_closing_task
+        _trial_closing_task(str(job_with_dna.id), str(calendar.id), time.time() - 5)
+
+    MockEmail.return_value.send_initial.assert_called_once()
+    mock_schedule.assert_called_once_with(calendar)
+    mock_duration.observe.assert_called_once()
+    job_with_dna.refresh_from_db()
+    assert job_with_dna.stage == AnalysisJob.STAGE_COMPLETE
+    assert job_with_dna.progress == 100
+    assert job_with_dna.status == AnalysisJob.STATUS_DONE
+
+
+def test_trial_closing_task_marks_done_even_if_email_fails(job_with_dna):
+    calendar = ContentCalendar.objects.create(brand_dna=job_with_dna.brand_dna)
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail, \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockEmail.return_value.send_initial.side_effect = Exception('smtp down')
+        from core.content_pipeline.tasks import _trial_closing_task
+        _trial_closing_task(str(job_with_dna.id), str(calendar.id), time.time())
+
+    job_with_dna.refresh_from_db()
+    assert job_with_dna.status == AnalysisJob.STATUS_DONE
+
+
+def test_trial_closing_task_marks_failed_on_internal_error(calendar_with_dna):
+    mock_job = MagicMock()
+    mock_job.save.side_effect = Exception('db down')
+    with patch('core.content_pipeline.tasks.AnalysisJob.objects.get', return_value=mock_job), \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'), \
+         patch('core.content_pipeline.tasks.CONTENT_GENERATION_DURATION') as mock_duration:
+        from core.content_pipeline.tasks import _trial_closing_task
+        _trial_closing_task('fake-job-id', str(calendar_with_dna.id), time.time())
+
+    mock_job.mark_failed.assert_called_once()
+    mock_duration.observe.assert_called_once()
 
 
 def test_generate_next_month_defers_when_trial_job_not_done(job_with_dna):

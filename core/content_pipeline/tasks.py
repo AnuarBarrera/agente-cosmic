@@ -304,6 +304,34 @@ def _week_closing_task(calendar_id: str, week_index: int) -> None:
         calendar.save(update_fields=['next_week_generating'])
 
 
+def _enqueue_trial_images(job_id: str, calendar_id: str, started_at: float) -> None:
+    calendar = ContentCalendar.objects.get(id=calendar_id)
+    post_ids = [str(pid) for pid in calendar.posts.order_by('day_number').values_list('id', flat=True)]
+    _enqueue_post_images_then(post_ids, _trial_closing_task, job_id, calendar_id, started_at)
+
+
+def _trial_closing_task(job_id: str, calendar_id: str, started_at: float) -> None:
+    job = AnalysisJob.objects.get(id=job_id)
+    calendar = ContentCalendar.objects.get(id=calendar_id)
+    brand_dna = calendar.brand_dna
+    try:
+        try:
+            EmailSender().send_initial(job=job, brand_dna=brand_dna)
+            schedule_daily_emails(calendar)
+        except Exception as email_err:
+            logger.error(f"Email inicial falló para job {job_id} (no fatal): {email_err}")
+        job.stage = AnalysisJob.STAGE_COMPLETE
+        job.progress = 100
+        job.status = AnalysisJob.STATUS_DONE
+        job.save(update_fields=['stage', 'progress', 'status'])
+        CONTENT_GENERATION_DURATION.observe(time.time() - started_at)
+        logger.info(f"Job {job_id} completado exitosamente")
+    except Exception as e:
+        CONTENT_GENERATION_DURATION.observe(time.time() - started_at)
+        logger.error(f"_trial_closing_task error para job {job_id}: {e}")
+        job.mark_failed(str(e))
+
+
 _MAX_TRIAL_WAIT_ATTEMPTS = 30  # 30 x 60s = 30 min de margen sobre los ~10-15 min medidos
 
 
