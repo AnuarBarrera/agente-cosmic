@@ -249,29 +249,35 @@ def send_daily_email_task(post_id: str) -> None:
     EmailSender().send_daily(post=post)
 
 
+def _enqueue_post_images_then(post_ids: list, closing_fn, *closing_args) -> None:
+    jobs = []
+    for post_id in post_ids:
+        post = ContentPost.objects.get(id=post_id)
+        timeout = 600 if post.format == ContentPost.FORMAT_REEL else 300
+        jobs.append(django_rq.enqueue(
+            backfill_image_task, post_id,
+            job_timeout=timeout,
+            retry=Retry(max=3, interval=[10, 20, 40]),
+        ))
+    django_rq.enqueue(
+        closing_fn, *closing_args,
+        job_timeout=120,
+        retry=Retry(max=2, interval=[10, 30]),
+        depends_on=Dependency(jobs=jobs, allow_failure=True),
+    )
+
+
 def _enqueue_week_images(calendar_id: str, week_index: int) -> None:
     calendar = ContentCalendar.objects.get(id=calendar_id)
     base_day = calendar.posts.count() - 28
     week_start = base_day + (week_index * 7) + 1
     week_end = week_start + 6
-    week_posts = list(
-        calendar.posts.filter(day_number__gte=week_start, day_number__lte=week_end).order_by('day_number')
-    )
-    jobs = []
-    for post in week_posts:
-        timeout = 600 if post.format == ContentPost.FORMAT_REEL else 300
-        job = django_rq.enqueue(
-            backfill_image_task, str(post.id),
-            job_timeout=timeout,
-            retry=Retry(max=3, interval=[10, 20, 40]),
-        )
-        jobs.append(job)
-    django_rq.enqueue(
-        _week_closing_task, calendar_id, week_index,
-        job_timeout=120,
-        retry=Retry(max=2, interval=[10, 30]),
-        depends_on=Dependency(jobs=jobs, allow_failure=True),
-    )
+    post_ids = [
+        str(pid) for pid in calendar.posts.filter(
+            day_number__gte=week_start, day_number__lte=week_end
+        ).order_by('day_number').values_list('id', flat=True)
+    ]
+    _enqueue_post_images_then(post_ids, _week_closing_task, calendar_id, week_index)
 
 
 def _week_closing_task(calendar_id: str, week_index: int) -> None:
