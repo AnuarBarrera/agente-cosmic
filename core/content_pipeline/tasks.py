@@ -49,7 +49,7 @@ def content_generation_task(job_id: str) -> None:
     job = AnalysisJob.objects.get(id=job_id)
     brand_dna = job.brand_dna
 
-    start = time.monotonic()
+    started_at = time.time()
     try:
         job.update_progress(AnalysisJob.STAGE_CONTENT, 80)
 
@@ -64,66 +64,31 @@ def content_generation_task(job_id: str) -> None:
                 status='trialing',
                 trial_ends_at=timezone.now() + timedelta(days=7),
             )
-        image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+
         now = timezone.now()
         mexico_today = now.astimezone(MEXICO_TZ).date()
-
         scheduled_dates = smart_schedule_dates(brand_dna, base_date=mexico_today, count=len(posts_data))
-
-        # Generamos las 7 imágenes por adelantado — el usuario no espera en vivo
-        # (flujo async: se le avisa por correo/dashboard cuando todo está listo),
-        # así que el calendario completo queda disponible desde el primer momento.
-        total = len(posts_data)
-        reel_script_gen = ReelScriptGenerator()
-        reel_gen = ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
 
         for i, post_data in enumerate(posts_data, start=1):
             scheduled = scheduled_dates[i - 1]
-            image_url, image_urls, video_url = _generate_post_media(
-                image_gen, reel_script_gen, reel_gen,
-                fmt=post_data.get('format', ContentPost.FORMAT_SINGLE),
-                filename=f"{job_id}-day{i}",
-                caption=post_data['caption'],
-                colors=brand_dna.primary_colors,
-                tone=brand_dna.tone,
-                brand_name=brand_dna.business_name,
-                keywords=brand_dna.keywords,
-                description=brand_dna.description,
-                audience=brand_dna.audience,
-                business_url=brand_dna.business_url,
-                brand_dna=brand_dna,
-                post_data=post_data,
-            )
-
             ContentPost.objects.create(
                 calendar=calendar,
                 day_number=i,
                 caption=post_data['caption'],
-                image_url=image_url,
-                image_urls=image_urls,
-                video_url=video_url,
+                image_url='',
+                image_urls=[],
+                video_url='',
                 format=post_data.get('format', ContentPost.FORMAT_SINGLE),
                 suggested_time=scheduled.astimezone(MEXICO_TZ).time(),
                 hashtags=post_data.get('hashtags', []),
                 scheduled_at=scheduled,
             )
-            job.update_progress(AnalysisJob.STAGE_CONTENT, 87 + int(8 * i / total))
 
-        try:
-            EmailSender().send_initial(job=job, brand_dna=brand_dna)
-            schedule_daily_emails(calendar)
-        except Exception as email_err:
-            logger.error(f"Email falló para job {job_id} (no fatal): {email_err}")
-
-        job.stage = AnalysisJob.STAGE_COMPLETE
-        job.progress = 100
-        job.status = AnalysisJob.STATUS_DONE
-        job.save(update_fields=['stage', 'progress', 'status'])
-        CONTENT_GENERATION_DURATION.observe(time.monotonic() - start)
-        logger.info(f"Job {job_id} completado exitosamente")
+        _enqueue_trial_images(job_id, str(calendar.id), started_at)
+        logger.info(f"Job {job_id}: texto listo, encadenando generación de imágenes")
 
     except Exception as e:
-        CONTENT_GENERATION_DURATION.observe(time.monotonic() - start)
+        CONTENT_GENERATION_DURATION.observe(time.time() - started_at)
         logger.error(f"content_generation_task error para job {job_id}: {e}")
         job.mark_failed(str(e))
 

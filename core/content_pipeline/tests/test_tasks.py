@@ -15,6 +15,12 @@ _MOCK_POSTS = [
     for i in range(1, 8)
 ]
 
+_MOCK_POSTS_WITH_CAROUSEL = [
+    {'caption': f'Post {i}', 'hashtags': ['#test'], 'suggested_time': '19:00',
+     'format': 'carousel' if i == 3 else 'single'}
+    for i in range(1, 8)
+]
+
 
 @pytest.fixture
 def job_with_dna():
@@ -72,11 +78,8 @@ def trialing_job_with_tenant(job_with_dna_and_tenant):
 )
 def test_content_generation_creates_calendar(job_with_dna):
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.EmailSender') as MockEmail, \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+         patch('core.content_pipeline.tasks._enqueue_trial_images'):
         MockText.return_value.generate.return_value = _MOCK_POSTS
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
 
         from core.content_pipeline.tasks import content_generation_task
         content_generation_task(str(job_with_dna.id))
@@ -85,23 +88,11 @@ def test_content_generation_creates_calendar(job_with_dna):
     assert ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna).count() == 7
 
 
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
 def test_content_generation_starts_trial_for_tenant(job_with_dna_and_tenant):
     from core.tenant_management.models import Subscription
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.EmailSender'), \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+         patch('core.content_pipeline.tasks._enqueue_trial_images'):
         MockText.return_value.generate.return_value = _MOCK_POSTS
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
 
         from core.content_pipeline.tasks import content_generation_task
         content_generation_task(str(job_with_dna_and_tenant.id))
@@ -113,15 +104,6 @@ def test_content_generation_starts_trial_for_tenant(job_with_dna_and_tenant):
     assert sub.trial_ends_at < timezone.now() + timedelta(days=8)
 
 
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
 def test_content_generation_does_not_start_trial_for_tester_plan(job_with_dna):
     from django.contrib.auth import get_user_model
     from core.tenant_management.models import TenantModel, Subscription, Plan
@@ -141,11 +123,8 @@ def test_content_generation_does_not_start_trial_for_tester_plan(job_with_dna):
     job_with_dna.save(update_fields=['user'])
 
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.EmailSender'), \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+         patch('core.content_pipeline.tasks._enqueue_trial_images'):
         MockText.return_value.generate.return_value = _MOCK_POSTS
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
 
         from core.content_pipeline.tasks import content_generation_task
         content_generation_task(str(job_with_dna.id))
@@ -155,197 +134,71 @@ def test_content_generation_does_not_start_trial_for_tester_plan(job_with_dna):
     assert sub.trial_ends_at is None
 
 
-
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
 def test_content_generation_without_user_does_not_crash(job_with_dna):
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.EmailSender'), \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+         patch('core.content_pipeline.tasks._enqueue_trial_images') as mock_enqueue:
         MockText.return_value.generate.return_value = _MOCK_POSTS
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
 
         from core.content_pipeline.tasks import content_generation_task
         content_generation_task(str(job_with_dna.id))
 
     job_with_dna.refresh_from_db()
-    assert job_with_dna.status == AnalysisJob.STATUS_DONE
+    assert job_with_dna.status == AnalysisJob.STATUS_PROCESSING
+    mock_enqueue.assert_called_once()
 
 
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
-def test_content_generation_generates_image_for_every_day(job_with_dna):
+def test_content_generation_creates_posts_without_images_and_enqueues_trial(job_with_dna):
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.EmailSender'), \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+         patch('core.content_pipeline.tasks._enqueue_trial_images') as mock_enqueue:
         MockText.return_value.generate.return_value = _MOCK_POSTS
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
 
         from core.content_pipeline.tasks import content_generation_task
         content_generation_task(str(job_with_dna.id))
 
-    assert MockImage.return_value.generate.call_count == 7
     posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna)
-    assert all(p.image_url == 'https://storage.googleapis.com/test/img.jpg' for p in posts)
+    assert posts.count() == 7
+    assert all(p.image_url == '' and p.image_urls == [] and p.video_url == '' for p in posts)
+
+    job_with_dna.refresh_from_db()
+    assert job_with_dna.stage == AnalysisJob.STAGE_CONTENT
+    assert job_with_dna.progress == 87
+
+    calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
+    mock_enqueue.assert_called_once()
+    call_args = mock_enqueue.call_args.args
+    assert call_args[0] == str(job_with_dna.id)
+    assert call_args[1] == str(calendar.id)
+    assert isinstance(call_args[2], float)
 
 
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
-def test_content_generation_marks_job_done(job_with_dna):
+def test_content_generation_observes_duration_metric_on_text_failure(job_with_dna):
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.EmailSender'), \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
-        MockText.return_value.generate.return_value = _MOCK_POSTS
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+         patch('core.content_pipeline.tasks.CONTENT_GENERATION_DURATION') as mock_duration:
+        MockText.return_value.generate.side_effect = Exception('Gemini error')
 
         from core.content_pipeline.tasks import content_generation_task
         content_generation_task(str(job_with_dna.id))
 
+    mock_duration.observe.assert_called_once()
     job_with_dna.refresh_from_db()
-    assert job_with_dna.status == AnalysisJob.STATUS_DONE
-    assert job_with_dna.progress == 100
+    assert job_with_dna.status == AnalysisJob.STATUS_FAILED
 
 
-_MOCK_POSTS_WITH_CAROUSEL = [
-    {'caption': f'Post {i}', 'hashtags': ['#test'], 'suggested_time': '19:00',
-     'format': 'carousel' if i == 3 else 'single'}
-    for i in range(1, 8)
-]
-
-
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
 def test_content_generation_uses_carousel_for_carousel_day(job_with_dna):
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.EmailSender'), \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+         patch('core.content_pipeline.tasks._enqueue_trial_images'):
         MockText.return_value.generate.return_value = _MOCK_POSTS_WITH_CAROUSEL
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
-        MockImage.return_value.generate_carousel.return_value = [
-            'https://storage.googleapis.com/test/slide1.jpg',
-            'https://storage.googleapis.com/test/slide2.jpg',
-            'https://storage.googleapis.com/test/slide3.jpg',
-        ]
 
         from core.content_pipeline.tasks import content_generation_task
         content_generation_task(str(job_with_dna.id))
 
-    assert MockImage.return_value.generate.call_count == 6
-    assert MockImage.return_value.generate_carousel.call_count == 1
     posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna).order_by('day_number')
     carousel_post = posts.get(day_number=3)
     assert carousel_post.format == 'carousel'
-    assert carousel_post.image_url == 'https://storage.googleapis.com/test/slide1.jpg'
-    assert carousel_post.image_urls == [
-        'https://storage.googleapis.com/test/slide1.jpg',
-        'https://storage.googleapis.com/test/slide2.jpg',
-        'https://storage.googleapis.com/test/slide3.jpg',
-    ]
+    assert carousel_post.image_url == ''
+    assert carousel_post.image_urls == []
     non_carousel_posts = [p for p in posts if p.day_number != 3]
     assert all(p.format == 'single' and p.image_urls == [] for p in non_carousel_posts)
-
-
-_MOCK_POSTS_WITH_REEL = [
-    {'caption': f'Post {i}', 'hashtags': ['#test'], 'suggested_time': '19:00',
-     'format': 'reel' if i == 1 else 'single'}
-    for i in range(1, 8)
-]
-
-
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
-def test_content_generation_uses_reel_for_day_1_without_product_photo(job_with_dna):
-    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
-         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel, \
-         patch('core.content_pipeline.tasks.EmailSender'), \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
-        MockText.return_value.generate.return_value = _MOCK_POSTS_WITH_REEL
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
-        MockScript.return_value.generate.return_value = {'hook_text': 'H', 'scene_prompts': ['a', 'b', 'c']}
-        MockReel.return_value.generate.return_value = ('https://storage.test/reel.mp4', 'https://storage.test/poster.png')
-
-        from core.content_pipeline.tasks import content_generation_task
-        content_generation_task(str(job_with_dna.id))
-
-    assert MockReel.return_value.generate.call_count == 1
-    assert MockImage.return_value.generate.call_count == 6
-    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna)
-    reel_post = posts.get(day_number=1)
-    assert reel_post.format == 'reel'
-    assert reel_post.video_url == 'https://storage.test/reel.mp4'
-    assert reel_post.image_url == 'https://storage.test/poster.png'
-
-
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
-def test_content_generation_falls_back_to_image_when_reel_generation_fails(job_with_dna):
-    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
-         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel, \
-         patch('core.content_pipeline.tasks.EmailSender'), \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
-        MockText.return_value.generate.return_value = _MOCK_POSTS_WITH_REEL
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/fallback.jpg'
-        MockScript.return_value.generate.return_value = {'hook_text': 'H', 'scene_prompts': ['a', 'b', 'c']}
-        MockReel.return_value.generate.return_value = ('', '')
-
-        from core.content_pipeline.tasks import content_generation_task
-        content_generation_task(str(job_with_dna.id))
-
-    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna)
-    day1 = posts.get(day_number=1)
-    assert day1.format == 'reel'
-    assert day1.video_url == ''
-    assert day1.image_url == 'https://storage.googleapis.com/test/fallback.jpg'
 
 
 _MOCK_POSTS_FOR_SAMPLE = [
@@ -551,16 +404,62 @@ def test_backfill_image_task_skips_deleted_calendar(calendar_with_dna):
     MockImage.assert_not_called()
 
 
+def test_backfill_image_task_uses_reel_for_reel_format(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 1, image_url='', format='reel')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel:
+        MockScript.return_value.generate.return_value = {'hook_text': 'H', 'scene_prompts': ['a', 'b', 'c']}
+        MockReel.return_value.generate.return_value = ('https://storage.test/reel.mp4', 'https://storage.test/poster.png')
+        from core.content_pipeline.tasks import backfill_image_task
+        backfill_image_task(str(post.id))
+
+    MockImage.return_value.generate.assert_not_called()
+    post.refresh_from_db()
+    assert post.video_url == 'https://storage.test/reel.mp4'
+    assert post.image_url == 'https://storage.test/poster.png'
+
+
+def test_backfill_image_task_falls_back_to_image_when_reel_generation_fails(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 1, image_url='', format='reel')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel:
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/fallback.jpg'
+        MockScript.return_value.generate.return_value = {'hook_text': 'H', 'scene_prompts': ['a', 'b', 'c']}
+        MockReel.return_value.generate.return_value = ('', '')
+        from core.content_pipeline.tasks import backfill_image_task
+        backfill_image_task(str(post.id))
+
+    post.refresh_from_db()
+    assert post.video_url == ''
+    assert post.image_url == 'https://storage.googleapis.com/test/fallback.jpg'
+
+
+def test_backfill_image_task_passes_business_url_to_image_gen(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 3, image_url='')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
+        from core.content_pipeline.tasks import backfill_image_task
+        backfill_image_task(str(post.id))
+
+    call_kwargs = MockImage.return_value.generate.call_args_list[0].kwargs
+    assert call_kwargs['business_url'] == 'https://tuwebmx.com'
+
+
 def test_generate_next_month_creates_28_posts_without_images(job_with_dna):
     from core.content_pipeline.tasks import content_generation_task, generate_next_month
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
          patch('core.content_pipeline.tasks.EmailSender'), \
          patch('core.content_pipeline.tasks.schedule_daily_emails'), \
+         patch('core.content_pipeline.tasks._enqueue_trial_images'), \
          patch('core.content_pipeline.tasks._enqueue_week_images') as mock_enqueue_week:
         MockText.return_value.generate.return_value = _MOCK_POSTS
         MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
         content_generation_task(str(job_with_dna.id))
+        job_with_dna.status = AnalysisJob.STATUS_DONE
+        job_with_dna.save(update_fields=['status'])
 
         calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
         generate_next_month(str(calendar.id))
@@ -582,10 +481,13 @@ def test_generate_next_month_resets_flag_on_text_failure(job_with_dna):
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
          patch('core.content_pipeline.tasks.EmailSender'), \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+         patch('core.content_pipeline.tasks.schedule_daily_emails'), \
+         patch('core.content_pipeline.tasks._enqueue_trial_images'):
         MockText.return_value.generate.return_value = _MOCK_POSTS
         MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
         content_generation_task(str(job_with_dna.id))
+        job_with_dna.status = AnalysisJob.STATUS_DONE
+        job_with_dna.save(update_fields=['status'])
         calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
         calendar.next_week_generating = True
         calendar.save(update_fields=['next_week_generating'])
@@ -603,10 +505,13 @@ def test_generate_next_month_keeps_flag_true_on_success(job_with_dna):
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
          patch('core.content_pipeline.tasks.EmailSender'), \
          patch('core.content_pipeline.tasks.schedule_daily_emails'), \
+         patch('core.content_pipeline.tasks._enqueue_trial_images'), \
          patch('core.content_pipeline.tasks._enqueue_week_images'):
         MockText.return_value.generate.return_value = _MOCK_POSTS
         MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
         content_generation_task(str(job_with_dna.id))
+        job_with_dna.status = AnalysisJob.STATUS_DONE
+        job_with_dna.save(update_fields=['status'])
         calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
         calendar.next_week_generating = True
         calendar.save(update_fields=['next_week_generating'])
@@ -615,31 +520,6 @@ def test_generate_next_month_keeps_flag_true_on_success(job_with_dna):
 
     calendar.refresh_from_db()
     assert calendar.next_week_generating is True
-
-
-
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
-    VERTEX_VISION_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-    DEFAULT_FROM_EMAIL='noreply@test.com',
-)
-def test_content_generation_passes_business_url_to_image_gen(job_with_dna):
-    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
-         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.EmailSender') as MockEmail, \
-         patch('core.content_pipeline.tasks.schedule_daily_emails'):
-        MockText.return_value.generate.return_value = _MOCK_POSTS
-        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
-
-        from core.content_pipeline.tasks import content_generation_task
-        content_generation_task(str(job_with_dna.id))
-
-    call_kwargs = MockImage.return_value.generate.call_args_list[0].kwargs
-    assert call_kwargs['business_url'] == 'https://tuwebmx.com'
 
 
 @override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/test123')
@@ -986,10 +866,13 @@ def test_generate_next_month_proceeds_when_trial_job_done(job_with_dna):
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
          patch('core.content_pipeline.tasks.EmailSender'), \
          patch('core.content_pipeline.tasks.schedule_daily_emails'), \
+         patch('core.content_pipeline.tasks._enqueue_trial_images'), \
          patch('core.content_pipeline.tasks._enqueue_week_images') as mock_enqueue_week:
         MockText.return_value.generate.return_value = _MOCK_POSTS
         MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.jpg'
         content_generation_task(str(job_with_dna.id))
+        job_with_dna.status = AnalysisJob.STATUS_DONE
+        job_with_dna.save(update_fields=['status'])
         calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
         generate_next_month(str(calendar.id))
     mock_enqueue_week.assert_called_once_with(str(calendar.id), week_index=0)
