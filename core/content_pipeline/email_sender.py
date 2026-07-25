@@ -62,6 +62,27 @@ class EmailSender:
         EMAILS_SENT.labels(type='month_ready').inc()
         logger.info(f"Email de mes listo enviado a {job.email} para job {job.id}")
 
+    def send_week_ready(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
+        calendar_url = settings.COSMIC_BASE_URL + reverse('calendar_review', args=[job.id])
+        html = render_to_string('content_pipeline/email_week_ready.html', {
+            'brand_dna': brand_dna,
+            'calendar_url': calendar_url,
+        })
+        name = brand_dna.business_name.strip() if brand_dna.business_name else ''
+        subject = f'🎉 Tu primera semana de contenido ya está lista — {name}' if name else '🎉 Tu primera semana de contenido ya está lista — Agente Cosmic'
+        plain = (
+            f'Tu primera semana de contenido de {name} ya está lista. Seguimos generando el resto del mes en segundo plano.'
+            if name else
+            'Tu primera semana de contenido ya está lista. Seguimos generando el resto del mes en segundo plano.'
+        )
+        send_mail(
+            subject, plain, settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[job.email], html_message=html, fail_silently=False,
+        )
+        EMAILS_SENT.labels(type='week_ready').inc()
+        logger.info(f"Email de semana 1 lista enviado a {job.email} para job {job.id}")
+
+
     def send_daily(self, post: ContentPost) -> None:
         calendar_review_url = settings.COSMIC_BASE_URL + reverse(
             'calendar_review', args=[post.calendar.brand_dna.job.id]
