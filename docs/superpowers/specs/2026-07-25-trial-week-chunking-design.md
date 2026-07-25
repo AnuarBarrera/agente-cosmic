@@ -94,24 +94,28 @@ Extraído de la parte genérica de `_enqueue_week_images` (hoy exclusiva del flu
 mes):
 
 ```python
-def _enqueue_post_images_then(post_ids: list[str], closing_fn, *closing_args) -> None:
-    queue = django_rq.get_queue('default')
+def _enqueue_post_images_then(post_ids: list, closing_fn, *closing_args) -> None:
     jobs = []
     for post_id in post_ids:
         post = ContentPost.objects.get(id=post_id)
         timeout = 600 if post.format == ContentPost.FORMAT_REEL else 300
-        jobs.append(queue.enqueue(
+        jobs.append(django_rq.enqueue(
             backfill_image_task, post_id,
             job_timeout=timeout,
             retry=Retry(max=3, interval=[10, 20, 40]),
         ))
-    queue.enqueue(
+    django_rq.enqueue(
         closing_fn, *closing_args,
         job_timeout=120,
         retry=Retry(max=2, interval=[10, 30]),
         depends_on=Dependency(jobs=jobs, allow_failure=True),
     )
 ```
+
+Usa el helper de conveniencia `django_rq.enqueue(...)` (módulo, no
+`get_queue('default').enqueue(...)`) — es el mismo patrón que ya usa
+`_enqueue_week_images` hoy, necesario para que los tests existentes (que mockean
+`patch('core.content_pipeline.tasks.django_rq')`) sigan funcionando sin cambios.
 
 `_enqueue_week_images(calendar_id, week_index)` (mes, ya existente) se reescribe para
 resolver sus 7 `post_ids` y llamar
