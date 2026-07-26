@@ -282,7 +282,7 @@ def _trial_closing_task(job_id: str, calendar_id: str, started_at: float) -> Non
     try:
         try:
             EmailSender().send_initial(job=job, brand_dna=brand_dna)
-            schedule_daily_emails(calendar)
+            schedule_daily_emails(calendar, day_start=1, day_end=calendar.posts.count())
         except Exception as email_err:
             logger.error(f"Email inicial falló para job {job_id} (no fatal): {email_err}")
         job.stage = AnalysisJob.STAGE_COMPLETE
@@ -352,7 +352,7 @@ def generate_next_month(calendar_id: str, attempt: int = 0) -> None:
                     scheduled_at=scheduled,
                 )
 
-        schedule_daily_emails(calendar)
+        schedule_daily_emails(calendar, day_start=base_day + 1, day_end=base_day + 28)
         _enqueue_week_images(calendar_id, week_index=0)
     except Exception as e:
         logger.error(f"generate_next_month error para calendar {calendar_id}: {e}")

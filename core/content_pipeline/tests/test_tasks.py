@@ -780,7 +780,7 @@ def test_trial_closing_task_sends_initial_email_and_marks_job_done(job_with_dna)
         _trial_closing_task(str(job_with_dna.id), str(calendar.id), time.time() - 5)
 
     MockEmail.return_value.send_initial.assert_called_once()
-    mock_schedule.assert_called_once_with(calendar)
+    mock_schedule.assert_called_once_with(calendar, day_start=1, day_end=0)
     mock_duration.observe.assert_called_once()
     job_with_dna.refresh_from_db()
     assert job_with_dna.stage == AnalysisJob.STAGE_COMPLETE
