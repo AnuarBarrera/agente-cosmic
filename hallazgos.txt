@@ -3914,3 +3914,64 @@ ACTUALIZACIÓN 2026-07-22 — 🟢 RESUELTO — implementado el auditor de
   branch por Claude — "Ready to merge: Yes", sin hallazgos Critical/Important.
   Fuera de alcance (spec separado pendiente): variabilidad/anti-repetición
   entre generaciones (ej. la misma imaginería repetida entre reels).
+
+=================================================================
+HALLAZGO 79 — Suite de pytest intermitentemente falla por
+  TenantRateLimitingMiddleware (limite por IP compartida del test client),
+  no es una regresion de codigo
+Categoría: Deuda técnica / aislamiento de tests
+Estado: 🟡 DIAGNOSTICADO — PENDIENTE DE FIX — 2026-07-26 (se desplegó
+  igual tras confirmar que no es una regresión real, ver evidencia abajo)
+=================================================================
+Contexto: durante el deploy del 2026-07-26 (47 commits: sistema de pagos
+  Stripe + trial/monthly chunking), el gate de pytest de `cosmic-pull` falló
+  con 6-10 tests caídos, todos con el mismo síntoma:
+  `assert 429 == 200` / `b'{"error": "Rate limit exceeded for
+  unauthenticated requests"}'` en vez del contenido esperado.
+
+Tests afectados (varían entre corridas — nunca los mismos exactos):
+  `test_status_api_requires_login`, `test_results_requires_login`,
+  `test_privacy_policy_accessible_without_login`,
+  `test_terms_of_service_accessible_without_login`,
+  `test_ga4_tag_renders_when_measurement_id_configured`,
+  `test_umami_tag_always_renders`, y los 4 de
+  `TestMetricsEndpoint` — todos en `core/brand_dna/tests/test_views.py` y
+  `core/shared/tests/test_metrics_endpoint.py`, todos requests anónimos.
+
+Causa raíz: `TenantRateLimitingMiddleware`
+  (`core/shared/middleware/tenant_rate_limiting.py`, registrado en
+  `settings.py` — código preexistente, NO tocado en los 47 commits de este
+  deploy) aplica un límite por IP-por-minuto a requests sin autenticar
+  (`_check_ip_rate_limit`, cache key `ip_rate_limit_{ip}_{minute_window}`).
+  El cache backend usado en tests es el mismo Redis real de producción — no
+  hay un `CACHES` de test aislado/dummy. El test client de Django manda
+  todas las requests anónimas con la MISMA IP falsa, así que las ~600+
+  pruebas de la suite completa comparten un solo cupo de rate-limit — al
+  pasar cierto umbral dentro de la misma ventana de un minuto, las
+  siguientes pruebas anónimas empiezan a recibir 429 en vez de la respuesta
+  real.
+
+Verificación de que NO es una regresión real:
+  - Los mismos tests, corridos aislados (`pytest
+    core/shared/tests/test_metrics_endpoint.py`), pasan limpio 4/4.
+  - La suite completa corrida 2 veces seguidas reprodujo el mismo patrón
+    ambas veces, pero con un subconjunto DISTINTO de tests fallando cada
+    vez (consistente con acumulación dependiente de timing/orden, no con
+    un bug determinístico de código).
+  - `git log` confirma que ningún archivo de rate-limiting/middleware se
+    tocó en los 47 commits de este deploy.
+  - Ninguno de los tests fallidos toca código de Stripe/pagos — son todos
+    de páginas/endpoints preexistentes sin relación al feature desplegado.
+
+Fix propuesto (NO implementado): aislar el `CACHES` en settings de test
+  (usar `LocMemCache` o un backend dummy en vez del Redis real), o
+  bypassear `TenantRateLimitingMiddleware` cuando `settings.TESTING` esté
+  activo — mismo patrón que ya se usa en otros lados del proyecto para
+  desactivar comportamiento de producción durante tests.
+
+Severidad: Baja (no afecta producción real — un usuario real jamás
+  comparte IP con miles de requests en un minuto como sí hace el test
+  client). Sí afecta la confiabilidad del gate de `cosmic-pull` — un
+  futuro deploy con una regresión real podría esconderse detrás de este
+  ruido si no se corrige.
+Prioridad: Media — corregir antes de que el ruido oculte una falla real.
