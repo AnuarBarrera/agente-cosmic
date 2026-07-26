@@ -45,7 +45,7 @@ class EmailSender:
 
     def send_month_ready(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
         calendar_url = settings.COSMIC_BASE_URL + reverse('calendar_review', args=[job.id])
-        html = render_to_string('content_pipeline/email_initial.html', {
+        html = render_to_string('content_pipeline/email_month_ready.html', {
             'brand_dna': brand_dna,
             'calendar_url': calendar_url,
         })

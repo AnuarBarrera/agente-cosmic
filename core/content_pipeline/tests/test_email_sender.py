@@ -172,6 +172,19 @@ def test_send_month_ready_email_calls_django_send(full_setup):
 
 
 @override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx')
+def test_send_month_ready_email_uses_month_specific_copy(full_setup):
+    from core.content_pipeline.email_sender import EmailSender
+    job, dna, calendar, posts = full_setup
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        sender = EmailSender()
+        sender.send_month_ready(job=job, brand_dna=dna)
+    html = mock_send.call_args[1]['html_message']
+    assert '7 días' not in html
+    assert '4 semanas' in html
+    assert 'La generación del mes de contenido que adquiriste' in html
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx')
 def test_send_week_ready_email_calls_django_send(full_setup):
     from core.content_pipeline.email_sender import EmailSender
     job, dna, calendar, posts = full_setup
@@ -184,6 +197,17 @@ def test_send_week_ready_email_calls_django_send(full_setup):
     subject = mock_send.call_args[0][0]
     assert 'Tu Web MX' in subject
     assert 'semana' in subject.lower()
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx')
+def test_send_week_ready_email_clarifies_it_is_part_of_paid_month(full_setup):
+    from core.content_pipeline.email_sender import EmailSender
+    job, dna, calendar, posts = full_setup
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        sender = EmailSender()
+        sender.send_week_ready(job=job, brand_dna=dna)
+    html = mock_send.call_args[1]['html_message']
+    assert 'del mes que adquiriste' in html
 
 
 
