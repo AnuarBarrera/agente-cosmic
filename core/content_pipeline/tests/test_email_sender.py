@@ -242,5 +242,29 @@ def test_send_month_expired_email_calls_django_send(full_setup):
     assert 'suscripción' not in html.lower()
 
 
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
+def test_send_reactivation_calendar_calls_django_send(full_setup):
+    from core.content_pipeline.email_sender import EmailSender
+    job, dna, calendar, posts = full_setup
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        sender = EmailSender()
+        sender.send_reactivation_calendar(calendar=calendar)
+    mock_send.assert_called_once()
+    call_kwargs = mock_send.call_args
+    assert job.email in call_kwargs[1]['recipient_list']
+    assert 'Tu Web MX' in call_kwargs[0][0]
 
 
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
+def test_send_reactivation_analysis_calls_django_send(full_setup):
+    from core.content_pipeline.email_sender import EmailSender
+    from django.contrib.auth import get_user_model
+    job, dna, calendar, posts = full_setup
+    UserModel = get_user_model()
+    user = UserModel.objects.create_user(username=job.email, email=job.email, password='pass1234')
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        sender = EmailSender()
+        sender.send_reactivation_analysis(user=user)
+    mock_send.assert_called_once()
+    call_kwargs = mock_send.call_args
+    assert user.email in call_kwargs[1]['recipient_list']

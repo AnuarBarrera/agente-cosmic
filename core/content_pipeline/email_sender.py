@@ -6,7 +6,7 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from core.brand_dna.models import AnalysisJob, BrandDNA
-from core.content_pipeline.models import ContentPost
+from core.content_pipeline.models import ContentCalendar, ContentPost
 from core.shared.metrics import EMAILS_SENT
 
 logger = logging.getLogger(__name__)
@@ -185,6 +185,42 @@ class EmailSender:
         )
         EMAILS_SENT.labels(type='month_expired').inc()
         logger.info(f"Email de mes vencido enviado a {job.email} para job {job.id}")
+
+    def send_reactivation_calendar(self, calendar: ContentCalendar) -> None:
+        brand_dna = calendar.brand_dna
+        job = brand_dna.job
+        calendar_review_url = settings.COSMIC_BASE_URL + reverse('calendar_review', args=[job.id])
+        html = render_to_string('content_pipeline/email_reactivation_calendar.html', {
+            'brand_dna': brand_dna,
+            'calendar_review_url': calendar_review_url,
+        })
+        name = brand_dna.business_name.strip() if brand_dna.business_name else ''
+        subject = f'👀 Tu contenido de {name} sigue esperando' if name else '👀 Tu contenido sigue esperando'
+        plain = (
+            f'Tu contenido de {name} sigue listo para descargar y publicar.'
+            if name else 'Tu contenido sigue listo para descargar y publicar.'
+        )
+        send_mail(
+            subject, plain, settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[job.email], html_message=html, fail_silently=False,
+        )
+        EMAILS_SENT.labels(type='reactivation_calendar').inc()
+        logger.info(f"Email de reactivacion (calendario) enviado a {job.email} para calendar {calendar.id}")
+
+    def send_reactivation_analysis(self, user) -> None:
+        analysis_url = settings.COSMIC_BASE_URL + reverse('new_analysis')
+        html = render_to_string('content_pipeline/email_reactivation_analysis.html', {
+            'analysis_url': analysis_url,
+        })
+        subject = '🚀 Aún no analizamos tu marca — te tomará 2 minutos'
+        plain = f'Aún no completas el análisis de tu marca. Hazlo aquí: {analysis_url}'
+        send_mail(
+            subject, plain, settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email], html_message=html, fail_silently=False,
+        )
+        EMAILS_SENT.labels(type='reactivation_analysis').inc()
+        logger.info(f"Email de reactivacion (analisis) enviado a {user.email}")
+
 
 
 
