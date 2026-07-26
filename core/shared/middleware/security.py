@@ -32,7 +32,13 @@ class SecurityHeadersMiddleware(MiddlewareMixin):
             "https://cloudflareinsights.com; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
-            "form-action 'self';"
+            # 'self' + billing.stripe.com: manage_subscription_view manda un POST
+            # a nuestro propio dominio (permitido por 'self') pero responde con un
+            # redirect al portal de cliente de Stripe — form-action tambien
+            # restringe ese redirect resultante, no solo el action= del form, asi
+            # que sin este origen el navegador lo bloquea en silencio (sin error
+            # visible, el usuario solo ve que "no pasa nada" al hacer click).
+            "form-action 'self' https://billing.stripe.com;"
         )
         
         # Security Headers
