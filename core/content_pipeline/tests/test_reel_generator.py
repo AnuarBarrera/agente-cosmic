@@ -57,6 +57,16 @@ class TestWrapText:
         assert ' ' in lines[-1]  # ninguna linea final queda con 1 sola palabra
         assert 'su' in lines[-1]
 
+    def test_does_not_merge_when_result_would_exceed_max_chars_by_much(self):
+        # Palabra final larga: fusionar excederia max_chars por mucho -> NO fusionar,
+        # se queda como esta (mejor una palabra sola legible que una linea sobreancha
+        # que se recortaria al centrarse en un hook/CTA).
+        text = 'Bienvenido a lo extraordinario'
+        result = _wrap_text(text, max_chars=20)
+        lines = result.split('\n')
+        assert len(lines[-1]) <= 24  # max_chars(20) + margen(4)
+
+
 
 
 class TestHexToFfmpegColor:

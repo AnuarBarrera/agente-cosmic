@@ -145,10 +145,14 @@ def _wrap_text(text: str, max_chars: int = 22) -> str:
     if current:
         lines.append(current)
     # Evita dejar una sola palabra huerfana en la ultima linea (ej. "...su" solo) —
-    # se fusiona con la linea anterior aunque exceda max_chars ligeramente.
+    # se fusiona con la linea anterior SOLO si el resultado no excede max_chars por
+    # mucho (margen de 4 caracteres) — evita colapsar un hook/CTA corto de 2 lineas
+    # en 1 sola linea sobreancha que se recortaria al centrarse (x=(w-text_w)/2).
     if len(lines) >= 2 and ' ' not in lines[-1]:
-        lines[-2] = f'{lines[-2]} {lines[-1]}'
-        lines.pop()
+        merged = f'{lines[-2]} {lines[-1]}'
+        if len(merged) <= max_chars + 4:
+            lines[-2] = merged
+            lines.pop()
     return '\n'.join(lines)
 
 
