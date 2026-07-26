@@ -38,6 +38,26 @@ def test_generate_returns_url():
     GOOGLE_CLOUD_LOCATION='us-central1',
     VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
 )
+def test_generate_with_vertex_passes_negative_prompt_for_imagen():
+    from core.content_pipeline.generators.image_generator import ImageGenerator, _IMAGE_NEGATIVE_PROMPT
+    gen = ImageGenerator(bucket_name='test-bucket')
+    mock_client = MagicMock()
+    mock_client.models.generate_images.return_value = MagicMock(
+        generated_images=[MagicMock(image=MagicMock(image_bytes=b'fake-png'))]
+    )
+    with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_client):
+        gen._generate_with_vertex('a test prompt')
+
+    call_kwargs = mock_client.models.generate_images.call_args.kwargs
+    assert call_kwargs['config'].negative_prompt == _IMAGE_NEGATIVE_PROMPT
+
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+)
 def test_generate_derives_font_seed_from_filename_without_day_suffix():
     """Las 7 imagenes de una semana comparten job_id en el filename (job-day1..7) —
     el seed de fuente debe ser el mismo para todas, sin importar el dia."""
@@ -307,6 +327,24 @@ class TestRenderHtmlTemplate:
         html_arg = mock_page.set_content.call_args[0][0]
         fallback = _pick_button_color([])
         assert fallback in html_arg
+
+    def test_uses_color_pool_for_primary_color_when_no_colors(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator, _FALLBACK_COLOR_POOL
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_bg = _png_bytes()
+        fake_shot = _png_bytes(size=(1080, 1080))
+        content = {'headline': 'Título', 'subtitle': 'Subtítulo', 'cta': 'Empieza', 'tag': 'TEST'}
+        mock_pw, mock_page = self._make_mock_playwright(fake_shot)
+
+        with patch('core.content_pipeline.generators.image_generator.sync_playwright', return_value=mock_pw), \
+             patch.object(ImageGenerator, '_choose_template_for_image', return_value='reel_cta.html'), \
+             patch('core.content_pipeline.generators.image_generator.random.choice', return_value='#3ED694') as mock_choice:
+            gen._render_html_template(fake_bg, content, [], font_seed='test')
+
+        mock_choice.assert_called_once_with(_FALLBACK_COLOR_POOL)
+        html_arg = mock_page.set_content.call_args[0][0]
+        assert '#3ED694' in html_arg
+
 
     def test_injects_font_family_into_html(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator, _choose_font_preset

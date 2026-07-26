@@ -26,6 +26,15 @@ logger = logging.getLogger(__name__)
 # (compartido con la portada/contraportada de reels, ver reel_generator.py).
 from core.shared.font_presets import FONT_PRESETS as _FONT_PRESETS, choose_font_preset as _choose_font_preset
 
+_FALLBACK_COLOR_POOL = ['#e94560', '#3ED694', '#8B5CF6', '#F5A9C7', '#FFFFFF']
+
+_IMAGE_NEGATIVE_PROMPT = (
+    "Deformed hands, extra fingers, fused fingers, mutated hands, distorted anatomy, "
+    "plastic skin, oversaturated glossy texture, unrealistic reflections, incorrect "
+    "product, wrong menu item, blurry, low quality."
+)
+
+
 
 def _crop_to_square(image_bytes: bytes) -> bytes:
     """Crop image to 1:1 aspect ratio with top-biased center crop.
@@ -689,7 +698,7 @@ class ImageGenerator:
             html = f.read()
         bg_mime = _detect_mime(background_bytes)
         bg_b64 = base64.b64encode(background_bytes).decode()
-        primary = colors[0] if colors else '#e94560'
+        primary = colors[0] if colors else random.choice(_FALLBACK_COLOR_POOL)
 
         safe_svg = _sanitize_svg(svg_overlay) if svg_overlay else ''
         svg_div = (
@@ -737,6 +746,7 @@ class ImageGenerator:
                     config=types.GenerateImagesConfig(
                         number_of_images=1,
                         aspect_ratio='1:1',
+                        negative_prompt=_IMAGE_NEGATIVE_PROMPT,
                         labels=vertex_labels(),
                     ),
                 )
