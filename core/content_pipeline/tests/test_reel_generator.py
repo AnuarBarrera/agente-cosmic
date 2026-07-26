@@ -236,6 +236,14 @@ class TestGenerateSingleClip:
         assert call_kwargs['config'].negative_prompt == gen._VEO_SAFE_CONSTRAINTS.strip()
         assert 'NO icons' not in call_kwargs['prompt']
 
+    def test_veo_safe_constraints_covers_anatomy_and_product_accuracy(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        constraints = gen._VEO_SAFE_CONSTRAINTS.lower()
+        assert 'deformed hands' in constraints
+        assert 'plastic' in constraints
+        assert 'incorrect or mismatched product' in constraints
+
 
 class TestGenerateVideoClips:
     @override_settings(
@@ -1313,6 +1321,24 @@ class TestGenerate:
              patch.object(gen, '_assemble_reel', side_effect=Exception('ffmpeg error')):
             video_url, poster_url = gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
         assert (video_url, poster_url) == ('', '')
+
+    def test_resolves_empty_colors_to_same_pool_color_for_clips_and_assembly(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator, _FALLBACK_COLOR_POOL
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2', b'c3'], False)) as mock_clips, \
+             patch.object(gen, '_generate_music', return_value=None), \
+             patch.object(gen, '_generate_narration', return_value=None), \
+             patch.object(gen, '_assemble_reel', return_value=b'final-mp4') as mock_assemble, \
+             patch.object(gen, '_extract_poster_frame', return_value=b'poster-png'), \
+             patch.object(gen, '_upload_video_to_storage', return_value='url1'), \
+             patch.object(gen, '_upload_to_storage', return_value='url2'), \
+             patch('core.content_pipeline.generators.reel_generator.random.choice', return_value='#8B5CF6') as mock_choice:
+            gen.generate(_FAKE_SCRIPT, [], 'job1-day1')
+
+        mock_choice.assert_called_once_with(_FALLBACK_COLOR_POOL)
+        assert mock_clips.call_args.args[4] == '#8B5CF6'
+        assert mock_assemble.call_args.args[4] == ['#8B5CF6']
+
 
 
 class TestUploadVideoToStorage:

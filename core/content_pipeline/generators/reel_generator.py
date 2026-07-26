@@ -38,6 +38,7 @@ _IMAGE_SHOT_DURATION_SECONDS = 2.0  # duracion de cada shot corto de imagen (esc
 _VEO_POLL_TIMEOUT_SECONDS = 1800
 _VIDEO_WIDTH = 1080
 _REEL_TEMPLATES = ['panel-wipe', 'kinetic-typography', 'dynamic-background']
+_FALLBACK_COLOR_POOL = ['#e94560', '#3ED694', '#8B5CF6', '#F5A9C7', '#FFFFFF']
 
 # Fuente compartida por hook, CTA y subtitulos — todo el texto de los reels se
 # compone con el filtro drawtext de ffmpeg (fontfile= apunta directo al .ttf).
@@ -351,7 +352,10 @@ class ReelGenerator:
         "NO UI elements, NO icons, NO logos, NO play buttons, NO video player overlays, "
         "NO readable screen content anywhere in the image or video. "
         "If a screen or monitor appears, it must be blank, off, or showing only abstract "
-        "blurred light — never legible text or interface elements."
+        "blurred light — never legible text or interface elements. "
+        "NO deformed hands, NO extra or fused fingers, NO mutated hands, NO distorted "
+        "anatomy, NO plastic-looking skin or food, NO oversaturated glossy textures, NO "
+        "unrealistic reflections, NO incorrect or mismatched product."
     )
 
     def _render_text_overlay_playwright(self, text: str, highlight_word: str,
@@ -917,7 +921,8 @@ class ReelGenerator:
 
     def generate(self, script: dict, colors: list[str], filename_prefix: str) -> tuple[str, str]:
         try:
-            primary_color = colors[0] if colors else '#e94560'
+            colors = colors or [random.choice(_FALLBACK_COLOR_POOL)]
+            primary_color = colors[0]
             clips, has_branding = self._generate_clips_with_branding(
                 script['scene_prompts'], script['hook_text'], script['highlight_word'],
                 script['tag_cta'], primary_color, filename_prefix,
