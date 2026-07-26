@@ -249,7 +249,40 @@ class APIThrottlingMiddlewareTestCase(TestCase):
         """Test that non-specialized endpoints are not affected"""
         request = self.factory.get('/api/v1/tenants/')
         request.user = self.user
-        
+
         # This should not trigger specialized throttling
         response = self.middleware(request)
         self.assertNotEqual(response.status_code, 429)
+
+
+# HALLAZGO 79 (hallazgos.txt): par de tests deliberadamente FUERA de la clase de
+# arriba (que tiene su propio tearDown con cache.clear() y por eso nunca mostraba el
+# bug) — reproducen la fuga de contador de rate-limit por IP entre tests sin relacion,
+# protegidos por el fixture autouse _clear_cache_between_tests (core/conftest.py).
+# Si ese fixture se rompe o se quita, test_b falla porque hereda el conteo de test_a.
+
+@pytest.mark.django_db
+def test_a_ip_rate_limit_exhausted_here_should_not_leak_to_next_test():
+    factory = RequestFactory()
+    request = factory.get('/api/test/')
+    request.user = MagicMock()
+    request.user.is_authenticated = False
+    request.META = {'REMOTE_ADDR': '203.0.113.77'}
+    middleware = TenantRateLimitingMiddleware(lambda r: MagicMock())
+    for _ in range(30):
+        response = middleware(request)
+        assert response.status_code != 429
+    response = middleware(request)
+    assert response.status_code == 429
+
+
+@pytest.mark.django_db
+def test_b_fresh_ip_rate_limit_not_affected_by_previous_test():
+    factory = RequestFactory()
+    request = factory.get('/api/test/')
+    request.user = MagicMock()
+    request.user.is_authenticated = False
+    request.META = {'REMOTE_ADDR': '203.0.113.77'}
+    middleware = TenantRateLimitingMiddleware(lambda r: MagicMock())
+    response = middleware(request)
+    assert response.status_code != 429

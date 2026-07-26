@@ -825,6 +825,17 @@ Acciones recomendadas:
 Severidad: Alta (impacta retención semana 2 directamente)
 Prioridad: P1
 
+ACTUALIZACIÓN 2026-07-25 — 🟢 RESUELTO — implementado como parte del ciclo de
+  suscripciones Stripe (pivote a pago único mensual, ver `ultimosCambios.md`
+  punto 5). Al llegar al día 7: quien pagó recibe la generación automática del
+  mes completo (35 posts, encadenado por semana vía `generate_next_month` +
+  `rq.job.Dependency`, con correo "semana 1 lista" y correo "mes completo");
+  quien no ha pagado ve el CTA de pago y no se genera nada hasta que confirme
+  — sin fricción extra para quien ya pagó, sin gasto especulativo para quien
+  no ha convertido. Reemplaza el mecanismo viejo `generate_next_week`
+  (disparo manual). Probado end-to-end con pago real de Stripe. Detalle
+  técnico completo en memoria `project_monthly_generation_chunking_2026_07_25.md`.
+
 =================================================================
 HALLAZGO 22 — No existe preview integrada del post (imagen + copy)
 Categoría: UX / revisión de calendario
@@ -3975,3 +3986,37 @@ Severidad: Baja (no afecta producción real — un usuario real jamás
   futuro deploy con una regresión real podría esconderse detrás de este
   ruido si no se corrige.
 Prioridad: Media — corregir antes de que el ruido oculte una falla real.
+
+ACTUALIZACIÓN 2026-07-26 — 🟢 RESUELTO — el fix propuesto originalmente
+  ("bypassear TenantRateLimitingMiddleware cuando esté activo un flag de
+  testing") se descartó al verificar `core/shared/tests/test_security_middleware.py`:
+  8+ tests de ese archivo (`test_rate_limiting_for_free_plan`,
+  `test_rate_limit_reset_after_time_window`, etc.) dependen de que el
+  rate-limit SÍ dispare un 429 real dentro de su propio test — un bypass
+  total durante pytest los habría roto a todos.
+
+  Causa raíz más precisa (confirmada en código, no era Redis): el backend
+  de cache no tiene ningún `CACHES` explícito en `settings.py`, así que
+  Django usa el default `LocMemCache` — un diccionario en memoria que vive
+  todo el proceso de pytest. El propio archivo de tests de rate-limiting ya
+  se protegía con su propio `tearDown()` (`cache.clear()`), pero eso solo
+  aislaba SUS tests entre sí — cualquier request anónima de OTRO archivo de
+  test (ej. `test_status_api_requires_login`) sumaba al mismo contador de
+  IP compartido sin que nadie lo limpiara, hasta acumular 30+ y contaminar
+  tests sin relación alguna.
+
+  Fix real: un fixture `autouse=True` nuevo en `core/conftest.py`
+  (`_clear_cache_between_tests`) que limpia `django.core.cache.cache`
+  ANTES de cada test de toda la suite — aísla el contador de IP entre
+  archivos sin desactivar el rate-limit en los tests que sí lo verifican a
+  propósito (siguen viendo su propio 429 dentro de su propia ejecución,
+  arrancando de un cache limpio cada vez).
+
+  Verificado con el mismo método que documentó el hallazgo: 2 tests nuevos
+  (`test_a_ip_rate_limit_exhausted_here_should_not_leak_to_next_test` +
+  `test_b_fresh_ip_rate_limit_not_affected_by_previous_test`,
+  deliberadamente fuera de la clase con su propio `tearDown`) reproducen la
+  fuga exacta — confirmado que `test_b` FALLA sin el fixture (429 heredado
+  del test anterior) y PASA con el fixture activo. Suite completa corrida
+  2 veces seguidas tras el fix: 573 passed ambas veces, sin ningún 429
+  espurio — el ruido documentado en este hallazgo ya no aparece.
