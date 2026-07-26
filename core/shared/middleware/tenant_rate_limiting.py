@@ -47,6 +47,12 @@ class TenantRateLimitingMiddleware:
             '/health/',
             '/api/v1/auth/token/',
             '/api/v1/auth/logout/',
+            # Stripe manda estos webhooks sin sesion de usuario, desde un pool de
+            # IPs compartido entre TODOS sus clientes (no solo nosotros) — sin
+            # este whitelist, un pago real podria confirmarse en Stripe pero
+            # nunca activarse aqui si el limite de 30 req/min por IP se agota
+            # por trafico ajeno o reintentos de Stripe.
+            '/stripe/webhook/',
         ]
     
     def __call__(self, request):
