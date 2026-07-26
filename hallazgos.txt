@@ -4020,3 +4020,36 @@ ACTUALIZACIÓN 2026-07-26 — 🟢 RESUELTO — el fix propuesto originalmente
   del test anterior) y PASA con el fixture activo. Suite completa corrida
   2 veces seguidas tras el fix: 573 passed ambas veces, sin ningún 429
   espurio — el ruido documentado en este hallazgo ya no aparece.
+
+=================================================================
+HALLAZGO 80 — Nuevo flake de orden de tests, distinto a HALLAZGO 79:
+  PasswordSecurityTestCase falla en suite completa, pasa en aislamiento
+Categoría: Deuda técnica / aislamiento de tests
+Estado: 🟡 DIAGNOSTICADO PARCIALMENTE — PENDIENTE DE INVESTIGAR CAUSA RAÍZ
+=================================================================
+Contexto: 2026-07-26, tras cerrar el plan de correcciones de calidad de
+  imagen/reel (5 tareas, ninguna toca `tenant_management` ni autenticación),
+  la corrida de la suite completa (`pytest core/`) mostró 3 tests caídos:
+  `PasswordSecurityTestCase::test_password_change_functionality`,
+  `test_password_history_tracking`, y
+  `test_security_event_logging_for_password_changes`
+  (`core/tenant_management/tests/test_auth_security.py`).
+
+Verificación de que NO es una regresión de este plan: los 3 tests, corridos
+  en aislamiento (`pytest core/tenant_management/tests/test_auth_security.py -k
+  "..."`), pasan limpio 3/3. `git log` confirma que ningún archivo de
+  `tenant_management`/auth se tocó en las 5 tareas del plan de imagen/reel.
+
+Diferencia con HALLAZGO 79 (ya resuelto el mismo día): confirmado que
+  `test_auth_security.py` NO usa `django.core.cache` en ningún punto — el
+  fixture `_clear_cache_between_tests` agregado hoy para HALLAZGO 79 no es
+  la causa. Esto es una fuga de estado DISTINTA entre tests que comparten
+  la suite completa (probablemente estado de base de datos/orden de
+  ejecución — no investigado a fondo todavía, no confundir con el mismo
+  patrón de síntoma que HALLAZGO 79).
+
+Severidad: Baja (no afecta producción real, mismo argumento que HALLAZGO 79
+  — es un artefacto de compartir estado entre ~580 tests en un solo proceso).
+Prioridad: Media — mismo riesgo que HALLAZGO 79 de esconder una regresión
+  real futura detrás de ruido conocido. Investigar causa raíz cuando se
+  retome trabajo de aislamiento de tests.
