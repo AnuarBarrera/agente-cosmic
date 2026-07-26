@@ -1025,6 +1025,29 @@ class TestAssembleReel:
         assert overlay_cmd[map_idx + 1] == '[sub1]'
 
     @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
+    def test_subtitle_filter_has_contrast_box_and_higher_safe_zone(self, tmp_path):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-mp4-bytes'
+
+        subtitles = [{'text': 'Tu negocio en linea.', 'start': 0.0, 'end': 2.5}]
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=_fake_ffmpeg_run(fake_output)) as mock_run:
+            gen._assemble_reel(
+                clips=[b'clip1', b'clip2', b'clip3'],
+                music=None, narration=None,
+                script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
+                subtitles=subtitles,
+            )
+
+        overlay_cmd = mock_run.call_args_list[3].args[0]
+        filter_complex_idx = overlay_cmd.index('-filter_complex')
+        filter_complex = overlay_cmd[filter_complex_idx + 1]
+        assert 'box=1:boxcolor=black@0.5' in filter_complex
+        assert 'y=h-345' in filter_complex
+
+
+    @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
     def test_omits_subtitle_filters_when_no_subtitles(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')

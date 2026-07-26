@@ -825,13 +825,14 @@ class ReelGenerator:
                     filter_parts += cta_parts
 
             subtitle_fontsize = max(1, int(_SUBTITLE_FONTSIZE * scale))
-            subtitle_y_offset = int(300 * scale)
+            subtitle_y_offset = int(345 * scale)
             for i, sub in enumerate(subtitles or []):
                 next_label = f'sub{i}'
                 textfile = _write_drawtext_textfile(tmp, f'{next_label}.txt', _wrap_text(sub['text']))
                 filter_parts.append(
                     f"[{last_label}]drawtext=fontfile={_DRAWTEXT_FONT_PATH}:textfile={textfile}:"
                     f"fontcolor=white:fontsize={subtitle_fontsize}:borderw=3:bordercolor=black:"
+                    f"box=1:boxcolor=black@0.5:boxborderw=10:"
                     f"x=(w-text_w)/2:y=h-{subtitle_y_offset}:"
                     f"enable='between(t,{sub['start']},{sub['end']})'[{next_label}]"
                 )
