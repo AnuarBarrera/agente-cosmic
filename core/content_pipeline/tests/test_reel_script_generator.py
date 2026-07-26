@@ -221,6 +221,29 @@ def test_prompt_differentiates_veo_scene_from_imagen_scenes(brand_dna):
     GOOGLE_CLOUD_LOCATION='us-central1',
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
 )
+def test_prompt_avoids_manufacturing_process_and_requires_style_consistency(brand_dna):
+    from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
+    post_data = {'caption': 'Bolsos artesanales hechos a mano'}
+    response_json = (
+        '{"hook_text":"H","highlight_word":"H","tag_cta":"C","narration_script":"N",'
+        '"scene_prompts":["s1","s2","s3","s4","s5","s6"],"music_mood":"M"}'
+    )
+    with patch('core.content_pipeline.generators.reel_script_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(response_json)
+        ReelScriptGenerator().generate(post_data, brand_dna)
+
+    sent_prompt = mock_vc.return_value.models.generate_content.call_args.kwargs['contents']
+    assert 'manos trabajando' not in sent_prompt
+    assert 'cliente disfrutando' in sent_prompt or 'sensacion de satisfaccion' in sent_prompt
+    assert 'mismo estilo fotografico consistente' in sent_prompt
+
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
 def test_generate_rewrites_field_flagged_by_brand_consistency_audit(brand_dna, _mock_brand_consistency_qc):
     from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
     mock_audit, mock_rewrite = _mock_brand_consistency_qc
