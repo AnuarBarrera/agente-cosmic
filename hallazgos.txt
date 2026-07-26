@@ -4053,3 +4053,74 @@ Severidad: Baja (no afecta producción real, mismo argumento que HALLAZGO 79
 Prioridad: Media — mismo riesgo que HALLAZGO 79 de esconder una regresión
   real futura detrás de ruido conocido. Investigar causa raíz cuando se
   retome trabajo de aislamiento de tests.
+
+=================================================================
+HALLAZGO 81 — schedule_daily_emails() se llama 2 veces por calendario,
+  duplica el recordatorio diario (probable correo real duplicado
+  confirmado en un caso)
+Categoría: Bug de lógica de negocio (emails duplicados)
+Estado: 🟡 DIAGNOSTICADO — PENDIENTE DE FIX — 2026-07-26
+=================================================================
+Contexto: Anuar pidió verificar que la lógica nueva de "descargar la
+  imagen/video/zip cancela el envío del recordatorio" ya estuviera activa
+  para el calendario de `contacto@dialogix.anuarbarrera.dev` (el mismo
+  usado para probar el flujo de pago real con Stripe). La lógica de
+  cancelación en sí está bien implementada — `send_daily_email_task`
+  revisa `if post.downloaded_at is not None: ... se omite el correo
+  diario` antes de mandar — pero al verificarla se encontró un bug
+  separado y más grave en el mismo subsistema.
+
+Evidencia: el recordatorio del día 2 de ese calendario se disparó DOS
+  VECES casi simultáneas (27ms de diferencia) desde 2 workers distintos
+  (`a38c988d...` en rqworker-1, `ea163187...` en rqworker-2), ambos a las
+  16:00:02 — exactamente la hora programada (`scheduled_at`) del post. El
+  intento `ea163187` completó normal y mandó el correo ("Email dia 2
+  enviado a contacto@dialogix.anuarbarrera.dev"). El intento `a38c988d`
+  truena con `psycopg2.errors.SerializationFailure: could not serialize
+  access due to concurrent update` — pero el traceback muestra que el
+  crash ocurre DENTRO de `post.save(update_fields=['status', 'sent_at'])`
+  (linea 109 de `email_sender.py`), es decir, DESPUES de que
+  `send_mail()` ya se ejecutó exitosamente en esa misma llamada. Esto
+  implica que el correo del día 2 muy probablemente se mandó DOS VECES a
+  un destinatario real, y el segundo intento solo fallo al escribir en
+  BD, no al enviar.
+
+  Se confirmó que el mismo patrón existe también para el día 3 de ese
+  calendario (2 jobs en el registro de programados de RQ para el mismo
+  post, aún sin disparar) — el problema no es exclusivo del día 2, afecta
+  a todo el rango de días que estaban `pending` en ambas llamadas.
+
+Causa raíz: `schedule_daily_emails()`
+  (`core/content_pipeline/scheduler.py`) filtra
+  `calendar.posts.filter(status=ContentPost.STATUS_PENDING)` — es decir,
+  vuelve a programar un recordatorio para CUALQUIER post que siga
+  `pending`, sin distinguir si ya tiene uno programado de una llamada
+  anterior. La función se llama en 2 puntos de `tasks.py`: una vez en
+  `_trial_closing_task` (al cerrar la semana de trial) y otra vez en
+  `generate_next_month` (al generar el mes pagado, disparado por el
+  webhook de Stripe). Para el calendario de dialogix, ambas llamadas
+  ocurrieron con ~2 minutos de diferencia (01:44 y 01:46 UTC) — todos los
+  días que en ese momento aún no habían llegado a su `scheduled_at`
+  (días 2-7, ya que el día 1 ya había pasado y estaba `sent`) quedaron
+  con 2 recordatorios programados en vez de 1.
+
+Fix propuesto (NO implementado): `schedule_daily_emails()` necesita
+  excluir posts que ya tienen un recordatorio programado — opciones a
+  evaluar: (1) agregar un campo booleano tipo `reminder_scheduled` a
+  `ContentPost` y filtrar por `reminder_scheduled=False`, marcándolo
+  `True` al encolar; o (2) que cada llamada solo programe el rango de
+  `day_number` que le corresponde a esa etapa (días 1-7 para
+  `_trial_closing_task`, días 8+ para `generate_next_month`) en vez de
+  volver a escanear todo el calendario. También vale la pena agregar un
+  guard de idempotencia en `EmailSender.send_daily()` (revisar
+  `post.status != STATUS_SENT` antes de llamar `send_mail()`, no solo
+  después) como red de seguridad adicional, ya que un `SerializationFailure`
+  concurrente puede repetirse por otras causas además de este bug
+  puntual.
+
+Severidad: Alta — correos duplicados le llegan a clientes reales, no es
+  solo un problema de logs/tests. Con el sistema de pagos ya en
+  producción, cada calendario pagado (`generate_next_month`) dispara esta
+  duplicación para los días de la semana de trial que sigan pendientes.
+Prioridad: Alta — corregir antes de que más cuentas reales completen el
+  flujo de pago.
