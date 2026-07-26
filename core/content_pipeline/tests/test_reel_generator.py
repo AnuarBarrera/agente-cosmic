@@ -50,6 +50,14 @@ class TestWrapText:
         result = _wrap_text(text, max_chars=20)
         assert result == 'Tu negocio en linea\nen menos de 48 horas'
 
+    def test_merges_orphaned_single_word_into_previous_line(self):
+        text = 'creemos que cada caballero merece lucir su'
+        result = _wrap_text(text, max_chars=22)
+        lines = result.split('\n')
+        assert ' ' in lines[-1]  # ninguna linea final queda con 1 sola palabra
+        assert 'su' in lines[-1]
+
+
 
 class TestHexToFfmpegColor:
     def test_converts_hash_prefix_to_0x(self):

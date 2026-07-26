@@ -144,6 +144,11 @@ def _wrap_text(text: str, max_chars: int = 22) -> str:
             current = candidate
     if current:
         lines.append(current)
+    # Evita dejar una sola palabra huerfana en la ultima linea (ej. "...su" solo) —
+    # se fusiona con la linea anterior aunque exceda max_chars ligeramente.
+    if len(lines) >= 2 and ' ' not in lines[-1]:
+        lines[-2] = f'{lines[-2]} {lines[-1]}'
+        lines.pop()
     return '\n'.join(lines)
 
 
