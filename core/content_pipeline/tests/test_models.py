@@ -69,3 +69,9 @@ def test_content_post_reel_format(brand_dna):
     assert post.format == 'reel'
     assert post.video_url == 'https://storage.googleapis.com/agente-cosmic/video.mp4'
     assert post.image_url == 'https://storage.googleapis.com/agente-cosmic/poster_frame.jpg'
+
+
+def test_content_calendar_last_reactivation_email_at_defaults_to_none(brand_dna):
+    calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
+    assert calendar.last_reactivation_email_at is None
+

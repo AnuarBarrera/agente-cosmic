@@ -64,3 +64,11 @@ def test_subscription_paid_until_accepts_datetime():
     assert sub.paid_until == paid_until
 
 
+def test_user_last_reactivation_email_at_defaults_to_none():
+    from django.contrib.auth import get_user_model
+    UserModel = get_user_model()
+    user = UserModel.objects.create_user(username='reactivacion@test.com', email='reactivacion@test.com', password='pass1234')
+    assert user.last_reactivation_email_at is None
+
+
+
