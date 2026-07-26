@@ -82,6 +82,20 @@ def test_send_daily_email_uses_real_date_not_day_number(full_setup):
     assert 'No se te olvide publicar' in plain
 
 
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx')
+def test_send_daily_is_idempotent_for_already_sent_post(full_setup):
+    from core.content_pipeline.email_sender import EmailSender
+    job, dna, calendar, posts = full_setup
+    post = posts[0]
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        sender = EmailSender()
+        sender.send_daily(post=post)
+        sender.send_daily(post=post)
+    assert mock_send.call_count == 1
+    post.refresh_from_db()
+    assert post.status == ContentPost.STATUS_SENT
+
+
 @override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/test123')
 def test_send_trial_expired_email_calls_django_send(full_setup):
     from core.content_pipeline.email_sender import EmailSender

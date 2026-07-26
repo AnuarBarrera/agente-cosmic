@@ -1,6 +1,7 @@
 import logging
 from django.conf import settings
 from django.core.mail import send_mail
+from django.db import transaction
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
@@ -84,31 +85,38 @@ class EmailSender:
 
 
     def send_daily(self, post: ContentPost) -> None:
-        calendar_review_url = settings.COSMIC_BASE_URL + reverse(
-            'calendar_review', args=[post.calendar.brand_dna.job.id]
-        )
-        fecha = _fecha_es(post.scheduled_at)
-        html = render_to_string('content_pipeline/email_daily.html', {
-            'post': post,
-            'calendar_review_url': calendar_review_url,
-            'fecha': fecha,
-        })
-        business_name = (post.calendar.brand_dna.business_name or '').strip()
-        email = post.calendar.brand_dna.job.email
-        subject = f'🔔 No se te olvide publicar hoy ({fecha}) — {business_name}' if business_name else f'🔔 No se te olvide publicar hoy ({fecha}) — Agente Cosmic'
-        send_mail(
-            subject,
-            f'No se te olvide publicar el día de hoy ({fecha}).',
-            settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[email],
-            html_message=html,
-            fail_silently=False,
-        )
-        post.status = ContentPost.STATUS_SENT
-        post.sent_at = timezone.now()
-        post.save(update_fields=['status', 'sent_at'])
+        with transaction.atomic():
+            locked_post = ContentPost.objects.select_for_update().filter(
+                id=post.id, status=ContentPost.STATUS_PENDING
+            ).first()
+            if locked_post is None:
+                logger.info(f"Post {post.id} ya no está pending — se omite envío duplicado")
+                return
+            calendar_review_url = settings.COSMIC_BASE_URL + reverse(
+                'calendar_review', args=[locked_post.calendar.brand_dna.job.id]
+            )
+            fecha = _fecha_es(locked_post.scheduled_at)
+            html = render_to_string('content_pipeline/email_daily.html', {
+                'post': locked_post,
+                'calendar_review_url': calendar_review_url,
+                'fecha': fecha,
+            })
+            business_name = (locked_post.calendar.brand_dna.business_name or '').strip()
+            email = locked_post.calendar.brand_dna.job.email
+            subject = f'🔔 No se te olvide publicar hoy ({fecha}) — {business_name}' if business_name else f'🔔 No se te olvide publicar hoy ({fecha}) — Agente Cosmic'
+            send_mail(
+                subject,
+                f'No se te olvide publicar el día de hoy ({fecha}).',
+                settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                html_message=html,
+                fail_silently=False,
+            )
+            locked_post.status = ContentPost.STATUS_SENT
+            locked_post.sent_at = timezone.now()
+            locked_post.save(update_fields=['status', 'sent_at'])
         EMAILS_SENT.labels(type='daily_post').inc()
-        logger.info(f"Email dia {post.day_number} enviado a {email}")
+        logger.info(f"Email dia {locked_post.day_number} enviado a {email}")
 
     def send_trial_expired(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
         payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={job.user.tenant_id}"
