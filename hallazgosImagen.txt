@@ -1,0 +1,561 @@
+=================================================================
+HALLAZGOS DE IMAGEN/REEL — Agente Cosmic
+=================================================================
+Archivo dedicado a hallazgos relacionados a generación de imagen/reel
+(pipeline de producto real como referencia, calidad visual, QC, etc.)
+detectados durante pruebas manuales. Mismo formato que hallazgos.txt.
+
+=================================================================
+HALLAZGO IMG-01 — "El control de calidad rechazó el resultado" es un
+  mensaje enganoso: en realidad es una excepcion sin manejar cuando
+  Gemini rechaza generar contenido (probable causa: copyright de
+  personajes con licencia en la foto de referencia)
+Categoría: Bug de manejo de errores + mensaje de usuario enganoso
+Estado: 🟡 DIAGNOSTICADO — PENDIENTE DE FIX — 2026-07-27
+=================================================================
+Contexto: Anuar probó el pipeline nuevo de "producto real como
+  referencia" (`sample_product_image`, desplegado el mismo día) subiendo
+  una foto real de producto (gelopaletas con personajes de Lilo & Stitch
+  con licencia de Disney, más texto de marca superpuesto en la foto:
+  "Gelopaleta Tematica MARBA", "Leche Entera, Descremada o
+  Deslactosada"). El job (`d6f60e36-0210-42a5-9b19-304d050ccb2e`,
+  contacto.neia@gmail.com) marcó `status=failed` con el mensaje:
+  "El control de calidad rechazó el resultado (posible alucinación de
+  logo/texto). Reintenta."
+
+Verificación: el log real (no el mensaje que ve el usuario) muestra:
+  `WARNING product_reference_generator ProductReferenceGenerator.
+  _generate_scene fallo: 'NoneType' object is not iterable`
+
+Causa raíz (código): en
+  `core/content_pipeline/generators/product_reference_generator.py`,
+  método `_generate_scene` (línea ~125-144):
+  ```python
+  resp = client.models.generate_content(
+      model=_REFERENCE_IMAGE_MODEL,
+      contents=[image_part, prompt],
+      config=types.GenerateContentConfig(response_modalities=['IMAGE', 'TEXT'], ...),
+  )
+  record_tokens(resp, operation='product_reference_scene', prompt_preview=prompt[:500])
+  for part in resp.candidates[0].content.parts:   # <-- truena aqui
+      if part.inline_data:
+          return part.inline_data.data
+  return None
+  ```
+  Cuando Gemini se niega a generar una imagen para ese turno (ver
+  hipótesis abajo), `resp.candidates[0].content.parts` viene `None` en
+  vez de una lista vacía — el `for` truena con
+  `TypeError: 'NoneType' object is not iterable`. Esa excepción la
+  atrapa el `try/except` genérico de `_generate_scene` (que solo
+  loggea un warning y regresa `None`), y ese `None` se propaga hasta
+  `_generate_product_reference_sample` en `tasks.py`, que interpreta
+  CUALQUIER resultado vacío como "el QC rechazó el resultado" — sin
+  distinguir entre (a) un rechazo real de nuestro propio control de
+  calidad visual (`_validate_scene`, que sí corre DESPUES de esta
+  llamada y nunca llegó a ejecutarse en este caso) y (b) el modelo de
+  Gemini negándose a generar nada. El mensaje que ve el usuario
+  ("el control de calidad rechazó...posible alucinación de logo/texto")
+  es literalmente el de la validación de HALUCINACIÓN — engañoso en
+  este caso, porque nunca se llegó a generar/validar ninguna imagen.
+
+Hipótesis de por qué Gemini no generó nada (no confirmado 100%, no hay
+  logging del `finish_reason` del candidato para verificarlo): la foto
+  de referencia subida contiene personajes con licencia de Disney
+  (Lilo & Stitch) impresos en el producto. Los modelos de generación de
+  imagen de Google suelen tener filtros de seguridad/copyright que
+  rechazan generar contenido derivado de IP con licencia reconocible.
+  Es la explicación mas probable dado el contenido de la imagen, pero
+  no se descarta que sea un fallo transitorio de la API sin relación al
+  contenido.
+
+Fix propuesto (NO implementado):
+  1. En `_generate_scene`, verificar `resp.candidates` y
+     `resp.candidates[0].content` antes de iterar — si vienen vacios/
+     None, loggear `resp.candidates[0].finish_reason` (o el equivalente
+     que exponga el SDK) para poder diagnosticar la causa real (SAFETY,
+     PROHIBITED_CONTENT, RECITATION, etc.) en vez de dejar que truene
+     con un TypeError generico.
+  2. Diferenciar en el mensaje final al usuario entre "el modelo se
+     nego a generar contenido para esta foto" (posible copyright/
+     seguridad — sugerir probar con una foto sin personajes con
+     licencia) vs "nuestro propio QC de alucinacion de logo/texto
+     rechazo el resultado" (`_validate_scene` fallo DESPUES de generar
+     algo) — son causas y remedios distintos para el usuario.
+
+Severidad: Media (el pipeline nuevo de producto-referencia queda
+  inutilizable para cualquier foto con personajes con licencia, sin
+  que el usuario entienda por que — el mensaje lo manda a "reintentar"
+  cuando reintentar con la MISMA foto muy probablemente vuelva a
+  fallar igual).
+Prioridad: Media — corregir el manejo de excepcion + mensaje antes de
+  que mas testers prueben este pipeline nuevo con fotos reales de
+  producto (muchos productos de clientes reales de Cosmic
+  probablemente tienen personajes con licencia impresos, ej. fiestas
+  infantiles).
+
+=================================================================
+HALLAZGO IMG-02 — _validate_scene() no loguea la razon del rechazo de
+  QC — imposible diagnosticar cual criterio especifico fallo sin
+  modificar el codigo
+Categoría: Observabilidad / gap de logging
+Estado: ✅ CORREGIDO — 2026-07-27
+=================================================================
+Contexto: segundo intento de prueba del pipeline de producto-referencia
+  (job `db96f195-4f41-459c-af4b-5d4f3afddf89`, contacto.neia@gmail.com,
+  mismo modo `sample_product_image`). A diferencia del primer intento
+  (HALLAZGO IMG-01, que truena por una excepcion sin manejar), esta vez
+  el flujo llego correctamente hasta `_validate_scene` y la escena SI se
+  genero — el rechazo esta vez es un QC real y funcionando:
+  `WARNING product_reference_generator ProductReferenceGenerator: QC
+  rechazo la escena generada (generate_image)`
+
+  Pero no hay forma de saber POR QUE la rechazo. El prompt de QC
+  (`_QC_PROMPT`) le pide a Gemini evaluar 5 criterios booleanos
+  distintos (`has_text`, `is_abstract_3d`, `has_screen_content`,
+  `has_malformed_object`, `has_unrealistic_grounding`) mas un booleano
+  final `ok` — pero `_validate_scene()` en
+  `core/content_pipeline/generators/product_reference_generator.py`
+  (linea ~195-212) solo extrae `data.get('ok', True)` y descarta el
+  resto del JSON sin loguearlo:
+  ```python
+  record_tokens(resp, operation='product_reference_qc', prompt_preview=_QC_PROMPT[:500])
+  raw = resp.text.strip()
+  match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
+  if match:
+      data = json.loads(match.group())
+      return bool(data.get('ok', True))
+  ```
+  Notese ademas que `record_tokens()` aqui NO pasa `response_preview=
+  resp.text[:500]` (a diferencia de otras llamadas de QC en el
+  proyecto, ej. `caption_safety_qc` en `text_generator.py`, que si
+  loguean el preview de la respuesta) — asi que ni siquiera queda un
+  rastro indirecto en `llm_audit.jsonl` de que decidio el modelo.
+
+  Resultado: cuando el QC rechaza (que puede pasar seguido, dado que la
+  foto de referencia de Anuar tiene texto impreso — "Gelopaleta Tematica
+  MARBA", "Leche Entera..." — y el criterio `has_text` explicitamente
+  marca CUALQUIER texto legible en la imagen, incluso en el producto
+  mismo, no solo alucinado), no hay manera de confirmar si el rechazo
+  fue por `has_text` (posiblemente detectando el texto YA IMPRESO en el
+  producto original, no un texto alucinado por el modelo — un falso
+  positivo del punto de vista del usuario) o por otro criterio.
+
+Fix implementado: `_validate_scene()` ahora loguea
+  `logger.warning(f"ProductReferenceGenerator: QC rechazo con detalle: {data}")`
+  con el JSON completo (los 5 booleanos + ok) cuando `ok=False`, y
+  `record_tokens()` ya recibe `response_preview=raw[:500]` — mismo
+  patron que `caption_safety_qc`. Con esto, la proxima vez que el QC
+  rechace algo, se podra ver en logs/llm_audit.jsonl exactamente cual de
+  los 5 criterios (`has_text`, `is_abstract_3d`, `has_screen_content`,
+  `has_malformed_object`, `has_unrealistic_grounding`) causo el rechazo,
+  en vez de solo el booleano final `ok=false`.
+
+  631 tests pasando sin cambios, desplegado y verificado sano en
+  produccion.
+
+Severidad: Media (no rompe nada, pero sin esto HALLAZGO IMG-01 y
+  cualquier futuro reporte de "el QC rechazo mi producto" no se podia
+  diagnosticar con evidencia — solo con conjeturas).
+Prioridad: Media — resuelto.
+
+=================================================================
+HALLAZGO IMG-03 — Contradiccion de diseno: el prompt de generacion pide
+  preservar "cualquier branding visible" del producto real, y el QC
+  rechaza CUALQUIER logo/texto sin distinguir real de alucinado — el
+  pipeline esta condenado a fallar con productos con etiqueta/marca
+  visible (el caso mas comun)
+Categoría: Bug de diseño de prompts (conflicto entre 2 pasos del mismo
+  pipeline)
+Estado: ✅ CORREGIDO — 2026-07-27 (pendiente de verificar con una 4a
+  prueba real que el QC ya no rechace productos con etiqueta)
+=================================================================
+Contexto: tercer intento de prueba (job
+  `64445bf6-41f5-465c-8529-246438a9d76c`, contacto.neia@gmail.com,
+  mismo modo `sample_product_image`). Esta vez la foto de referencia NO
+  tiene personajes con licencia (a diferencia de HALLAZGO IMG-01) — es
+  un vaso transparente con gelatina y fruta, con un pequeño sticker/logo
+  "MARBA" impreso en la tapa. `_generate_scene` SI genero una imagen
+  nueva exitosamente (1318 output tokens), pero `_validate_scene` (QC)
+  la rechazo de nuevo, con el mismo mensaje generico.
+
+Con este tercer caso (limpio, sin copyright de por medio) se puede
+  confirmar la causa raiz real detras de los 3 intentos fallidos: es un
+  conflicto de diseno entre 2 prompts del mismo archivo
+  `product_reference_generator.py`:
+
+  `_SCENE_PROMPT_TEMPLATE` (linea 27-33) — el prompt que genera la
+  escena nueva — le INSTRUYE EXPLICITAMENTE a Gemini preservar el
+  branding real del producto:
+  > "Incorporate this exact product as it appears (same shape, color,
+  > texture, **any visible branding**) as the subject of the new
+  > photograph."
+
+  `_QC_PROMPT` (linea 41-51) — el prompt que audita el resultado —
+  RECHAZA cualquier resultado con texto/logo, SIN distinguir si es real
+  (fiel al producto original) o alucinado:
+  > "has_text: true if ANY readable letters, words, numbers or text
+  > appear ANYWHERE in the image... OR any logo/brand mark of any kind,
+  > even a purely graphic symbol with no letters (**real or
+  > invented**). ... Be very strict."
+
+  Es decir: el paso 1 le pide al modelo que SI reproduzca la marca/
+  etiqueta real del producto (correcto, es el punto de este pipeline:
+  usar la foto real como referencia fiel). El paso 2 rechaza el
+  resultado si detecta esa MISMA marca/etiqueta, sin importar que sea
+  una reproduccion fiel y no una alucinacion. El pipeline esta
+  practicamente garantizado a fallar con CUALQUIER producto que tenga
+  una etiqueta o logo visible en su empaque — que es el caso mas comun
+  para productos reales de clientes de Cosmic (casi todo producto
+  empacado trae su propia marca impresa).
+
+  Esto reencuadra HALLAZGO IMG-01 tambien: es probable que en ese primer
+  intento (foto con personajes de Stitch + texto "Gelopaleta Tematica
+  MARBA" horneado en la imagen), la razon real de que Gemini se negara
+  a generar nada (el crash de `NoneType`) tambien haya sido relacionada
+  a este mismo conflicto — o al copyright de Stitch especificamente. Sin
+  el fix de HALLAZGO IMG-02 (loguear la razon real de rechazo/
+  finish_reason) no se puede confirmar cual de las 2 causas domino en
+  cada caso — pero HALLAZGO IMG-03 por si solo ya explica por que los
+  3/3 intentos fallaron, independientemente de si hay copyright de por
+  medio o no.
+
+Decision de producto (tomada por Anuar en la conversacion): no confiar
+  en que el modelo reproduzca el logo/etiqueta de forma fiel — mas facil
+  y confiable pedirle que NUNCA incluya texto/logo (ni siquiera el
+  real), y dejar que el QC siga rechazando cualquier texto/logo tal cual
+  ya hacia. Esto corresponde a la opcion 3 de las originalmente
+  propuestas (ver diff abajo) — se descarto la opcion 2 (comparar
+  contra la foto original) por ser mas compleja y depender de que el
+  modelo reproduzca el logo correctamente, que es justo lo que no se
+  quiere asumir.
+
+Fix implementado: `_SCENE_PROMPT_TEMPLATE` en
+  `core/content_pipeline/generators/product_reference_generator.py` ya
+  NO pide preservar "any visible branding" — ahora pide fidelidad de
+  forma/color/material/textura del producto, pero instruye
+  explicitamente NO incluir texto/logos/marca en ningun lado de la
+  imagen, y renderizar cualquier zona de etiqueta como material en
+  blanco sin texto ni graficos visibles. Con esto, un rechazo del QC por
+  `has_text` en una prueba futura ya significa con confianza que el
+  modelo alucino algo que se le pidio explicitamente NO hacer — no que
+  hizo bien su trabajo de preservar branding y lo castigamos por eso.
+
+  609 → 631 tests pasando sin cambios (ningun test dependia del texto
+  exacto del prompt), desplegado y verificado sano en produccion.
+
+Severidad: Alta — el pipeline nuevo de producto-referencia, tal como
+  estuvo desplegado el 27-jul (antes de este fix), fallaba
+  consistentemente (3/3 pruebas manuales) para productos con cualquier
+  etiqueta/marca visible, que es la mayoria de los productos reales. No
+  era un bug intermitente, era un conflicto estructural entre 2 prompts
+  del mismo flujo.
+Prioridad: Alta — resuelto. Pendiente: una 4a prueba real con un
+  producto con etiqueta visible para confirmar que el QC ya no rechaza
+  por el logo/texto original del producto.
+
+=================================================================
+HALLAZGO IMG-04 — Rechazo de QC con foto de referencia saturada de
+  marca de agua repetida — causa real CONFIRMADA (gracias al fix de
+  IMG-02): NO es por texto/logo, es `has_unrealistic_grounding` (el
+  sujeto/producto se ve flotando, sin anclaje realista a la superficie)
+Categoría: Caso limite del pipeline de producto-referencia (calidad de
+  composicion, no relacionado a texto/logo)
+Estado: 🟢 CAUSA CONFIRMADA CON EVIDENCIA — SIN FIX AUN (ver propuesta
+  abajo) — 2026-07-27
+=================================================================
+Contexto: 4ta y 5ta prueba fueron exitosas tras el fix de HALLAZGO
+  IMG-03 (jobs `9a502fb3`, `22a1502a`, `094e1f84`, `c598b9cf` —
+  4 seguidas en verde). La siguiente prueba
+  (`1d2e3a3b-1a37-42dc-a05f-3aabc87d5462`, negocio "Batas de carnicero")
+  volvio a fallar con el mismo mensaje generico.
+
+La foto de referencia de este caso es cualitativamente distinta a los 3
+  hallazgos anteriores: no es un logo pequeño en una etiqueta/tapa — es
+  una foto de producto (bata de carnicero, modelo de cuerpo completo con
+  mascara) con una **marca de agua repetida decenas de veces cubriendo
+  TODA la superficie de la imagen**: "#BATAS DE CARNICERO", un numero de
+  WhatsApp ("55 1195 5535"), e iconos de Facebook/WhatsApp, en un
+  patron tipo mosaico que se repite ~20+ veces de arriba a abajo.
+  Practica comun de vendedores en redes sociales/marketplace para
+  evitar robo de imagen.
+
+`_generate_scene` SI genero una imagen (1290 output tokens, no fue un
+  crash como IMG-01). `_validate_scene` la rechazo.
+
+**Actualizacion — causa confirmada con el fix de IMG-02 ya activo:**
+  se repitio la prueba con la MISMA foto exacta (confirmado por hash
+  MD5 identico entre `1d2e3a3b` y el nuevo intento `90adccd7`) y esta
+  vez el log si mostro el detalle completo:
+  ```
+  {'has_text': False, 'is_abstract_3d': False, 'has_screen_content': False,
+   'has_malformed_object': False, 'has_unrealistic_grounding': True, 'ok': False}
+  ```
+  **`has_text` salio `False`** — el fix de HALLAZGO IMG-03 SI esta
+  funcionando, no hay fuga de texto/marca de agua hacia la escena
+  generada. La hipotesis original de este hallazgo (que el watermark se
+  filtraba) queda **descartada por evidencia real**.
+
+  La causa real es `has_unrealistic_grounding` — segun `_QC_PROMPT`:
+  "true if the main subject (person, animal, or product) appears to
+  float, hover, or is otherwise disconnected from the surface/floor/
+  background it should be resting or standing on — no visible contact
+  point, no matching contact shadow directly beneath it, wrong scale or
+  perspective versus the background, or a dynamic mid-air pose
+  composited in". Es decir: es un problema de COMPOSICION/REALISMO de
+  la escena generada, sin relacion alguna a texto o logos. Tiene
+  sentido dado que esta foto de referencia es de una PERSONA completa
+  usando la bata (no un producto en una mesa/fondo liso como los casos
+  anteriores) — pedirle al modelo que recomponga una figura humana
+  completa en una escena nueva con anclaje fisico creible es un reto de
+  composicion mucho mayor que un producto simple.
+
+Siguiente paso: repetir la prueba con la MISMA foto (o una similar,
+  igual de saturada de marca de agua) ahora que el fix de IMG-02 ya esta
+  desplegado — el proximo rechazo si mostrara en
+  `logger.warning(f"...QC rechazo con detalle: {data}")` cual criterio
+  especifico fallo (`has_text` casi seguro, pero tambien podria ser
+  `has_malformed_object` dado que la imagen tiene una persona con
+  mascara, no solo el producto). Con esa evidencia se podra decidir si
+  hace falta una mitigacion adicional (ej. avisarle al usuario que evite
+  fotos con marca de agua extensa, o pre-procesar/recortar la imagen
+  antes de mandarla al modelo).
+
+Severidad: Por determinar — depende de que tan comun sea este tipo de
+  foto (con marca de agua masiva) entre los clientes reales de Cosmic.
+  Placeholder hasta tener evidencia real.
+Prioridad: Media — reproducir con el fix de IMG-02 activo antes de
+  decidir si hace falta un fix adicional o si es un caso limite
+  aceptable (pedirle al usuario una foto mas limpia).
+
+=================================================================
+HALLAZGO IMG-05 — Rechazo garantizado cuando la "foto de referencia"
+  subida es en realidad una CAPTURA DE PANTALLA completa de una
+  publicacion de Instagram (con toda la interfaz del telefono), no una
+  foto de producto — causa raiz distinta a IMG-01/03/04, no es un
+  problema del modelo ni del prompt
+Categoría: Falta de validacion de entrada del usuario (UX del formulario
+  de subida de foto de referencia)
+Estado: 🟢 DIAGNOSTICADO CON EVIDENCIA — SIN FIX AUN — 2026-07-27
+=================================================================
+Contexto: negocio "El perro rebelde" (mascotas), 3 intentos con 2 fotos
+  distintas (confirmado por hash MD5 — una foto se probo 2 veces:
+  jobs `ebb63d7f-8512-4452-8c28-798e94e552a9` y
+  `e58bbf33-4a45-41d8-b4b6-fb3ee361e425`, hash `ba105065...`, 460589
+  bytes; la otra foto una sola vez: job
+  `7b6fc9f0-d8c2-4395-8e0f-9f0cb7690607`, hash `1ba1eaf1...`, 248104
+  bytes). Los 3 intentos fallaron con el mensaje generico de siempre.
+
+Con el logueo de detalle de HALLAZGO IMG-02 ya activo, los 3 rechazos
+  de QC muestran:
+  - Foto A (probada 2 veces): `has_text: true`, `has_screen_content:
+    true/false` segun el intento, `ok: false`
+  - Foto B: `has_text: true`, `has_screen_content: true`, `ok: false`
+
+Se descargaron ambas fotos de referencia (via `read_upload`) y se
+  inspeccionaron visualmente. Resultado: **ninguna de las dos es una
+  foto de producto** — son **capturas de pantalla completas de la app
+  de Instagram** mostrando una publicacion del negocio:
+  - Foto A: captura completa con barra de estado del telefono (hora,
+    iconos de senal/bateria/notificaciones), header "Publicaciones" +
+    boton "Seguir", el logo de la marca superpuesto sobre la foto de un
+    gato, texto del pie de foto ("Hay clientes satisfechos... 😍🐱🧡"),
+    fecha ("17 de mayo"), contadores de like/comentarios, e incluso el
+    inicio de OTRA publicacion distinta scrolleada debajo (un cartel de
+    un evento cultural del Gobierno del Estado de Mexico, con su propio
+    bloque de texto).
+  - Foto B: misma estructura (barra de estado, header "Publicaciones",
+    boton "Seguir") mostrando una foto de un perro con un meme de texto
+    grande superpuesto ("No todos los motocicl...", cortado), mas el pie
+    de foto y fecha ("27 de enero").
+
+Es decir: el usuario no subio una foto limpia de su producto/mascota —
+  subio una captura de pantalla de su propio feed de Instagram, con
+  TODA la interfaz de la app, texto de UI, captions y hasta contenido de
+  otra publicacion. El rechazo de QC por `has_text`/`has_screen_content`
+  es completamente correcto y esperado dado ese input — no hay ningun
+  bug de prompt o de modelo aqui, a diferencia de IMG-03. El problema es
+  que el formulario de subida no valida ni guia al usuario sobre que
+  tipo de foto debe subir, y el pipeline intenta procesar cualquier
+  imagen tal cual llega.
+
+Esto tambien reafirma por que el mensaje de error actual (compartido con
+  IMG-01) es problematico: al usuario solo le llega "El control de
+  calidad rechazó el resultado (posible alucinación de logo/texto).
+  Reintenta." sin ninguna pista de que el problema real es que subio el
+  tipo de imagen equivocado — probablemente reintentara con la misma
+  captura de pantalla una y otra vez sin exito.
+
+Propuesta de fix (no implementada aun, pendiente de decision de Anuar):
+  1. Validacion en el formulario/backend al subir la foto de referencia:
+     detectar heuristicamente capturas de pantalla de apps (aspect ratio
+     tipico de telefono + densidad alta de texto/UI via un chequeo
+     rapido, o simplemente una instruccion clara en el formulario: "sube
+     una foto real del producto, no una captura de pantalla de redes
+     sociales").
+  2. Alternativamente/ademas, mensaje de error mas especifico cuando el
+     QC rechaza por `has_text=true` Y `has_screen_content=true` a la vez
+     (patron tipico de captura de pantalla) — sugiriendole al usuario
+     subir una foto directa del producto en vez de reintentar a ciegas.
+
+Severidad: Alta — a diferencia de IMG-04 (caso limite raro), este es un
+  error de uso previsible y probablemente comun (muchos negocios pequeños
+  solo tienen fotos de su producto en forma de posts ya publicados en
+  redes sociales, no fotos "en crudo"). Sin guia clara, el pipeline
+  fallara sistematicamente para este tipo de usuario y solo vera un
+  mensaje generico sin poder corregir el problema.
+Prioridad: Alta — es el tipo de fix con mayor impacto de los 5
+  hallazgos de este archivo, porque ataca la causa mas probable de
+  fallos reales en produccion (no un caso limite raro como IMG-04, sino
+  un patron de uso esperable).
+
+=================================================================
+HALLAZGO IMG-06 — Rechazo "correcto" pero inevitable en productos cuya
+  identidad ES el texto (globos/detalles impresos, dulces con marca en
+  el empaque) — la instruccion de IMG-03 de "no incluir texto" es
+  contraproducente para este tipo de producto
+Categoría: Limitacion de diseño del pipeline (no aplica a todos los
+  tipos de negocio/producto por igual)
+Estado: 🟢 DIAGNOSTICADO CON EVIDENCIA — SIN FIX AUN — 2026-07-27
+=================================================================
+Contexto: negocio "Yonderly Creativa" (manualidades/detalles para
+  fiestas), modo `sample_product_image` (1 solo paso, sin reel), job
+  `db8023b8-4bdc-4516-9331-8d8f33311a88`. QC rechazo:
+  `{"has_text": true, "is_abstract_3d": false, "has_screen_content":
+  false, "has_malformed_object": false, "has_unrealistic_grounding":
+  false, "ok": false}` — a diferencia de IMG-05, este SI es un rechazo
+  legitimo del criterio `has_text`, no un problema de tipo de imagen
+  subida.
+
+(Nota: el mismo negocio tambien probo un segundo intento en modo imagen
+  que SI tuvo exito — job `39a2dc56-7dc7-4a71-91b6-824f646dca6d`,
+  `ok: true` — y 2 intentos en modo reel que fallaron con el mismo
+  `has_text: true`, jobs `850c5073-3bce-4e8b-8f57-32d51f39e57b` y
+  `d360d45a-6843-4805-b2a7-b5d7bbd19215`. Osea 3 de 4 intentos fallaron
+  por esta misma causa con el mismo tipo de producto.)
+
+La foto de referencia del intento fallido (`db8023b8`) es una foto real
+  y legitima de producto — un arreglo/"detalle" de cumpleaños vendido
+  por el negocio: un globo metalico circular con las palabras impresas
+  "FeliZ Cumpleaños" en letras grandes ocupando la mitad superior del
+  globo, mas un ramo de dulces empaquetados con sus marcas comerciales
+  claramente visibles (Pulparindo, Crunch, Carlos, Bon Bon, Vero Cupido,
+  etc.), fotografiado dentro de la tienda (fondo de anaqueles con otros
+  productos).
+
+La diferencia clave con IMG-05: aqui la foto SI es una foto de producto
+  valida, tomada correctamente. El problema es que **el texto no es una
+  marca superpuesta o accidental — es una parte inseparable e
+  intencional del producto mismo**. Un globo de "Feliz Cumpleaños" sin
+  el texto "Feliz Cumpleaños" deja de ser el producto que el negocio
+  vende; lo mismo con dulces de marca reconocible (parte de lo que hace
+  atractivo un arreglo de este tipo es precisamente mostrar que dulces
+  trae). La instruccion de HALLAZGO IMG-03 ("no incluyas ningun texto,
+  logo o etiqueta, renderiza como material en blanco") le pide al modelo
+  generar una version irreconocible o falsa del producto para poder
+  pasar el QC — y aun si el modelo INTENTA cumplirla, el globo/dulces
+  genericos que resulten seguramente conservaran algo de texto (el
+  patron es visualmente muy dominante en la foto), lo cual el QC seguira
+  rechazando de todas formas.
+
+Esto expone una limitacion de diseño mas amplia que IMG-03: el pipeline
+  de "producto real como referencia" asume implicitamente que el
+  producto es un objeto "neutro" (comida, ropa, artesania sin texto
+  central) donde ocultar cualquier texto/logo alucinado no afecta la
+  fidelidad del resultado. Para negocios cuyo producto ES texto/impresion
+  (globos personalizados, tarjetas, playeras estampadas, pasteles con
+  mensaje, papeleria) esa premisa no aplica, y el pipeline fallara de
+  forma sistematica y no arreglable con un ajuste de prompt como el de
+  IMG-03.
+
+Propuesta de fix (no implementada, pendiente de decision de Anuar —
+  este caso no tiene una solucion tan simple como IMG-03, requiere
+  decidir una estrategia de producto):
+  1. Deshabilitar/advertir sobre este modo de generacion para categorias
+     de negocio donde el texto es parte central del producto (dificil
+     de detectar automaticamente sin un paso adicional de clasificacion).
+  2. Relajar el criterio `has_text` cuando aplica solo al PRODUCTO en si
+     (vs. a la escena/fondo) — pero esto reintroduce el problema
+     original de IMG-03 (no se puede distinguir "texto real del
+     producto, preservado fielmente" de "texto alucinado por el
+     modelo").
+  3. Aceptar como limitacion conocida del pipeline y comunicarsela al
+     usuario de forma clara en el mensaje de error (en vez del mensaje
+     generico actual) cuando el patron de rechazo sea consistente con
+     este caso.
+
+Severidad: Media-Alta — afecta a una categoria completa de negocios
+  (cualquiera cuyo producto tenga texto/mensaje impreso como parte
+  central: globos, tarjetas, playeras, pasteles personalizados,
+  papeleria), no solo un caso aislado.
+Prioridad: Media — a diferencia de IMG-05 (facil de arreglar con
+  validacion de input), este requiere una decision de producto sobre
+  como manejar la categoria completa de "productos que son texto".
+
+=================================================================
+PROPUESTA DE DISEÑO — Triage previo: no todas las fotos son candidatas
+  a regeneracion con IA (idea de Anuar, 2026-07-27)
+Categoría: Cambio de arquitectura del pipeline de producto-referencia
+Estado: 💡 PROPUESTA — NO IMPLEMENTADA, PENDIENTE DE DECISION
+=================================================================
+Contexto: tras acumular IMG-01, IMG-02 (corregido), IMG-03 (corregido),
+  IMG-04, IMG-05 e IMG-06, el patron que emerge es que varios rechazos
+  no son bugs corregibles con un ajuste de prompt — son fotos que, por
+  su naturaleza, NUNCA van a poder regenerarse exitosamente con el
+  modelo actual:
+  - IMG-05: la imagen ni siquiera es una foto de producto (captura de
+    pantalla de Instagram).
+  - IMG-06: el producto ES el texto (globo con mensaje impreso, dulces
+    de marca) — pedirle al modelo que omita el texto destruye la
+    identidad del producto.
+  - IMG-04: el producto es una persona completa modelando la prenda —
+    reto de composicion/anclaje fisico que el modelo no domina de forma
+    confiable.
+
+Insight de Anuar: en vez de seguir intentando "arreglar" estos casos con
+  mas ajustes de prompt (pelea contra la naturaleza del input), para
+  este tipo de fotos la mejor estrategia puede ser NO regenerar con IA
+  en absoluto — sino tomar la foto real del usuario tal cual y solo
+  MEJORARLA con procesamiento de imagen clasico (recorte, nitidez,
+  contraste, quiza correccion de balance de blancos o incluso remocion
+  de marca de agua), sin gastar en llamadas de IA generativa. El reto
+  central es COMO diferenciar, de forma barata, cuales fotos si vale la
+  pena intentar regenerar (producto neutro, foto limpia) de cuales
+  conviene solo mejorar tal cual (screenshot, producto-es-texto, figura
+  humana completa).
+
+Propuesta concreta (discutida en la conversacion, no implementada):
+  Agregar un paso de TRIAGE al inicio del pipeline, ANTES de gastar en
+  `_generate_scene` (y mucho antes de `_animate_scene`/Veo, que es el
+  paso mas caro), que clasifique la foto subida en 3 rutas:
+  1. RECHAZAR — no es una foto de producto real (ej. screenshot de
+     redes sociales, IMG-05). Mensaje de error especifico al usuario en
+     vez del generico actual.
+  2. SOLO MEJORAR — la foto es valida pero el producto depende del
+     texto/impresion real, o es un caso de alto riesgo de rechazo
+     (IMG-06, IMG-04) → aplicar mejora clasica (recorte, nitidez,
+     contraste vía Pillow/OpenCV) sobre la foto ORIGINAL y usarla tal
+     cual, sin generar una escena nueva con IA. Cero costo de IA
+     generativa en esta ruta.
+  3. REGENERAR — producto neutro sin texto central, foto limpia y de
+     buen encuadre → seguir el pipeline actual de generacion con IA tal
+     como esta hoy.
+
+  El triage en si mismo probablemente requiera una llamada de IA barata
+  (una sola clasificacion, mucho mas barata que el costo actual de
+  llegar al rechazo al final del pipeline completo — que ya incluye
+  scene-gen + QC, y en modo reel ademas Veo). Pendiente de diseñar el
+  prompt/criterio exacto de clasificacion, y decidir si conviene
+  complementarlo con heuristicas gratuitas (ej. relacion de aspecto
+  tipica de captura de pantalla de telefono, resoluciones que coinciden
+  con pantallas de dispositivos conocidos) para filtrar los casos mas
+  obvios (IMG-05) sin gastar nada en IA.
+
+Riesgo principal a resolver antes de implementar: afinar el criterio de
+  clasificacion para no desviar a la ruta "solo mejorar" fotos que si
+  hubieran regenerado bien con IA (que es la funcionalidad mas
+  diferenciada/vistosa del producto) — un triage demasiado conservador
+  degradaria la propuesta de valor del pipeline nuevo innecesariamente.
+
+Siguiente paso: pendiente de decision de Anuar sobre si se prioriza esta
+  propuesta y en que orden respecto a los fixes ya identificados
+  (IMG-01, IMG-05).

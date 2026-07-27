@@ -25,11 +25,21 @@ _VEO_POLL_TIMEOUT_SECONDS = 300
 _VEO_POLL_INTERVAL_SECONDS = 10
 
 _SCENE_PROMPT_TEMPLATE = (
+    # HALLAZGO IMG-03 (hallazgosImagen.txt, 2026-07-27): antes este prompt pedia
+    # preservar "any visible branding" del producto, y el QC (_QC_PROMPT) rechaza
+    # cualquier logo/texto sin distinguir real de alucinado — resultado
+    # garantizado: rechazo en cualquier producto con etiqueta visible (el caso
+    # mas comun). Fix: pedir fidelidad al producto (forma/color/material/
+    # textura) pero EXCLUIR explicitamente cualquier logo/texto/etiqueta — asi
+    # un rechazo del QC por has_text ya significa que el modelo alucino algo
+    # que no debia, no que hizo bien su trabajo.
     "Using the product shown in this reference image, generate a brand-new professional "
     "product photograph for {business_name}: a completely new scene, new background, new "
     "lighting and composition — NOT an edit of the input image. Incorporate this exact "
-    "product as it appears (same shape, color, texture, any visible branding) as the subject "
-    "of the new photograph. Photorealistic, studio-quality, natural lighting."
+    "product as it appears (same shape, color, material and texture) as the subject of the "
+    "new photograph, but do NOT include any text, logos, brand marks, or labels anywhere in "
+    "the product or the scene — render any label area as plain, blank material with no "
+    "visible text or graphics. Photorealistic, studio-quality, natural lighting."
 )
 
 _VIDEO_PROMPT_TEMPLATE = (
@@ -202,12 +212,16 @@ class ProductReferenceGenerator:
                     contents=[image_part, _QC_PROMPT],
                     config=types.GenerateContentConfig(labels=vertex_labels()),
                 )
-            record_tokens(resp, operation='product_reference_qc', prompt_preview=_QC_PROMPT[:500])
             raw = resp.text.strip()
+            record_tokens(resp, operation='product_reference_qc',
+                          prompt_preview=_QC_PROMPT[:500], response_preview=raw[:500])
             match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
             if match:
                 data = json.loads(match.group())
-                return bool(data.get('ok', True))
+                ok = bool(data.get('ok', True))
+                if not ok:
+                    logger.warning(f"ProductReferenceGenerator: QC rechazo con detalle: {data}")
+                return ok
         except Exception as e:
             logger.warning(f"ProductReferenceGenerator._validate_scene error (assuming ok): {e}")
         return True
