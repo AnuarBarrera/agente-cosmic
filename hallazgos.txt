@@ -4141,3 +4141,63 @@ Fix real implementado (2026-07-27, plan
   (`test_schedule_daily_emails_two_calls_with_different_ranges_do_not_overlap`)
   reproduce el escenario exacto del hallazgo y confirma 0 duplicados.
   600/600 tests de la suite completa. Subido a origin.
+
+=================================================================
+HALLAZGO 82 — TTS pronuncia letras dobles por separado en vez de
+  fusionarlas (reportado por Jorge, Trajes Dayian)
+Categoría: Calidad de audio/narración del reel
+Estado: 🟡 REPORTADO — CAUSA RAÍZ NO INVESTIGADA — 2026-07-27
+=================================================================
+Contexto: Jorge (Trajes Dayian) reportó en su feedback semanal: "Me
+  percaté que el video no lo hizo con acento español o gallego, sigue
+  pronunciando por separado las letras b y b en el lugar de hacer la
+  pronunciación junta (*betowbe*)". Interpretación: la voz TTS del reel
+  no funde consonantes dobles/consecutivas de forma natural (ej. "bb"),
+  sonando como deletreo en vez de habla fluida.
+
+Relación con hallazgos previos: hay un reporte informal anterior (sin
+  hallazgo formal, mencionado dentro del contexto de un hallazgo ya
+  resuelto sobre narración/tono, línea ~3880 de este archivo) sobre una
+  narración que sonaba "muy catalana". Ese caso llevó a construir
+  `brand_consistency_qc.py` (auditor de TONO/PALABRAS del
+  `narration_script`, texto) — pero ese auditor NO audita pronunciación
+  fonética del audio ya sintetizado, es una capa distinta. El reporte de
+  Jorge parece ser un problema de la voz TTS en sí (`voice_name='Kore'`,
+  `reel_generator.py:743`), no del texto que se le pasa.
+
+Causa raíz: NO INVESTIGADA. No se revisó todavía si `'Kore'` es la
+  mejor voz prebuilt disponible para español neutro/mexicano en el
+  modelo TTS de Gemini/Vertex usado (ver `docs/superpowers/specs/...`
+  sobre `gemini-2.5-flash-tts`/`gemini-2.5-pro-preview-tts`), ni si hay
+  parámetros de idioma/acento configurables en esa llamada.
+
+Severidad: Media — afecta la percepción de calidad/profesionalismo del
+  reel, no bloquea la generación ni la publicación.
+Prioridad: Media — investigar opciones de voz disponibles antes de
+  decidir un fix.
+
+=================================================================
+HALLAZGO 83 — Carrusel reutiliza 1 sola imagen de fondo para todos los
+  slides (por diseño, pero genera feedback negativo real)
+Categoría: Decisión de producto / percepción de calidad
+Estado: 🟡 REPORTADO — ES COMPORTAMIENTO INTENCIONAL, NO UN BUG — 2026-07-27
+=================================================================
+Contexto: Jorge (Trajes Dayian) reportó: "El carrusel de imágenes solo
+  genera una imagen y solo cambia los textos". Confirmado en código
+  (`core/content_pipeline/generators/image_generator.py:192-213`,
+  método `generate_carousel`) — es EXACTAMENTE el comportamiento
+  documentado en el propio docstring: "Reutiliza UN solo fondo (misma
+  llamada a Imagen 3) y superpone contenido de texto DISTINTO por
+  slide — evita multiplicar el costo de generación de imagen por N
+  mientras mantiene coherencia visual entre slides." Fue una decisión
+  deliberada de costo (H20 + roadmap #5), no un bug — pero un usuario
+  real percibe un "carrusel" como slides visualmente distintos, y el
+  resultado actual no cumple esa expectativa.
+
+Severidad: Media — no rompe nada técnicamente, pero el formato
+  "carrusel" no entrega el valor percibido que el nombre promete.
+Prioridad: Sin definir — requiere decisión de producto (¿vale la pena
+  el costo de generar N imágenes distintas por carrusel? ¿hay un punto
+  medio, ej. 2 fondos distintos en vez de 1?), no es un fix de código
+  directo. Evaluar junto con el brainstorm de estrategia de contenido
+  interno-vs-externo (ver `ultimosCambios.md` punto 7).
