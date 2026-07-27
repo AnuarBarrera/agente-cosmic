@@ -148,7 +148,10 @@ def analyze_submit(request):
     # get_user_plan ya esta importado arriba en esta funcion (linea ~98,
     # junto a can_create_calendar) — no hace falta reimportarlo.
     requested_mode = request.POST.get('generation_mode', AnalysisJob.MODE_FULL)
-    valid_modes = {AnalysisJob.MODE_FULL, AnalysisJob.MODE_SAMPLE_IMAGE, AnalysisJob.MODE_SAMPLE_REEL}
+    valid_modes = {
+        AnalysisJob.MODE_FULL, AnalysisJob.MODE_SAMPLE_IMAGE, AnalysisJob.MODE_SAMPLE_REEL,
+        AnalysisJob.MODE_SAMPLE_PRODUCT_IMAGE, AnalysisJob.MODE_SAMPLE_PRODUCT_REEL,
+    }
     if requested_mode not in valid_modes or not get_user_plan(request.user).allows_sample_generation:
         requested_mode = AnalysisJob.MODE_FULL
 
@@ -170,6 +173,17 @@ def analyze_submit(request):
         save_upload(logo_bytes, logo_path)
         job.logo_file_path = logo_path
         job.save(update_fields=['logo_file_path'])
+
+    if 'product_reference_photo' in request.FILES:
+        photo_file = request.FILES['product_reference_photo']
+        photo_bytes = photo_file.read()
+        if not _validate_image_bytes(photo_bytes):
+            return render(request, 'brand_dna/new_analysis.html', {'error': 'La foto del producto no es una imagen válida.'})
+        ext = _safe_extension(photo_file.name)
+        photo_path = f'uploads/product_ref_{job.id}.{ext}'
+        save_upload(photo_bytes, photo_path)
+        job.product_reference_image_path = photo_path
+        job.save(update_fields=['product_reference_image_path'])
 
     from core.brand_dna.tasks import analyze_brand_task
     django_rq.enqueue(analyze_brand_task, str(job.id))

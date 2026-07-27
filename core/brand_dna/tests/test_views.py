@@ -150,6 +150,69 @@ def test_analyze_submit_defaults_to_full_when_mode_missing(user, free_plan):
     assert job.generation_mode == AnalysisJob.MODE_FULL
 
 
+def _fake_product_photo():
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from PIL import Image
+    import io
+    buf = io.BytesIO()
+    Image.new('RGB', (10, 10), color='orange').save(buf, format='PNG')
+    return SimpleUploadedFile('producto.png', buf.getvalue(), content_type='image/png')
+
+
+def test_analyze_submit_saves_product_reference_photo_when_permitted(user, free_plan):
+    free_plan.allows_sample_generation = True
+    free_plan.save(update_fields=['allows_sample_generation'])
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.django_rq'), \
+         patch('core.brand_dna.moderation.check_business_legitimacy', return_value=(True, '')), \
+         patch('core.brand_dna.views.save_upload') as mock_save:
+        c.post('/analizar/', {
+            'business_name': 'Gelatinas Marba',
+            'business_description': 'Gelatinas artesanales.',
+            'generation_mode': 'sample_product_reel',
+            'product_reference_photo': _fake_product_photo(),
+        })
+    job = AnalysisJob.objects.filter(user=user).latest('created_at')
+    assert job.generation_mode == AnalysisJob.MODE_SAMPLE_PRODUCT_REEL
+    assert job.product_reference_image_path != ''
+    mock_save.assert_called_once()
+
+
+def test_analyze_submit_rejects_invalid_product_reference_photo(user, free_plan):
+    free_plan.allows_sample_generation = True
+    free_plan.save(update_fields=['allows_sample_generation'])
+    c = Client()
+    c.force_login(user)
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    bad_file = SimpleUploadedFile('producto.png', b'no es una imagen real', content_type='image/png')
+    with patch('core.brand_dna.views.django_rq'), \
+         patch('core.brand_dna.moderation.check_business_legitimacy', return_value=(True, '')):
+        response = c.post('/analizar/', {
+            'business_name': 'Gelatinas Marba',
+            'business_description': 'Gelatinas artesanales.',
+            'generation_mode': 'sample_product_reel',
+            'product_reference_photo': bad_file,
+        })
+    assert response.status_code == 200
+    assert b'no es una imagen v\xc3\xa1lida' in response.content
+
+
+def test_analyze_submit_ignores_product_mode_without_permission(user):
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.django_rq'), \
+         patch('core.brand_dna.moderation.check_business_legitimacy', return_value=(True, '')):
+        c.post('/analizar/', {
+            'business_name': 'Gelatinas Marba',
+            'business_description': 'Gelatinas artesanales.',
+            'generation_mode': 'sample_product_reel',
+        })
+    job = AnalysisJob.objects.filter(user=user).latest('created_at')
+    assert job.generation_mode == AnalysisJob.MODE_FULL
+
+
+
 def test_analyze_submit_without_url_with_description(user):
     c = Client()
     c.force_login(user)
