@@ -71,6 +71,21 @@ class TestGenerateImage:
 
         assert result == ''
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+        GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    )
+    def test_generate_image_returns_empty_string_when_upload_fails(self):
+        from core.content_pipeline.generators.product_reference_generator import ProductReferenceGenerator
+        gen = ProductReferenceGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_scene', return_value=b'scene-bytes'), \
+             patch.object(gen, '_validate_scene', return_value=True), \
+             patch.object(gen, '_upload_to_storage', side_effect=Exception('GCS down')):
+            result = gen.generate_image(b'fake-photo-bytes', 'Gelatinas Marba', 'job123-sample')
+        assert result == ''
+
 
 class TestGenerateReel:
     @override_settings(
@@ -144,6 +159,23 @@ class TestGenerateReel:
              patch.object(gen, '_validate_scene', side_effect=[True, True, False]), \
              patch.object(gen, '_animate_scene', return_value=b'video-bytes'), \
              patch.object(gen, '_extract_frame', return_value=b'frame-bytes'):
+            video_url, poster_url = gen.generate_reel(b'fake-photo-bytes', 'Gelatinas Marba', 'job123-sample')
+        assert video_url == '' and poster_url == ''
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+        VERTEX_VIDEO_MODEL='veo-3.1-fast-generate-001',
+        GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+    )
+    def test_returns_empty_strings_when_frame_extraction_fails(self):
+        from core.content_pipeline.generators.product_reference_generator import ProductReferenceGenerator
+        gen = ProductReferenceGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_scene', return_value=b'scene-bytes'), \
+             patch.object(gen, '_validate_scene', return_value=True), \
+             patch.object(gen, '_animate_scene', return_value=b'video-bytes'), \
+             patch.object(gen, '_extract_frame', return_value=None):
             video_url, poster_url = gen.generate_reel(b'fake-photo-bytes', 'Gelatinas Marba', 'job123-sample')
         assert video_url == '' and poster_url == ''
 

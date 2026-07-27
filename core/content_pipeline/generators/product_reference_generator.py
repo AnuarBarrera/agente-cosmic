@@ -81,35 +81,46 @@ class ProductReferenceGenerator:
         self._bucket = bucket_name
 
     def generate_image(self, product_photo_bytes: bytes, business_name: str, filename: str) -> str:
-        scene_bytes = self._generate_scene(product_photo_bytes, business_name)
-        if scene_bytes is None:
+        try:
+            scene_bytes = self._generate_scene(product_photo_bytes, business_name)
+            if scene_bytes is None:
+                return ''
+            if not self._validate_scene(scene_bytes):
+                logger.warning("ProductReferenceGenerator: QC rechazo la escena generada (generate_image)")
+                return ''
+            return self._upload_to_storage(scene_bytes, filename, 'image/png', 'product-samples')
+        except Exception as e:
+            logger.warning(f"ProductReferenceGenerator.generate_image fallo: {e}")
             return ''
-        if not self._validate_scene(scene_bytes):
-            logger.warning("ProductReferenceGenerator: QC rechazo la escena generada (generate_image)")
-            return ''
-        return self._upload_to_storage(scene_bytes, filename, 'image/png', 'product-samples')
 
     def generate_reel(self, product_photo_bytes: bytes, business_name: str, filename_prefix: str) -> tuple[str, str]:
-        scene_bytes = self._generate_scene(product_photo_bytes, business_name)
-        if scene_bytes is None:
-            return '', ''
-        if not self._validate_scene(scene_bytes):
-            logger.warning("ProductReferenceGenerator: QC rechazo la escena generada (generate_reel)")
-            return '', ''
-
-        video_bytes = self._animate_scene(scene_bytes, business_name)
-        if video_bytes is None:
-            return '', ''
-
-        for offset in _QC_FRAME_OFFSETS:
-            frame_bytes = self._extract_frame(video_bytes, offset_seconds=offset)
-            if frame_bytes is not None and not self._validate_scene(frame_bytes):
-                logger.warning(f"ProductReferenceGenerator: QC rechazo el frame en {offset}s del video")
+        try:
+            scene_bytes = self._generate_scene(product_photo_bytes, business_name)
+            if scene_bytes is None:
+                return '', ''
+            if not self._validate_scene(scene_bytes):
+                logger.warning("ProductReferenceGenerator: QC rechazo la escena generada (generate_reel)")
                 return '', ''
 
-        poster_url = self._upload_to_storage(scene_bytes, f'{filename_prefix}-poster', 'image/png', 'product-samples')
-        video_url = self._upload_to_storage(video_bytes, filename_prefix, 'video/mp4', 'product-samples')
-        return video_url, poster_url
+            video_bytes = self._animate_scene(scene_bytes, business_name)
+            if video_bytes is None:
+                return '', ''
+
+            for offset in _QC_FRAME_OFFSETS:
+                frame_bytes = self._extract_frame(video_bytes, offset_seconds=offset)
+                if frame_bytes is None:
+                    logger.warning(f"ProductReferenceGenerator: no se pudo extraer el frame en {offset}s para QC — se rechaza el resultado")
+                    return '', ''
+                if not self._validate_scene(frame_bytes):
+                    logger.warning(f"ProductReferenceGenerator: QC rechazo el frame en {offset}s del video")
+                    return '', ''
+
+            poster_url = self._upload_to_storage(scene_bytes, f'{filename_prefix}-poster', 'image/png', 'product-samples')
+            video_url = self._upload_to_storage(video_bytes, filename_prefix, 'video/mp4', 'product-samples')
+            return video_url, poster_url
+        except Exception as e:
+            logger.warning(f"ProductReferenceGenerator.generate_reel fallo: {e}")
+            return '', ''
 
     def _generate_scene(self, product_photo_bytes: bytes, business_name: str) -> bytes | None:
         try:
@@ -121,7 +132,7 @@ class ProductReferenceGenerator:
                 resp = client.models.generate_content(
                     model=_REFERENCE_IMAGE_MODEL,
                     contents=[image_part, prompt],
-                    config=types.GenerateContentConfig(response_modalities=['IMAGE', 'TEXT']),
+                    config=types.GenerateContentConfig(response_modalities=['IMAGE', 'TEXT'], labels=vertex_labels()),
                 )
             record_tokens(resp, operation='product_reference_scene', prompt_preview=prompt[:500])
             for part in resp.candidates[0].content.parts:
@@ -143,6 +154,7 @@ class ProductReferenceGenerator:
                     image=types.Image(image_bytes=scene_bytes, mime_type='image/png'),
                     config=types.GenerateVideosConfig(
                         aspect_ratio='9:16', duration_seconds=8, number_of_videos=1, generate_audio=False,
+                        labels=vertex_labels(),
                     ),
                 )
             poll_start = time.monotonic()
