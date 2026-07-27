@@ -273,11 +273,11 @@ class ImageGenerator:
         keyword_product_mode = self._targets_minors(audience, description)
 
         _FALLBACK_PROMPT = (
-            f"Real-world {'product photography' if keyword_product_mode else 'lifestyle photograph'} inspired by: {brand_ctx[:100]}. "
+            f"Real-world {'abstract product-category texture/color composition' if keyword_product_mode else 'lifestyle photograph evoking customer satisfaction'} inspired by: {brand_ctx[:100]}. "
             f"Natural lighting, shallow depth of field. Prominently feature the brand color palette ({color_str}) "
             f"in props, backdrop, or accent elements — the background should visibly reflect these colors, not "
             f"look like a generic neutral stock photo. Mood: {tone}. "
-            f"{'NO people, NO children, NO hands. Focus on the product itself.' if keyword_product_mode else 'Authentic setting, real textures, professional photography style.'} "
+            f"{'NO people, NO children, NO hands. Generic/abstract representation only, NOT a specific product design.' if keyword_product_mode else 'Focus on the feeling of the experience, not a literal product shot. Authentic setting, real textures, professional photography style.'} "
             f"NO laptops, NO computers, NO phones, NO desk, NO office, NO keyboard. "
             f"NO text, NO logos, NO UI elements. Square 1:1 format. Photorealistic."
         )
@@ -291,10 +291,15 @@ class ImageGenerator:
                 f"birthday parties with children, or any person under 18 years old.\n"
                 f"Would a natural lifestyle photo for this brand risk triggering that restriction?\n\n"
                 f"STEP 2 — Generate a background prompt (max 80 words):\n"
-                f"- If risk=YES → mode=\"product\": focus on the product/food/objects only, NO people of any age, NO hands.\n"
-                f"  Think: overhead flat lay, artful food arrangement, colorful props matching brand palette.\n"
-                f"- If risk=NO  → mode=\"lifestyle\": real-world scene reflecting the brand's world and customers.\n"
-                f"  Think: service environment, lifestyle moment, nature matching brand values. NO offices or screens.\n\n"
+                f"- If risk=YES → mode=\"product\": DO NOT attempt to depict this business's exact product design — "
+                f"there is no reference photo, and a wrong specific detail (shape, topping, pattern) will look "
+                f"factually incorrect to a real customer. Instead, evoke the CATEGORY generically through color, "
+                f"texture, and mood: abstract close-up of textures/ingredients/materials in the brand palette, or a "
+                f"generic/simple version of the product category (not an elaborate custom design). NO people of any age, NO hands.\n"
+                f"- If risk=NO  → mode=\"lifestyle\": DO NOT feature this business's exact product/craft as the main "
+                f"subject either — focus on how a customer FEELS after using/consuming it (satisfaction, comfort, a "
+                f"genuine expression, the environment/mood of the experience), not a literal shot of the product "
+                f"itself. NO offices or screens.\n\n"
                 f"Both modes: real textures, natural light, depth. Make the brand colors ({color_str}) VISUALLY "
                 f"PROMINENT in the scene (props, walls, fabrics, accents) — avoid plain neutral/beige backgrounds "
                 f"that could belong to any brand; the color palette should be clearly recognizable at a glance. "

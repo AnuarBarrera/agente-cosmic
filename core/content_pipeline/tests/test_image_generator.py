@@ -544,6 +544,45 @@ class TestValidateBackground:
         assert result is False
 
 
+class TestAnalyzeBrandScene:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_gemini_prompt_avoids_literal_product_depiction(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"mode": "lifestyle", "prompt": "A cozy scene"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            gen._analyze_brand_scene('Caption', ['keyword'], 'Descripcion', 'profesional', ['#1a1a2e'])
+        call_kwargs = mock_vc.return_value.models.generate_content.call_args.kwargs
+        gemini_prompt = call_kwargs['contents']
+        assert 'focus on the product/food/objects only' not in gemini_prompt
+        assert "DO NOT attempt to depict this business's exact product design" in gemini_prompt
+        assert 'focus on how a customer FEELS' in gemini_prompt
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_fallback_prompt_does_not_promise_literal_product_focus(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API down')
+            scene_prompt, product_mode = gen._analyze_brand_scene(
+                'Caption', ['keyword'], 'Descripcion', 'profesional', ['#1a1a2e'], audience='niños'
+            )
+        assert product_mode is True
+        assert 'Focus on the product itself.' not in scene_prompt
+        assert 'artful' not in scene_prompt.lower()
+        assert 'Generic/abstract representation only' in scene_prompt
+
+
 class TestChooseTemplateForImage:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
