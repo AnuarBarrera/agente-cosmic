@@ -3,6 +3,7 @@ import time
 from datetime import datetime as dt_datetime, timedelta, timezone as dt_timezone
 from django.conf import settings
 from django.utils import timezone
+from django.db.models import Count
 import django_rq
 from rq import Retry
 from rq.job import Dependency
@@ -10,7 +11,7 @@ from rq.job import Dependency
 MEXICO_TZ = dt_timezone(timedelta(hours=-6))  # UTC-6 sin DST (desde 2023)
 from core.brand_dna.models import AnalysisJob
 from core.content_pipeline.models import ContentCalendar, ContentPost
-from core.tenant_management.models import Subscription
+from core.tenant_management.models import Subscription, User
 from core.content_pipeline.generators.text_generator import TextGenerator
 from core.content_pipeline.generators.image_generator import ImageGenerator
 from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
@@ -386,3 +387,48 @@ def expire_stale_trials_task() -> None:
         sub.save(update_fields=['status'])
 
 
+_REACTIVATION_FIRST_DAYS_CALENDAR = 3
+_REACTIVATION_FIRST_DAYS_ANALYSIS = 2
+_REACTIVATION_REPEAT_DAYS = 15
+
+
+def send_reactivation_emails_task() -> None:
+    now = timezone.now()
+
+    stale_calendars = ContentCalendar.objects.filter(
+        created_at__lte=now - timedelta(days=_REACTIVATION_FIRST_DAYS_CALENDAR),
+    ).exclude(
+        posts__downloaded_at__isnull=False
+    )
+    for calendar in stale_calendars:
+        due = (
+            calendar.last_reactivation_email_at is None
+            or calendar.last_reactivation_email_at <= now - timedelta(days=_REACTIVATION_REPEAT_DAYS)
+        )
+        if not due:
+            continue
+        try:
+            EmailSender().send_reactivation_calendar(calendar)
+            calendar.last_reactivation_email_at = now
+            calendar.save(update_fields=['last_reactivation_email_at'])
+        except Exception as email_err:
+            logger.error(f"Email de reactivacion (calendario) fallo para {calendar.id} (no fatal): {email_err}")
+
+    stale_users = User.objects.filter(
+        date_joined__lte=now - timedelta(days=_REACTIVATION_FIRST_DAYS_ANALYSIS),
+    ).annotate(
+        jobs_count=Count('analysis_jobs')
+    ).filter(jobs_count=0)
+    for user in stale_users:
+        due = (
+            user.last_reactivation_email_at is None
+            or user.last_reactivation_email_at <= now - timedelta(days=_REACTIVATION_REPEAT_DAYS)
+        )
+        if not due:
+            continue
+        try:
+            EmailSender().send_reactivation_analysis(user)
+            user.last_reactivation_email_at = now
+            user.save(update_fields=['last_reactivation_email_at'])
+        except Exception as email_err:
+            logger.error(f"Email de reactivacion (analisis) fallo para {user.id} (no fatal): {email_err}")

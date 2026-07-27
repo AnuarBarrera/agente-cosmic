@@ -878,8 +878,96 @@ def test_generate_next_month_proceeds_when_trial_job_done(job_with_dna):
     mock_enqueue_week.assert_called_once_with(str(calendar.id), week_index=0)
 
 
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx')
+def test_send_reactivation_emails_task_sends_for_stale_calendar_without_downloads(calendar_with_dna):
+    for i in range(1, 4):
+        _make_post(calendar_with_dna, i)
+    ContentCalendar.objects.filter(id=calendar_with_dna.id).update(
+        created_at=timezone.now() - timedelta(days=4)
+    )
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import send_reactivation_emails_task
+        send_reactivation_emails_task()
+    MockEmail.return_value.send_reactivation_calendar.assert_called_once()
+    calendar_with_dna.refresh_from_db()
+    assert calendar_with_dna.last_reactivation_email_at is not None
 
 
+def test_send_reactivation_emails_task_skips_recent_calendar(calendar_with_dna):
+    for i in range(1, 4):
+        _make_post(calendar_with_dna, i)
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import send_reactivation_emails_task
+        send_reactivation_emails_task()
+    MockEmail.return_value.send_reactivation_calendar.assert_not_called()
 
 
+def test_send_reactivation_emails_task_skips_calendar_with_a_download(calendar_with_dna):
+    _make_post(calendar_with_dna, 1, downloaded_at=timezone.now())
+    ContentCalendar.objects.filter(id=calendar_with_dna.id).update(
+        created_at=timezone.now() - timedelta(days=4)
+    )
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import send_reactivation_emails_task
+        send_reactivation_emails_task()
+    MockEmail.return_value.send_reactivation_calendar.assert_not_called()
 
+
+def test_send_reactivation_emails_task_does_not_repeat_before_15_days(calendar_with_dna):
+    _make_post(calendar_with_dna, 1)
+    ContentCalendar.objects.filter(id=calendar_with_dna.id).update(
+        created_at=timezone.now() - timedelta(days=20),
+        last_reactivation_email_at=timezone.now() - timedelta(days=5),
+    )
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import send_reactivation_emails_task
+        send_reactivation_emails_task()
+    MockEmail.return_value.send_reactivation_calendar.assert_not_called()
+
+
+def test_send_reactivation_emails_task_repeats_after_15_days(calendar_with_dna):
+    _make_post(calendar_with_dna, 1)
+    ContentCalendar.objects.filter(id=calendar_with_dna.id).update(
+        created_at=timezone.now() - timedelta(days=30),
+        last_reactivation_email_at=timezone.now() - timedelta(days=16),
+    )
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import send_reactivation_emails_task
+        send_reactivation_emails_task()
+    MockEmail.return_value.send_reactivation_calendar.assert_called_once()
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx')
+def test_send_reactivation_emails_task_sends_for_user_without_analysis():
+    from django.contrib.auth import get_user_model
+    UserModel = get_user_model()
+    user = UserModel.objects.create_user(username='sinanalisis@test.com', email='sinanalisis@test.com', password='pass1234')
+    UserModel.objects.filter(id=user.id).update(date_joined=timezone.now() - timedelta(days=3))
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import send_reactivation_emails_task
+        send_reactivation_emails_task()
+    MockEmail.return_value.send_reactivation_analysis.assert_called_once()
+    user.refresh_from_db()
+    assert user.last_reactivation_email_at is not None
+
+
+def test_send_reactivation_emails_task_skips_recent_user():
+    from django.contrib.auth import get_user_model
+    UserModel = get_user_model()
+    UserModel.objects.create_user(username='reciente@test.com', email='reciente@test.com', password='pass1234')
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import send_reactivation_emails_task
+        send_reactivation_emails_task()
+    MockEmail.return_value.send_reactivation_analysis.assert_not_called()
+
+
+def test_send_reactivation_emails_task_skips_user_with_analysis(job_with_dna_and_tenant):
+    from django.contrib.auth import get_user_model
+    UserModel = get_user_model()
+    UserModel.objects.filter(id=job_with_dna_and_tenant.user.id).update(
+        date_joined=timezone.now() - timedelta(days=3)
+    )
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import send_reactivation_emails_task
+        send_reactivation_emails_task()
+    MockEmail.return_value.send_reactivation_analysis.assert_not_called()
