@@ -29,10 +29,14 @@ class AnalysisJob(models.Model):
     MODE_FULL = 'full'
     MODE_SAMPLE_IMAGE = 'sample_image'
     MODE_SAMPLE_REEL = 'sample_reel'
+    MODE_SAMPLE_PRODUCT_IMAGE = 'sample_product_image'
+    MODE_SAMPLE_PRODUCT_REEL = 'sample_product_reel'
     MODE_CHOICES = [
         (MODE_FULL, 'Calendario completo'),
         (MODE_SAMPLE_IMAGE, 'Muestra: imagen'),
         (MODE_SAMPLE_REEL, 'Muestra: reel'),
+        (MODE_SAMPLE_PRODUCT_IMAGE, 'Muestra: imagen con producto real (solo admin)'),
+        (MODE_SAMPLE_PRODUCT_REEL, 'Muestra: reel con producto real (solo admin)'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -44,6 +48,7 @@ class AnalysisJob(models.Model):
     progress = models.IntegerField(default=0)
     error_message = models.TextField(blank=True, default='')
     logo_file_path = models.CharField(max_length=500, blank=True, default='')
+    product_reference_image_path = models.CharField(max_length=500, blank=True, default='')
     post_images_paths = models.JSONField(default=list, blank=True)
     posts_text = models.TextField(blank=True, default='')
     profile_url = models.URLField(blank=True, default='')

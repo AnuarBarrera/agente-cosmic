@@ -15,6 +15,17 @@ def test_analysis_job_creation():
     assert str(job.id) != ''
 
 
+def test_analysis_job_product_reference_image_path_defaults_to_empty():
+    job = AnalysisJob.objects.create(email='t@t.com', business_url='https://tuwebmx.com')
+    assert job.product_reference_image_path == ''
+
+
+def test_analysis_job_has_product_sample_modes():
+    assert AnalysisJob.MODE_SAMPLE_PRODUCT_IMAGE == 'sample_product_image'
+    assert AnalysisJob.MODE_SAMPLE_PRODUCT_REEL == 'sample_product_reel'
+
+
+
 def test_brand_dna_creation(analysis_job):
     dna = BrandDNA.objects.create(
         job=analysis_job,
