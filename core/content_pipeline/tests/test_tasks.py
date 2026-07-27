@@ -326,7 +326,24 @@ def test_generate_sample_task_marks_failed_on_error(job_with_dna_sample_image):
 
 @pytest.fixture
 def calendar_with_dna():
-    job = AnalysisJob.objects.create(email='t@t.com', business_url='https://tuwebmx.com')
+    from django.contrib.auth import get_user_model
+    from core.tenant_management.models import TenantModel, Subscription, Plan
+    UserModel = get_user_model()
+    plan, _ = Plan.objects.get_or_create(name='User', defaults={
+        'max_calendars_per_week': 2, 'max_post_regenerations': 2,
+        'max_post_edits': 2, 'price': 0,
+    })
+    user = UserModel.objects.create_user(
+        username='calendariovencido@test.com', email='calendariovencido@test.com', password='pass1234'
+    )
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    Subscription.objects.create(tenant=tenant, plan=plan, status='active')
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+
+    job = AnalysisJob.objects.create(
+        email='t@t.com', business_url='https://tuwebmx.com', user=user,
+    )
     dna = BrandDNA.objects.create(
         job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
         description='Agencia digital', keywords=['diseno'], audience='PYMEs',
@@ -1005,4 +1022,43 @@ def test_send_reactivation_emails_task_skips_tester_and_admin_plans():
         from core.content_pipeline.tasks import send_reactivation_emails_task
         send_reactivation_emails_task()
     MockEmail.return_value.send_reactivation_analysis.assert_not_called()
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx')
+def test_send_reactivation_emails_task_skips_calendar_for_tester_and_admin_plans():
+    """HALLAZGO: stale_calendars no filtraba por plan — un calendario vencido de
+    Tester/Admin recibia el correo de reactivacion igual que uno de plan User."""
+    from django.contrib.auth import get_user_model
+    from core.tenant_management.models import TenantModel, Subscription, Plan
+    UserModel = get_user_model()
+    for plan_name in ('Tester', 'Admin'):
+        plan, _ = Plan.objects.get_or_create(name=plan_name, defaults={
+            'max_calendars_per_week': 999, 'max_post_regenerations': 999,
+            'max_post_edits': 999, 'price': 0,
+        })
+        user = UserModel.objects.create_user(
+            username=f'{plan_name.lower()}calendario@test.com',
+            email=f'{plan_name.lower()}calendario@test.com', password='pass1234'
+        )
+        tenant = TenantModel.objects.create(name=user.email, status='active')
+        Subscription.objects.create(tenant=tenant, plan=plan, status='active')
+        user.tenant = tenant
+        user.save(update_fields=['tenant'])
+
+        job = AnalysisJob.objects.create(email=user.email, business_url='https://tuwebmx.com', user=user)
+        dna = BrandDNA.objects.create(
+            job=job, business_name=f'Negocio {plan_name}', business_url='https://tuwebmx.com',
+            description='Agencia digital', keywords=['diseno'], audience='PYMEs',
+            tone='profesional', primary_colors=['#1a1a2e'],
+        )
+        calendar = ContentCalendar.objects.create(brand_dna=dna)
+        _make_post(calendar, 1)
+        ContentCalendar.objects.filter(id=calendar.id).update(
+            created_at=timezone.now() - timedelta(days=4)
+        )
+
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import send_reactivation_emails_task
+        send_reactivation_emails_task()
+    MockEmail.return_value.send_reactivation_calendar.assert_not_called()
 

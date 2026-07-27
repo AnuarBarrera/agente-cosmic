@@ -397,6 +397,7 @@ def send_reactivation_emails_task() -> None:
 
     stale_calendars = ContentCalendar.objects.filter(
         created_at__lte=now - timedelta(days=_REACTIVATION_FIRST_DAYS_CALENDAR),
+        brand_dna__job__user__tenant__subscription__plan__name='User',
     ).exclude(
         posts__downloaded_at__isnull=False
     )
