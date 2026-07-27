@@ -2208,11 +2208,11 @@ ACTUALIZACIÓN 2026-07-13 — se encontró y corrigió la causa raíz real del
 HALLAZGO 47 — Encuesta de renovación (opt-in) genera fricción; usuarios
   prefieren continuidad automática con opt-out
 Categoría: Producto / retención
-Estado: 🟡 PARCIAL — 2026-07-12: la fricción de "parece encuesta" se resolvió
-  (ver H48), pero el modelo sigue siendo opt-in (el usuario debe hacer clic
-  en "Generar nueva semana"). La decisión de fondo — cambiar a opt-out real
-  (generar automático salvo cancelación explícita) — sigue sin tomarse,
-  pendiente de la definición de costo que este hallazgo ya documentó.
+Estado: 🟢 YA NO APLICA — 2026-07-27 (confirmado por Anuar). Superado por
+  completo por el pivote a pago único mensual vía Stripe (ver
+  `ultimosCambios.md` punto 5) — ya no existe ninguna "encuesta de
+  renovación": la renovación ahora es simplemente el pago mensual mismo,
+  sin paso intermedio de opt-in/opt-out que resolver.
 =================================================================
 Surfaceado por: Jorge (feedback directo a Anuar) + evidencia de comportamiento
   real de un tester en logs (2026-07-07/08).
@@ -2327,7 +2327,14 @@ Prioridad: P1 — mismo criterio que H47: decidir antes de que la base de
 HALLAZGO 49 — El correo de notificación diaria se pierde entre el resto de
   los correos del usuario; funciona para nosotros pero no para él
 Categoría: Producto / comunicación / retención
-Estado: 🟡 Pendiente de decisión
+Estado: 🟢 RESUELTO — 2026-07-27 (confirmado por Anuar). Se corrige con la
+  cancelación del recordatorio al descargar: `send_daily_email_task`
+  (`core/content_pipeline/tasks.py`) ya omite el correo diario si
+  `post.downloaded_at is not None` — el usuario comprometido deja de
+  recibir correos de ese post, reduciendo el volumen que compite por
+  atención en su bandeja. No se implementó el fix de subject line ni un
+  canal adicional (WhatsApp/push) que este hallazgo también mencionaba,
+  pero Anuar considera el problema de fondo resuelto con este mecanismo.
 =================================================================
 Surfaceado por: Anuar, misma sesión en vivo con Dulce el 2026-07-08.
 
