@@ -364,7 +364,11 @@ class ReelGenerator:
         "blurred light — never legible text or interface elements. "
         "NO deformed hands, NO extra or fused fingers, NO mutated hands, NO distorted "
         "anatomy, NO plastic-looking skin or food, NO oversaturated glossy textures, NO "
-        "unrealistic reflections, NO incorrect or mismatched product."
+        "unrealistic reflections, NO incorrect or mismatched product. "
+        "NO continuous or infinite zoom into a single point, NO extreme or unnatural zoom "
+        "speed, NO unnatural cloth, fabric, or sheet physics — fabric must move and settle "
+        "naturally under gravity, never float or fold in an impossible way. NO camera "
+        "movement that breaks spatial continuity within the shot."
     )
 
     def _render_text_overlay_playwright(self, text: str, highlight_word: str,

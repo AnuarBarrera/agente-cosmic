@@ -261,6 +261,9 @@ class TestGenerateSingleClip:
         assert 'deformed hands' in constraints
         assert 'plastic' in constraints
         assert 'incorrect or mismatched product' in constraints
+        assert 'infinite zoom' in constraints
+        assert 'fabric' in constraints or 'cloth' in constraints
+        assert 'spatial continuity' in constraints
 
 
 class TestGenerateVideoClips:
