@@ -416,6 +416,7 @@ def send_reactivation_emails_task() -> None:
 
     stale_users = User.objects.filter(
         date_joined__lte=now - timedelta(days=_REACTIVATION_FIRST_DAYS_ANALYSIS),
+        tenant__subscription__plan__name='User',
     ).annotate(
         jobs_count=Count('analysis_jobs')
     ).filter(jobs_count=0)
