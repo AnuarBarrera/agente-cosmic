@@ -4059,7 +4059,7 @@ HALLAZGO 81 — schedule_daily_emails() se llama 2 veces por calendario,
   duplica el recordatorio diario (probable correo real duplicado
   confirmado en un caso)
 Categoría: Bug de lógica de negocio (emails duplicados)
-Estado: 🟡 DIAGNOSTICADO — PENDIENTE DE FIX — 2026-07-26
+Estado: 🟢 RESUELTO — 2026-07-27, subido a origin (commits 305bc34, 6b44c80)
 =================================================================
 Contexto: Anuar pidió verificar que la lógica nueva de "descargar la
   imagen/video/zip cancela el envío del recordatorio" ya estuviera activa
@@ -4124,3 +4124,20 @@ Severidad: Alta — correos duplicados le llegan a clientes reales, no es
   duplicación para los días de la semana de trial que sigan pendientes.
 Prioridad: Alta — corregir antes de que más cuentas reales completen el
   flujo de pago.
+
+Fix real implementado (2026-07-27, plan
+  `docs/superpowers/plans/2026-07-26-email-lifecycle-fixes-plan.md`):
+  se tomó la opción (2) — `schedule_daily_emails(calendar, day_start,
+  day_end)` ahora recibe el rango de días exacto de cada etapa
+  (`_trial_closing_task` pasa `1..calendar.posts.count()`,
+  `generate_next_month` pasa `base_day+1..base_day+28`), en vez de
+  reescanear todo lo `pending`. Se aprovechó el mismo cambio para fijar
+  el recordatorio diario siempre a las 7am hora de Ciudad de México (pedido
+  aparte de Anuar). Además se implementó el guard de idempotencia
+  sugerido: `EmailSender.send_daily()` ahora usa
+  `transaction.atomic()` + `select_for_update(status=PENDING)` antes de
+  enviar, como defensa adicional contra el `SerializationFailure`
+  concurrente de raíz. Test dedicado
+  (`test_schedule_daily_emails_two_calls_with_different_ranges_do_not_overlap`)
+  reproduce el escenario exacto del hallazgo y confirma 0 duplicados.
+  600/600 tests de la suite completa. Subido a origin.
