@@ -429,8 +429,12 @@ class ReelGenerator:
     def _generate_still_scene_clip(self, prompt: str, width: int, height: int, fps: float,
                                     duration: float = _VEO_CLIP_DURATION_SECONDS) -> bytes | None:
         still = self._generate_scene_still(prompt)
-        if still is None:
-            still = self._generate_scene_still(prompt)  # 1 reintento
+        if still is None or not self._validate_scene_still(still):
+            retry_still = self._generate_scene_still(prompt)
+            if retry_still is not None:
+                still = retry_still  # se usa el reintento aunque tambien falle QC —
+                # mismo criterio que _generate_background: reintentos agotados, se
+                # acepta la ultima imagen generada en vez de perder la escena completa.
         if still is None:
             return None
         return self._animate_still_to_clip(still, width, height, fps, duration=duration)
@@ -667,6 +671,60 @@ class ReelGenerator:
         except Exception as e:
             logger.warning(f"Imagen scene generation failed: {e}")
             return None
+
+    def _validate_scene_still(self, image_bytes: bytes) -> bool:
+        """Gemini reviews the generated scene still for forbidden elements. Mismo
+        checklist que ImageGenerator._validate_background — duplicado aqui a proposito
+        (mismo patron de este proyecto para generadores independientes)."""
+        try:
+            client = _vertex_client()
+            image_part = types.Part.from_bytes(data=image_bytes, mime_type='image/png')
+            prompt = (
+                "Analyze this image strictly. Reply ONLY with this JSON (no markdown):\n"
+                "{\"has_text\": <bool>, \"is_abstract_3d\": <bool>, \"has_screen_content\": <bool>, "
+                "\"has_malformed_object\": <bool>, \"has_unrealistic_grounding\": <bool>, \"ok\": <bool>}\n\n"
+                "has_text: true if ANY readable letters, words, numbers or text appear ANYWHERE in the image — "
+                "including text on signs, labels, books, packaging, walls, or any surface — OR any logo/brand "
+                "mark of any kind, even a purely graphic symbol with no letters (real or invented). Even partial "
+                "words or blurry text count. Be very strict.\n"
+                "is_abstract_3d: true if the image has floating 3D geometric shapes, abstract CGI objects, or surreal renders.\n"
+                "has_screen_content: true if any computer monitor, laptop screen, phone screen, TV, or digital display "
+                "shows visible content — including websites, text, images, graphics, UI elements, or any non-blank content. "
+                "A screen must be completely BLACK or clearly turned off to not count. Be very strict.\n"
+                "has_malformed_object: true if any object, tool, instrument, hand, or mechanical item is anatomically or "
+                "physically impossible or distorted — wrong number of parts, parts connected incorrectly, missing pieces "
+                "a real version of the object would have, or a structurally implausible shape. Examine objects with "
+                "multiple connected parts (tools, instruments, hands, machinery) closely. Only flag clear, obvious cases.\n"
+                "has_unrealistic_grounding: true if the main subject (person, animal, or product) appears to float, "
+                "hover, or is otherwise disconnected from the surface/floor/background it should be resting or "
+                "standing on — no visible contact point, no matching contact shadow directly beneath it, wrong "
+                "scale or perspective versus the background, or a dynamic mid-air pose (jumping, running) composited "
+                "onto a background that implies the subject is stationary. This commonly happens when a subject's "
+                "pose doesn't match its new background. Only flag clear, obvious cases where it looks physically wrong.\n"
+                "ok: true ONLY if has_text=false AND is_abstract_3d=false AND has_screen_content=false "
+                "AND has_malformed_object=false AND has_unrealistic_grounding=false."
+            )
+            with track_external_api('gemini', operation='reel_scene_qc'):
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL,
+                    contents=[image_part, prompt],
+                    config=types.GenerateContentConfig(labels=vertex_labels()),
+                )
+            record_tokens(resp, operation='reel_scene_qc',
+                          prompt_preview=prompt[:500],
+                          response_preview=resp.text[:500] if resp.text else '')
+            raw = resp.text.strip()
+            match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                ok = bool(data.get('ok', True))
+                if not ok:
+                    flags = [k for k in ('has_text', 'is_abstract_3d', 'has_screen_content', 'has_malformed_object', 'has_unrealistic_grounding') if data.get(k)]
+                    logger.warning(f"Reel scene QC REJECTED: {', '.join(flags)} | full={data}")
+                return ok
+        except Exception as e:
+            logger.warning(f"Reel scene QC error (assuming ok): {e}")
+        return True
 
     def _animate_still_to_clip(self, image_bytes: bytes, width: int, height: int,
                                 fps: float, duration: float = _VEO_CLIP_DURATION_SECONDS) -> bytes:

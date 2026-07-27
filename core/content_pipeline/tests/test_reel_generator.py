@@ -277,6 +277,7 @@ class TestGenerateVideoClips:
         with patch.object(gen, '_generate_single_clip', return_value=b'veo-clip') as mock_veo, \
              patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)) as mock_probe, \
              patch.object(gen, '_generate_scene_still', return_value=b'still-bytes') as mock_still, \
+             patch.object(gen, '_validate_scene_still', return_value=True), \
              patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
             clips = gen._generate_video_clips(
                 ['scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5', 'scene 6']
@@ -306,6 +307,7 @@ class TestGenerateVideoClips:
         with patch.object(gen, '_generate_single_clip', return_value=None) as mock_veo, \
              patch.object(gen, '_probe_clip_dimensions') as mock_probe, \
              patch.object(gen, '_generate_scene_still', return_value=b'still-bytes'), \
+             patch.object(gen, '_validate_scene_still', return_value=True), \
              patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
             clips = gen._generate_video_clips(
                 ['scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5', 'scene 6']
@@ -502,6 +504,100 @@ class TestGenerateSceneStill:
             mock_vc.return_value.models.generate_images.return_value = mock_resp
             result = gen._generate_scene_still('a workshop scene')
         assert result is None
+
+
+class TestValidateSceneStill:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_true_when_image_ok(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"has_text": false, "is_abstract_3d": false, "has_screen_content": false, "ok": true}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._validate_scene_still(b'fake-png')
+        assert result is True
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_false_when_has_text(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"has_text": true, "is_abstract_3d": false, "has_screen_content": false, "ok": false}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._validate_scene_still(b'fake-png')
+        assert result is False
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_true_on_api_error(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            result = gen._validate_scene_still(b'fake-png')
+        assert result is True  # don't block pipeline on QC error
+
+
+class TestGenerateStillSceneClipQC:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+    )
+    def test_retries_once_when_qc_rejects_first_still(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_scene_still', side_effect=[b'bad-still', b'good-still']) as mock_still, \
+             patch.object(gen, '_validate_scene_still', side_effect=[False, True]), \
+             patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
+            result = gen._generate_still_scene_clip('a scene', 720, 1280, 24.0, duration=2.0)
+        assert result == b'animated-clip'
+        assert mock_still.call_count == 2
+        mock_animate.assert_called_once_with(b'good-still', 720, 1280, 24.0, duration=2.0)
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+    )
+    def test_uses_retry_result_even_if_retry_also_fails_qc(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_scene_still', side_effect=[b'bad-still-1', b'bad-still-2']) as mock_still, \
+             patch.object(gen, '_validate_scene_still', return_value=False), \
+             patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
+            result = gen._generate_still_scene_clip('a scene', 720, 1280, 24.0, duration=2.0)
+        assert result == b'animated-clip'
+        assert mock_still.call_count == 2
+        # se acepta el resultado del reintento aunque tambien falle QC -- no se pierde la escena
+        mock_animate.assert_called_once_with(b'bad-still-2', 720, 1280, 24.0, duration=2.0)
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+    )
+    def test_does_not_retry_when_first_still_passes_qc(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_scene_still', return_value=b'good-still') as mock_still, \
+             patch.object(gen, '_validate_scene_still', return_value=True), \
+             patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip'):
+            gen._generate_still_scene_clip('a scene', 720, 1280, 24.0, duration=2.0)
+        assert mock_still.call_count == 1
 
 
 class TestChooseReelTemplate:
