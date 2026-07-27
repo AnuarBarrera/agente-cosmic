@@ -4201,3 +4201,37 @@ Prioridad: Sin definir — requiere decisión de producto (¿vale la pena
   medio, ej. 2 fondos distintos en vez de 1?), no es un fix de código
   directo. Evaluar junto con el brainstorm de estrategia de contenido
   interno-vs-externo (ver `ultimosCambios.md` punto 7).
+
+=================================================================
+HALLAZGO 84 — Inconsistencia espacial entre las 5 tomas independientes
+  de imagen del reel (ej. misma locación con geometría distinta)
+Categoría: Limitación de arquitectura (generación independiente sin
+  referencia compartida)
+Estado: 🟡 DOCUMENTADO COMO LIMITACIÓN CONOCIDA — SIN FIX PLANEADO — 2026-07-27
+=================================================================
+Contexto: Anuar reportó (revisión visual directa de reels reales,
+  ejemplo de un negocio de estética/spa) que la misma locación
+  aparente (ej. la misma cama de masajes) se muestra con geometría/
+  distribución distinta entre las 5 tomas fijas del reel
+  (`scene_prompts[1]` a `scene_prompts[5]`, cada una generada de forma
+  100% independiente vía Imagen 3 en
+  `core/content_pipeline/generators/reel_generator.py:_generate_scene_still`).
+
+Causa raíz: cada una de las 5 tomas se genera con su propio prompt,
+  sin ningún mecanismo de referencia compartida (seed, imagen base,
+  descripción literal reusada) que garantice que "la misma habitación"
+  descrita en 2 prompts distintos se renderice como el mismo espacio
+  físico. Es un problema estructural de la arquitectura actual (5
+  generaciones independientes), no un bug de prompt puntual.
+
+Fix: NO PLANEADO. Evaluado en el brainstorm de
+  `docs/superpowers/specs/2026-07-27-image-reel-fidelity-fixes-design.md`
+  — decisión explícita de Anuar de documentarlo como limitación
+  conocida en vez de atacarlo ahora, ya que requeriría un cambio de
+  arquitectura mayor (compartir referencia/contexto entre las 5
+  generaciones) y no un simple ajuste de prompt.
+
+Severidad: Baja-Media — afecta la percepción de calidad/coherencia
+  visual del reel, no rompe la generación ni bloquea publicación.
+Prioridad: Baja — revisar si se retoma cuando se evalúe un cambio de
+  arquitectura mayor al pipeline de generación de escenas del reel.
