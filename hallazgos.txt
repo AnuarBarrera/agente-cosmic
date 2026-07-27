@@ -3773,9 +3773,7 @@ Prioridad: Cerrado.
 HALLAZGO 77 — Logo alucinado (nombre real del negocio impreso en una
   etiqueta falsa) en el clip de Veo de un reel de muestra
 Categoría: Bug de prompt engineering
-Estado: 🟡 DIAGNOSTICADO EN PRODUCCIÓN — PENDIENTE DE FIX — 2026-07-20
-  (root cause confirmado con evidencia visual, fix NO implementado
-  todavía — para hacer en el servidor de desarrollo)
+Estado: 🟢 RESUELTO — 2026-07-20 (ver actualización con el fix real más abajo)
 =================================================================
 Contexto: Anuar generó un reel de muestra para el negocio "MariBelas"
   (velas y jabones artesanales) y reportó que el video se ve bien pero
@@ -3838,15 +3836,23 @@ Severidad: Media (afecta credibilidad de marca en contenido generado
   un logo falso en su propio contenido de muestra).
 Prioridad: Alta — implementar fix en próxima sesión de desarrollo.
 
+ACTUALIZACIÓN 2026-07-20 — 🟢 RESUELTO — implementados los 2 fixes
+  propuestos, confirmado en código (`reel_script_generator.py`): (1) la
+  instrucción #5 del `_PROMPT` ahora prohíbe explícitamente mencionar el
+  nombre del negocio, etiquetas o cualquier marca visible en los
+  `scene_prompts`; (2) backstop determinístico `_scrub_brand_leak()`
+  (regex sobre `label|logo|brand(?:ing)?|packaging|signage|wordmark|emblem|...`)
+  que descarta y reemplaza cualquier escena que se cuele mencionando el
+  nombre real del negocio o palabras de etiquetado/marca, usando el
+  fallback correspondiente en vez de todo el guion.
+
 =================================================================
 HALLAZGO 78 — Narración de reel parafraseó "upcycling" como
   "materiales reutilizados", perjudicando el posicionamiento de la
   marca (patron: traduccion/parafraseo tecnicamente valido pero
   perjudicial, sin QC que lo detecte)
 Categoría: Bug de prompt engineering / falta de QC semantico
-Estado: 🟡 DIAGNOSTICADO EN PRODUCCIÓN — PENDIENTE DE ANÁLISIS —
-  2026-07-22 (Anuar va a revisarlo con más calma antes de decidir el
-  fix — NO implementar todavía)
+Estado: 🟢 RESUELTO — 2026-07-22 (ver actualización con el fix real más abajo)
 =================================================================
 Contexto: Anuar detectó por qué no se publicó el reel del día 15 del
   calendario de "El perro rebelde" (`elperrorebelde61@gmail.com`,
@@ -3931,8 +3937,7 @@ HALLAZGO 79 — Suite de pytest intermitentemente falla por
   TenantRateLimitingMiddleware (limite por IP compartida del test client),
   no es una regresion de codigo
 Categoría: Deuda técnica / aislamiento de tests
-Estado: 🟡 DIAGNOSTICADO — PENDIENTE DE FIX — 2026-07-26 (se desplegó
-  igual tras confirmar que no es una regresión real, ver evidencia abajo)
+Estado: 🟢 RESUELTO — 2026-07-26 (ver actualización con el fix real más abajo)
 =================================================================
 Contexto: durante el deploy del 2026-07-26 (47 commits: sistema de pagos
   Stripe + trial/monthly chunking), el gate de pytest de `cosmic-pull` falló
