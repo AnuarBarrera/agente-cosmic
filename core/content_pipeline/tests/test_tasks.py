@@ -408,6 +408,48 @@ def test_generate_sample_task_product_reel_mode_creates_post(job_with_dna_sample
     assert post.image_url == 'https://storage.test/poster.png'
 
 
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+)
+def test_generate_sample_task_product_image_mode_fails_when_qc_rejects(job_with_dna_sample_product_image):
+    with patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes'), \
+         patch('core.content_pipeline.tasks.ProductReferenceGenerator') as MockGen:
+        MockGen.return_value.generate_image.return_value = ''
+
+        from core.content_pipeline.tasks import generate_sample_task
+        generate_sample_task(str(job_with_dna_sample_product_image.id))
+
+    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna_sample_product_image)
+    assert posts.count() == 0
+    job_with_dna_sample_product_image.refresh_from_db()
+    assert job_with_dna_sample_product_image.status == AnalysisJob.STATUS_FAILED
+    assert 'calidad' in job_with_dna_sample_product_image.error_message.lower()
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+)
+def test_generate_sample_task_product_reel_mode_fails_when_qc_rejects(job_with_dna_sample_product_reel):
+    with patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes'), \
+         patch('core.content_pipeline.tasks.ProductReferenceGenerator') as MockGen:
+        MockGen.return_value.generate_reel.return_value = ('', '')
+
+        from core.content_pipeline.tasks import generate_sample_task
+        generate_sample_task(str(job_with_dna_sample_product_reel.id))
+
+    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna_sample_product_reel)
+    assert posts.count() == 0
+    job_with_dna_sample_product_reel.refresh_from_db()
+    assert job_with_dna_sample_product_reel.status == AnalysisJob.STATUS_FAILED
+    assert 'calidad' in job_with_dna_sample_product_reel.error_message.lower()
+
+
 def test_generate_sample_task_product_mode_fails_without_photo():
     job = AnalysisJob.objects.create(
         email='t@t.com', business_url='https://tuwebmx.com',

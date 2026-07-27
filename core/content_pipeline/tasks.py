@@ -68,6 +68,11 @@ def _generate_product_reference_sample(job, brand_dna) -> None:
         )
         video_url, fmt = '', ContentPost.FORMAT_SINGLE
 
+    if not image_url and not video_url:
+        calendar.delete()
+        job.mark_failed('El control de calidad rechazó el resultado (posible alucinación de logo/texto). Reintenta.')
+        return
+
     ContentPost.objects.create(
         calendar=calendar,
         day_number=1,
