@@ -814,3 +814,93 @@ Severidad: Alta — afecta a TODA la categoria de negocios de "nicho
 Prioridad: Alta — a diferencia de IMG-07 (donde aun falta evidencia de
   la causa raiz), aqui la causa YA esta confirmada con evidencia
   completa; el fix es implementable directamente sin mas investigacion.
+
+=================================================================
+HALLAZGO IMG-09 — El QC de escenas de reel/imagen NO tiene NINGUN
+  criterio de contenido sensible/desnudez — una escena de masaje con
+  hombros/espalda descubiertos y un artefacto de sombreado ambiguo en
+  la zona del pecho paso los 5 checks de QC sin problema, porque
+  ninguno de los 5 evalua eso
+Categoría: Falta de criterio de seguridad de contenido en el QC (riesgo
+  de marca/reputacional, no un bug de fidelidad/calidad como los demas
+  hallazgos de este archivo)
+Estado: 🔴 CONFIRMADO CON EVIDENCIA — SIN FIX AUN — SEVERIDAD ALTA —
+  2026-07-28
+=================================================================
+Contexto: Anuar genero un reel de muestra para "Oasis de Relajación"
+  (spa/masajes), job `afc229ed-df71-43cc-a80d-d4d6fd972275`
+  (`contacto.neia@gmail.com`, cuenta de pruebas — NO llego a un cliente
+  real). Reporto: "una de las imagenes... sale una mujer afroamericana
+  y parece que se dibuja un pezón, dificil, porque no se dibuja como
+  tal pero hay un cambio de texturas y si lo hace se parece mucho."
+
+Verificacion: se descargo el reel
+  (`storage.googleapis.com/agente-cosmic-assets/reels/afc229ed-...-
+  sample.mp4`) y se extrajeron frames en el rango ~12.8s-14.8s del
+  video (uno de los 5 shots de imagen generados por Imagen 3, el que
+  muestra a la clienta recibiendo un masaje). Confirmado: hombros y
+  espalda superior descubiertos (composicion tipica de fotografia de
+  stock de spa/masaje — mano de la masajista sobre el cuello), y una
+  marca de sombra/pliegue oscura y ambigua en la zona del pecho/
+  clavicula que, sin ser un dibujo explicito de un pezon, es facilmente
+  interpretable como tal por el cambio de textura/sombreado —
+  exactamente como lo describio Anuar.
+
+Causa raiz — NO es un problema de esta escena en particular, es
+  estructural: se revisaron los 5 QC calls que corrieron sobre las
+  escenas de este reel (logs `reel_scene_qc` en
+  `logs/llm_audit.jsonl`/docker logs, timestamps 20:52-20:54). Los 5
+  pasaron con `"ok": true`. El `_QC_PROMPT` (duplicado a proposito en 3
+  archivos — `core/content_pipeline/generators/reel_generator.py`
+  metodo `_validate_scene_still`, `image_generator.py`, y
+  `product_reference_generator.py`) evalua exactamente estos 5
+  criterios: `has_text`, `is_abstract_3d`, `has_screen_content`,
+  `has_malformed_object`, `has_unrealistic_grounding`. **Ninguno de los
+  5 evalua desnudez, piel expuesta, o contenido sugerente/sensible.**
+  Una escena asi pasa limpio sin importar que tan explicita o ambigua
+  resulte, porque el QC nunca la revisa — no hubo ningun "casi rechazo"
+  ni situacion limite, simplemente no es un criterio que exista hoy.
+
+Por que esto es mas grave que los demas hallazgos de este archivo: los
+  hallazgos IMG-01 a IMG-08 son problemas de FIDELIDAD/CALIDAD (logos
+  alucinados, guiones genericos, voz cortada) — mal look-and-feel para
+  el negocio, pero sin riesgo legal/reputacional directo. Este es un
+  problema de SEGURIDAD DE CONTENIDO — contenido con apariencia de
+  desnudez saliendo de la plataforma hacia clientes reales seria un
+  problema serio de marca y de confianza, independientemente de que
+  tecnicamente no sea "explicito".
+
+Tampoco es un caso aislado: el propio prompt de `ReelScriptGenerator`
+  (`_PROMPT` en `reel_script_generator.py`, instruccion #5) le pide a la
+  IA generar shots de "el cliente disfrutando o recibiendo el
+  resultado" como parte estandar del guion — para negocios de spa,
+  masajes, belleza, fitness, ese tipo de escena (piel expuesta, cuerpo
+  humano en primer plano) es el resultado ESPERABLE del prompt, no una
+  rareza. Va a volver a pasar con cualquier negocio de este rubro.
+
+Propuesta de fix (no implementada, pendiente de decision de Anuar):
+  1. Agregar un 6to criterio al `_QC_PROMPT` compartido (los 3 archivos)
+     tipo `has_suggestive_or_exposed_content: true if the image shows
+     exposed intimate body parts, implied nudity, or content that could
+     be perceived as sexually suggestive, even if not explicit` — y
+     sumarlo a la condicion final de `ok`.
+  2. Dado que este criterio es mas subjetivo/sensible que los otros 5
+     (que son objetivos: hay texto o no, hay pantalla o no), conviene
+     ser conservador/estricto en la redaccion — mejor un falso rechazo
+     ocasional (foto legitima de spa completamente vestida que se
+     rechaza sin razon) que un falso positivo de este tipo pasando a
+     produccion.
+  3. Posiblemente tambien ajustar `reel_script_generator.py` (`_PROMPT`,
+     instruccion #5) para excluir explicitamente escenas de "cliente
+     recibiendo tratamiento/masaje con piel expuesta" en la
+     generacion del guion — atacar el problema en el origen (que no se
+     pida ese tipo de escena) ademas de en el QC (que se rechace si se
+     genera).
+
+Severidad: Alta — riesgo de marca/reputacional, no solo de calidad.
+  Afecta a toda la categoria de negocios de spa/masajes/belleza/fitness,
+  un patron de negocio comun, no un caso raro.
+Prioridad: Alta — a diferencia de otros hallazgos de "calidad", este
+  tiene potencial de dañar la confianza en la plataforma si un cliente
+  real llega a recibir contenido asi. Recomendado atacar antes de los
+  demas hallazgos pendientes (IMG-01, IMG-05) si hay que priorizar.
