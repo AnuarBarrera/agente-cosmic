@@ -11,7 +11,12 @@ HALLAZGO IMG-01 — "El control de calidad rechazó el resultado" es un
   Gemini rechaza generar contenido (probable causa: copyright de
   personajes con licencia en la foto de referencia)
 Categoría: Bug de manejo de errores + mensaje de usuario enganoso
-Estado: 🟡 DIAGNOSTICADO — PENDIENTE DE FIX — 2026-07-27
+Estado: ✅ CORREGIDO (crash) — 2026-07-27. El mensaje de usuario generico
+  sigue igual (no se toco ese punto), pero ya no truena sin control ni
+  sin rastro: `_generate_scene` ahora chequea `candidate.content` antes
+  de iterar (ya no lanza 'NoneType' object is not iterable) y loguea
+  `finish_reason` en cualquier caso donde no vuelva imagen, mas
+  `record_tokens` con ese detalle para verlo en llm_audit.jsonl.
 =================================================================
 Contexto: Anuar probó el pipeline nuevo de "producto real como
   referencia" (`sample_product_image`, desplegado el mismo día) subiendo
@@ -559,3 +564,253 @@ Riesgo principal a resolver antes de implementar: afinar el criterio de
 Siguiente paso: pendiente de decision de Anuar sobre si se prioriza esta
   propuesta y en que orden respecto a los fixes ya identificados
   (IMG-01, IMG-05).
+
+=================================================================
+HALLAZGO IMG-07 — Narracion de TTS en reels se corta a mitad del guion
+  en varios de los reels generados en una misma sesion de pruebas —
+  causa exacta NO CONFIRMADA por falta de logging (mismo punto ciego
+  que IMG-02, pero en `_generate_narration`, nunca corregido ahi)
+Categoría: Bug de calidad de audio en generacion de reels + falta de
+  observabilidad
+Estado: 🟡 LOGGING IMPLEMENTADO — CAUSA RAIZ AUN PENDIENTE DE CONFIRMAR
+  CON EL PROXIMO CASO REAL — 2026-07-27
+=================================================================
+Contexto: Anuar genero 5 reels de muestra en ~40 minutos (jobs
+  `978af4ed` 18:59, `fe511b97` 19:18, `d55407b5` 19:23, `3ac53b82`
+  19:26, `52aa625d` 19:35 — los ultimos 2 solo 3 min de diferencia
+  entre si) y reporto que al menos 2 tuvieron problemas de voz: uno
+  donde la narracion "no termino con lo que venia en el texto" y otro
+  "definitivamente se quedo sin voz". Hipotesis de Anuar: al mandar
+  varias generaciones muy cercanas en tiempo, se esta cayendo en rate
+  limits o saturacion de los workers — un punto de escalabilidad real
+  a vigilar antes de crecer la base de usuarios.
+
+Verificacion: se descargaron los 5 videos (`storage.googleapis.com/
+  agente-cosmic-assets/reels/{job_id}-sample.mp4`), se extrajo el audio
+  de cada uno, y se transcribio con Gemini (llamada multimodal directa,
+  sin depender de logs) para comparar contra el `narration_script`
+  exacto que se genero para cada reel (capturado de los logs de
+  `reel_script` en `metrics_utils`). Resultado:
+  - `fe511b97` (Custom Glow Skin): narracion se corta, falta la ultima
+    frase del guion ("Descubre tu verdadero resplandor" no se alcanza a
+    decir completo / corte abrupto).
+  - `d55407b5` (AMV Consultorio Dental): narracion COMPLETA, coincide
+    palabra por palabra con el guion. Sin problema.
+  - `3ac53b82` (Dental Donti): narracion se corta, falta la ultima
+    oracion completa del guion ("Tu bienestar es nuestra pasión.").
+  - `52aa625d` (Dentalhit): caso mas severo — la narracion se corta muy
+    temprano (~8.5s de 24s) Y el texto transcrito ni siquiera coincide
+    con el `narration_script` esperado (coincide en cambio con el
+    CAPTION del post, no la narracion) — esto correlaciona con un log
+    de esa misma ejecucion: `"ReelScriptGenerator: guion rechazado por
+    lenguaje prohibido en nicho sensible, usando fallback"` (negocio
+    dental = nicho sensible para el moderador de contenido). Es decir,
+    este caso probablemente sea un guion de fallback distinto al que se
+    capturo en el log de `reel_script` (que corresponde al guion
+    ORIGINAL, ya rechazado) — necesita mas investigacion aparte.
+  - `978af4ed` (Berenis Hair, hace ~50 min, fuera de la ventana que
+    menciono Anuar): narracion COMPLETA, termina naturalmente antes de
+    que acabe el video (comportamiento esperado/documentado en el
+    codigo — la narracion suele durar menos que los 24s del video y
+    eso esta bien, no es un bug).
+
+Lo que esto DESCARTA de la hipotesis original: no parece ser un
+  rate-limit/429 clasico de la API. `_generate_narration()` en
+  `reel_generator.py` tiene un `try/except` que loguea explicitamente
+  `"TTS narration generation failed (reel sin narracion): {e}"` cuando
+  la llamada lanza una excepcion — y no aparece NI UNA sola vez ese log
+  en toda la ventana de tiempo revisada (`docker compose logs rqworker`,
+  18:55-19:40). Es decir, la llamada a la API de TTS
+  (`gemini-2.5-flash-tts`, `VERTEX_TTS_MODEL`) nunca fallo con una
+  excepcion — respondio "exitosamente" pero con audio incompleto/
+  truncado. Esto apunta mas a una limitacion del modelo con guiones
+  largos bajo cierta condicion (¿carga del servicio? ¿longitud del
+  texto cerca de un limite interno del modelo?) que a un rate-limit
+  tradicional — pero **no se puede confirmar la causa exacta** porque
+  `_generate_narration()` no loguea NADA util mas alla de la excepcion:
+  ni el `finish_reason` de la respuesta, ni `usage_metadata` (tokens de
+  audio generados), ni siquiera un log de exito con la duracion del
+  audio devuelto. Mismo punto ciego que tenia `_validate_scene()` antes
+  del fix de HALLAZGO IMG-02, pero aqui nunca se corrigio.
+
+Tambien vale notar: el metodo de verificacion usado aqui (descargar el
+  video, extraer audio, transcribir con Gemini y comparar contra el
+  guion esperado) fue necesario PRECISAMENTE por esta falta de logging
+  — no hay forma mas barata/rapida de diagnosticar este tipo de falla
+  hoy.
+
+Propuesta de fix (no implementada, pendiente de decision de Anuar):
+  1. Igual que IMG-02: agregar logging de detalle a `_generate_narration`
+     — loguear `finish_reason`, `usage_metadata` (si el SDK lo expone
+     para audio), y la duracion del audio PCM devuelto (bytes / (24000
+     * 2) para PCM 16-bit mono a 24kHz) en cada llamada exitosa, para
+     poder ver directamente si el corte correlaciona con algun limite
+     de tokens/duracion reportado por la API.
+  2. Una vez con esa visibilidad, si se confirma que es un limite de
+     duracion/tokens del modelo con guiones largos (no concurrencia),
+     la mitigacion mas directa seria acortar el `narration_script`
+     pedido (el prompt de `reel_script` ya apunta a "~18 segundos" pero
+     el resultado real ronda 21-24+ segundos de habla en varios casos)
+     o generar la narracion en <=2 tandas mas cortas y concatenar el
+     audio.
+  3. Si en cambio se confirma que SI es un tema de concurrencia/carga
+     (necesitaria reproducirse con logging activo y jobs simultaneos
+     deliberados), evaluar cola dedicada o limite de concurrencia
+     especifico para llamadas de TTS/Veo separado del resto de RQ.
+
+Severidad: Alta — afecto a 3 de 5 reels de prueba en esta sesion (60%),
+  un reel con narracion incompleta es un producto entregado con defecto
+  visible al usuario final, no un caso limite raro.
+Prioridad: Alta — pero el primer paso NO es intentar arreglar la causa
+  a ciegas (no esta confirmada), sino instrumentar el logging (mismo
+  patron que IMG-02) para poder diagnosticar con evidencia real en el
+  proximo reel que falle, en vez de tener que transcribir audio a mano
+  cada vez.
+
+Fix implementado — 2026-07-27: a peticion de Anuar ("añade el logging
+  en todas las peticiones para tener visibilidad en los errores"), se
+  agrego logging de detalle a TODAS las llamadas de generacion binaria
+  (audio/video/imagen) del pipeline de reels y de producto-referencia
+  que hoy fallaban en silencio — no solo TTS. Antes de este fix, la
+  logica de "exito silencioso vs. fallo silencioso" en estas llamadas
+  era distinta a la de las llamadas de texto/QC (que ya logueaban bien
+  desde antes via `record_tokens` + `response_preview`, ej.
+  `reel_scene_qc`, `image_qc`): las llamadas que devuelven audio/video/
+  imagen binaria no pasaban por `record_tokens` en absoluto, asi que no
+  dejaban ningun rastro en `llm_audit.jsonl` ni el motivo (`finish_reason`,
+  filtro de seguridad) cuando volvian vacias.
+
+  Cambios (`core/content_pipeline/generators/reel_generator.py` y
+  `product_reference_generator.py`):
+  - `_generate_narration` (TTS, reel_generator.py): ya no asume que
+    `resp.candidates[0].content.parts` existe — chequea `candidate.content`
+    antes de iterar, loguea `finish_reason` en el caso de audio vacio, y
+    ahora llama a `record_tokens` en AMBOS casos (exito con duracion
+    estimada del audio, y fallo con el finish_reason) — visible en
+    `llm_audit.jsonl` con `operation=tts_generate`.
+  - `_generate_single_clip` (Veo, reel_generator.py): loguea
+    `rai_media_filtered_reasons` cuando Veo devuelve 0 videos sin marcar
+    `operation.error` (filtro de seguridad silencioso).
+  - `_generate_scene_still` (Imagen 3, reel_generator.py): loguea cuando
+    `resp.generated_images` vuelve vacio (filtro de seguridad de Imagen).
+  - `_generate_music_attempt` (Lyria, reel_generator.py): loguea cuando
+    la interaccion no trae `output_audio`.
+  - `_generate_scene` (Gemini/product_reference_generator.py — HALLAZGO
+    IMG-01): mismo fix de fondo que TTS — chequeo defensivo de
+    `candidate.content` (ya no truena con 'NoneType' object is not
+    iterable) + logging de `finish_reason` + `record_tokens` en ambos
+    casos.
+  - `_animate_scene` (Veo/product_reference_generator.py): mismo logging
+    de `rai_media_filtered_reasons` que `_generate_single_clip`.
+
+  Verificado: 631 tests (`pytest core -q`) pasando sin cambios, desplegado
+  con `docker compose up -d --force-recreate --no-deps backend rqworker`,
+  health check OK post-deploy. Pendiente: reproducir un proximo caso real
+  de narracion cortada para leer el `finish_reason` real y por fin
+  confirmar la causa raiz (limite del modelo vs. concurrencia).
+
+=================================================================
+HALLAZGO IMG-08 — Reel de "Dentalhit" cae en fallback generico dos
+  veces seguidas — NO es el bug de TTS (IMG-07): el filtro de "nicho
+  sensible" descarta el guion COMPLETO por un falso positivo de
+  substring ("100%" tomado de la propia descripcion del negocio,
+  "empresa 100% mexicana", sin relacion a promesas de salud)
+Categoría: Falso positivo en filtro de seguridad de contenido + diseño
+  todo-o-nada del fallback (descarta el guion entero, no solo la frase)
+Estado: 🟢 CAUSA RAIZ CONFIRMADA CON EVIDENCIA DE LOGS — SIN FIX AUN —
+  2026-07-27
+=================================================================
+Contexto: Anuar reporto que el reel de "Dentalhit" fallo por segunda vez
+  (jobs `52aa625d-6c34-42c9-b53c-c7b4d74365fa` 19:35 y
+  `242038e0-8e76-4d5e-8ef6-5a88fee0d3ed` 21:31, mismo negocio, mismo
+  resultado). Con el logging nuevo de HALLAZGO IMG-07 ya activo, se pudo
+  descartar de inmediato que fuera el bug de TTS: el log de la segunda
+  corrida muestra `{"operation": "tts_generate", ...,
+  "response_preview": "ok, finish_reason=FinishReason.STOP,
+  audio_duration_s=9.9"}` — audio completo, sin corte. El "fallo" real
+  es otro: el reel se genero con contenido GENERICO no relacionado al
+  negocio (confirmado visualmente extrayendo un frame del video: una
+  escena de frascos de vidrio y una suculenta sobre marmol — nada que
+  ver con una clinica dental).
+
+Causa raiz (rastreada via logs, `core/content_pipeline/generators/
+  reel_script_generator.py` y `text_generator.py`):
+  1. `_is_sensitive_niche()` (text_generator.py) marca cualquier negocio
+     con "dental"/"dentista" (junto con salud, legal, finanzas, infantil,
+     etc.) en su descripcion/audiencia/keywords como "nicho sensible".
+  2. Para esos negocios, `ReelScriptGenerator.generate()` genera el
+     guion completo con IA y LUEGO revisa si `hook_text + narration_script`
+     contiene alguna de estas palabras (simple substring, sin contexto):
+     `garantizado, garantizamos, asegurar, aseguramos, 100%`.
+  3. Si encuentra una, descarta el guion COMPLETO (no solo la frase) y
+     usa un fallback generico hardcodeado: `narration_script` = los
+     primeros 200 caracteres del CAPTION del post (no un guion de voz
+     real), `tag_cta` = literalmente "Contáctanos hoy" (fijo, sin
+     personalizar), y `scene_prompts` = 6 escenas genericas de
+     PRODUCTO FISICO (`_FALLBACK_SCENES`: flat lay, macro de textura,
+     "manos organizando el producto", etc.) — sin sentido para un
+     negocio de SERVICIOS como una clinica dental.
+
+  El disparador real, confirmado en el log de `reel_script` (que SI
+  queda guardado en `llm_audit.jsonl`/logs ANTES del descarte, via
+  `record_tokens` — por eso se pudo reconstruir el guion original
+  descartado): la DESCRIPCION del negocio en `BrandDNA` dice
+  textualmente "DENTALHIT es una empresa **100% mexicana** que ofrece
+  una amplia gama de especialidades dentales...". Ese "100%" describe
+  el ORIGEN/nacionalidad de la empresa, sin relacion alguna a una
+  promesa de resultado medico. La IA, al redactar la narracion, se
+  apoyo en esa misma frase de la descripcion ("somos una empresa 100%
+  mexicana dedicada a tu bienestar...") — y el filtro, al ser un simple
+  match de substring sobre "100%" sin entender el contexto, lo trato
+  igual que "resultados 100% garantizados" y descarto todo el guion.
+
+  Confirmado por comparacion: "AMV Consultorio Dental" (tambien nicho
+  sensible por ser dental, y que SI genero su reel bien en esta misma
+  sesion) tiene una descripcion limpia sin "100%" ni ninguna palabra de
+  la lista prohibida — nunca cayo en este fallback. Osea el problema NO
+  es "ser una clinica dental" en general, sino el texto exacto y
+  especifico de la descripcion de ESTE negocio en particular.
+
+Dos problemas de diseño distintos, ambos reales:
+  1. El filtro de palabras prohibidas es un match de substring sin
+     contexto semantico — no distingue "100% mexicana" (dato neutro de
+     identidad de marca) de "resultados 100% garantizados" (promesa de
+     salud no verificable, que SI es el caso que el filtro busca evitar
+     con razon).
+  2. Cuando SI detecta un match legitimo o falso positivo, la respuesta
+     es todo-o-nada: descarta el guion COMPLETO (hook, narracion, CTA,
+     Y las 6 escenas visuales) en vez de solo corregir/reescribir la
+     frase ofensora — perdiendo toda la personalizacion del reel para
+     ese negocio, incluso cuando el resto del guion era perfectamente
+     valido.
+
+Propuesta de fix (no implementada, pendiente de decision de Anuar):
+  1. Evitar el falso positivo especifico: excluir explicitamente
+     patrones tipo "N% mexican[ao]/nacional/local" del chequeo, o
+     acotar el chequeo a frases de promesa de resultado (ej. requerir
+     que "100%" aparezca cerca de palabras como "garantiz-", "asegur-",
+     "resultado", "efectiv-", en vez de cualquier "100%" suelto en el
+     texto).
+  2. Cambiar el manejo de rechazo de todo-o-nada a granular: en vez de
+     `return fallback` completo, usar el mismo patron que ya existe en
+     este mismo archivo para otro tipo de problema (`audit_brand_consistency`
+     + `rewrite_for_brand_consistency`, lineas 178-189) — reescribir
+     SOLO el campo (`hook_text` o `narration_script`) que contenia la
+     palabra prohibida, conservando el resto del guion (scene_prompts,
+     tag_cta, music_mood) intacto y personalizado.
+  3. Si se implementa (2), tambien conviene loguear la palabra/frase
+     especifica que disparo el rechazo (hoy el log solo dice "lenguaje
+     prohibido", no cual palabra ni en que campo) — mismo espiritu que
+     el fix de HALLAZGO IMG-02/IMG-07, para no tener que reconstruir el
+     guion original a mano desde `llm_audit.jsonl` la proxima vez.
+
+Severidad: Alta — afecta a TODA la categoria de negocios de "nicho
+  sensible" (salud, dental, legal, finanzas, infantil) cuya propia
+  descripcion de marca use naturalmente alguna de las palabras
+  prohibidas en un contexto no relacionado a promesas (ej. "100%
+  mexicana", "aseguramos citas los sabados", etc.) — no es un caso
+  raro, es esperable que varias descripciones de negocio reales caigan
+  en este patron.
+Prioridad: Alta — a diferencia de IMG-07 (donde aun falta evidencia de
+  la causa raiz), aqui la causa YA esta confirmada con evidencia
+  completa; el fix es implementable directamente sin mas investigacion.

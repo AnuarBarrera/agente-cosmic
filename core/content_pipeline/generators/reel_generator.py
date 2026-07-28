@@ -647,6 +647,13 @@ class ReelGenerator:
                 return None
             generated = operation.result.generated_videos
             if not generated:
+                # Motivo tipico: filtro de seguridad (RAI) de Veo bloqueo el clip sin
+                # marcar operation.error — rai_media_filtered_reasons trae el detalle.
+                filtered_reasons = getattr(operation.result, 'rai_media_filtered_reasons', None)
+                logger.warning(
+                    f"Veo: 0 videos generados (posible filtro de seguridad) | "
+                    f"filtered_reasons={filtered_reasons} | prompt={prompt[:80]}"
+                )
                 return None
             record_veo_generation(duration_seconds=_VEO_CLIP_DURATION_SECONDS)
             return generated[0].video.video_bytes
@@ -671,6 +678,13 @@ class ReelGenerator:
             if resp.generated_images:
                 record_imagen_generation('reel_scene')
                 return resp.generated_images[0].image.image_bytes
+            # Motivo tipico: filtro de seguridad de Imagen bloqueo la generacion
+            # (prompt rechazado) sin lanzar excepcion — solo devuelve la lista vacia.
+            filter_reason = getattr(resp, 'positive_prompt_safety_attributes', None)
+            logger.warning(
+                f"Imagen scene: 0 imagenes generadas (posible filtro de seguridad) | "
+                f"filter_reason={filter_reason} | prompt={prompt[:80]}"
+            )
             return None
         except Exception as e:
             logger.warning(f"Imagen scene generation failed: {e}")
@@ -786,6 +800,9 @@ class ReelGenerator:
                 # AudioContent.data como string base64, no bytes crudos.
                 record_lyria_generation()
                 return base64.b64decode(audio.data)
+            logger.warning(
+                f"Lyria: respuesta sin output_audio (posible filtro de contenido) | prompt={prompt[:80]}"
+            )
             return None
         except Exception as e:
             logger.warning(f"Lyria music generation failed (reintentando o degradando): {e}")
@@ -808,10 +825,33 @@ class ReelGenerator:
                         labels=vertex_labels(),
                     ),
                 )
-            for part in resp.candidates[0].content.parts:
-                if part.inline_data:
-                    record_tts_generation(char_count=len(narration_script))
-                    return part.inline_data.data
+            candidate = resp.candidates[0] if resp.candidates else None
+            finish_reason = getattr(candidate, 'finish_reason', None) if candidate else None
+            parts = candidate.content.parts if candidate and candidate.content else None
+            if parts:
+                for part in parts:
+                    if part.inline_data:
+                        audio_bytes = part.inline_data.data
+                        # PCM 16-bit mono 24kHz (ver _assemble_reel) — bytes / (24000*2) = segundos.
+                        duration_s = len(audio_bytes) / 48000
+                        record_tts_generation(char_count=len(narration_script))
+                        record_tokens(
+                            resp, operation='tts_generate', prompt_preview=narration_script[:500],
+                            response_preview=f"ok, finish_reason={finish_reason}, audio_duration_s={duration_s:.1f}",
+                        )
+                        return audio_bytes
+            # HALLAZGO IMG-07 (hallazgosImagen.txt, 2026-07-27): antes esta rama no logueaba
+            # nada — la narracion salia truncada o vacia sin ningun rastro en logs/audit,
+            # obligando a transcribir el audio a mano para diagnosticar. finish_reason
+            # (ej. MAX_TOKENS, SAFETY) es la pista real de por que no hubo audio o quedo corto.
+            logger.warning(
+                f"TTS narration: sin audio en la respuesta (reel sin narracion) | "
+                f"finish_reason={finish_reason} | script_len={len(narration_script)}"
+            )
+            record_tokens(
+                resp, operation='tts_generate', prompt_preview=narration_script[:500],
+                response_preview=f"SIN AUDIO, finish_reason={finish_reason}",
+            )
             return None
         except Exception as e:
             logger.warning(f"TTS narration generation failed (reel sin narracion): {e}")

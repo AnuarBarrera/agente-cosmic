@@ -144,10 +144,30 @@ class ProductReferenceGenerator:
                     contents=[image_part, prompt],
                     config=types.GenerateContentConfig(response_modalities=['IMAGE', 'TEXT'], labels=vertex_labels()),
                 )
-            record_tokens(resp, operation='product_reference_scene', prompt_preview=prompt[:500])
-            for part in resp.candidates[0].content.parts:
-                if part.inline_data:
-                    return part.inline_data.data
+            # HALLAZGO IMG-01 (hallazgosImagen.txt, 2026-07-27): antes se iteraba
+            # directo `resp.candidates[0].content.parts` — si Gemini se niega a
+            # generar (ej. copyright de un personaje con licencia en la foto de
+            # referencia) devuelve un candidate con content=None, y esto lanzaba
+            # 'NoneType' object is not iterable sin ninguna pista del motivo real.
+            candidate = resp.candidates[0] if resp.candidates else None
+            finish_reason = getattr(candidate, 'finish_reason', None) if candidate else None
+            parts = candidate.content.parts if candidate and candidate.content else None
+            if parts:
+                for part in parts:
+                    if part.inline_data:
+                        record_tokens(
+                            resp, operation='product_reference_scene', prompt_preview=prompt[:500],
+                            response_preview=f"ok, finish_reason={finish_reason}",
+                        )
+                        return part.inline_data.data
+            logger.warning(
+                f"ProductReferenceGenerator._generate_scene: sin imagen en la respuesta "
+                f"(Gemini probablemente se nego a generar) | finish_reason={finish_reason}"
+            )
+            record_tokens(
+                resp, operation='product_reference_scene', prompt_preview=prompt[:500],
+                response_preview=f"SIN IMAGEN, finish_reason={finish_reason}",
+            )
             return None
         except Exception as e:
             logger.warning(f"ProductReferenceGenerator._generate_scene fallo: {e}")
@@ -179,6 +199,11 @@ class ProductReferenceGenerator:
                 return None
             generated = operation.result.generated_videos
             if not generated:
+                filtered_reasons = getattr(operation.result, 'rai_media_filtered_reasons', None)
+                logger.warning(
+                    f"ProductReferenceGenerator._animate_scene: 0 videos generados "
+                    f"(posible filtro de seguridad) | filtered_reasons={filtered_reasons}"
+                )
                 return None
             return generated[0].video.video_bytes
         except Exception as e:
