@@ -904,3 +904,88 @@ Prioridad: Alta — a diferencia de otros hallazgos de "calidad", este
   tiene potencial de dañar la confianza en la plataforma si un cliente
   real llega a recibir contenido asi. Recomendado atacar antes de los
   demas hallazgos pendientes (IMG-01, IMG-05) si hay que priorizar.
+
+=================================================================
+HALLAZGO IMG-10 — Narracion de reel en registro formal/peninsular
+  ("usted", vocabulario corporativo tipo España) en vez de tuteo
+  mexicano/latinoamericano neutro — mal atribuido en un principio a un
+  "acento castellano" del TTS, pero el TTS en si es neutro; el problema
+  es el TEXTO que genera el guionista. Ademas, bug separado: placeholder
+  "[Marca]" sin reemplazar quedo hablado tal cual en un guion.
+Categoría: Calidad de copy/voz de marca en generacion de guion de reel
+  (`reel_script_generator.py`) + bug de sustitucion de variable
+Estado: 🟢 CAUSA RAIZ CONFIRMADA CON EVIDENCIA DE AUDIO — SIN FIX AUN —
+  2026-07-31
+=================================================================
+Contexto: Anuar reporto que en 2 reels de "Batas de Carnicero" (jobs
+  `98d0957a-4c92-4196-9cd2-d5fbfaf38f4c` del 17 jul y
+  `f6fc047c-6b62-4113-87d6-156fdd856127` del 28 jul) el TTS "hablaba en
+  castellano". Se transcribio y analizo foneticamente el audio real de
+  ambos reels con Gemini (seseo/ceceo, entonacion, aspiracion de 's')
+  para confirmar: **el acento de la voz (Kore) es consistentemente
+  neutro latinoamericano en ambos** — sin ceceo, seseo total, entonacion
+  plana. La voz en si NO tiene un problema de acento/configuracion.
+
+Lo que si esta mal es el REGISTRO y VOCABULARIO del guion que redacta
+  `ReelScriptGenerator` (el `narration_script`), que en ambos casos usa
+  imperativos formales de "usted" y vocabulario corporativo tipico del
+  español peninsular:
+  - 17 jul: "Marca. Creamos batas de carnicero diseñadas para el rigor
+    del sector alimentario. Nuestra **indumentaria**... pensada para la
+    proteccion de **su** equipo. Fabricamos directamente, asegurando la
+    calidad que **su** negocio necesita."
+  - 28 jul: "...entendemos la exigencia de **su** sector... diseñadas
+    para la **inocuidad alimentaria**. Garantizamos durabilidad...
+    adaptandonos a **sus** necesidades B2B. **Proteja** a su equipo con
+    la calidad que merece."
+
+  Es la lectura en voz alta de "Garantice"/"Proteja"/"Solicite" (usted)
+  y palabras como "indumentaria"/"inocuidad" lo que se percibe como
+  "español de España" — no la pronunciacion. Confirmado que este
+  registro NO aparece en el mismo grado en otros negocios con
+  `tono: profesional` (ej. AMV Consultorio Dental, Dentalhit — usan
+  tuteo: "te ofrecemos", "tu salud bucal"), asi que no es un disparador
+  automatico de `tono=profesional` — parece estar ligado a que la
+  DESCRIPCION de este negocio en particular ya viene redactada en
+  registro formal/B2B ("Operamos en un modelo B2B con distribucion
+  nacional", "conforme a normas de inocuidad"), y el guionista de IA
+  extiende ese mismo registro al narration_script.
+
+Bug separado encontrado de paso en el mismo audio (job 17 jul): la
+  transcripcion real del audio empieza literalmente diciendo **"Marca.
+  Creamos batas de carnicero..."** — el placeholder `[Marca]` (nombre
+  del negocio sin sustituir) quedo tal cual en el `narration_script` y
+  el TTS lo leyo como si fuera texto normal. Pendiente confirmar en que
+  parte del pipeline se genera/deberia sustituirse ese placeholder.
+
+Correccion de concepto importante (para no repetir el error): el fix
+  NO es un "negative_prompt" — ese parametro es exclusivo de los
+  modelos de imagen/video (Imagen, Veo), usado en este proyecto como
+  `negative_prompt=self._VEO_SAFE_CONSTRAINTS` para decirle al modelo
+  que NO dibuje algo visualmente. Gemini generando texto (el guion del
+  reel) no tiene ese parametro — es solo un prompt de instrucciones. El
+  fix correcto es agregar una instruccion explicita al prompt del
+  guionista.
+
+Propuesta de fix (no implementada, pendiente de decision de Anuar):
+  1. Agregar instruccion explicita al `_PROMPT` de
+     `ReelScriptGenerator` (`core/content_pipeline/generators/
+     reel_script_generator.py`) pidiendo español latinoamericano/
+     mexicano neutro, tuteo (tú) en vez de "usted", y evitando
+     vocabulario corporativo peninsular — mismo mecanismo que ya usa
+     ese archivo para la "REGLA DE SEGURIDAD" de nichos sensibles.
+  2. Investigar y corregir el bug del placeholder `[Marca]` sin
+     sustituir — confirmar si el prompt le pide a Gemini usar el
+     nombre real del negocio (deberia, similar al fix ya existente en
+     `reel_script_generator.py` para el guion de video: "Si mencionas
+     el nombre del negocio, usa el nombre real exacto... nunca escribas
+     la palabra generica 'marca' ni un placeholder entre corchetes como
+     [Marca]") y por que en este caso no se cumplio.
+
+Severidad: Media — no es un riesgo de seguridad/marca como IMG-09, pero
+  si afecta la calidad percibida y el tono de marca — un negocio
+  mexicano recibiendo un reel con narracion en registro de España no
+  se siente como "su" contenido.
+Prioridad: Media-Alta — el fix es sencillo (agregar instruccion al
+  prompt) y el placeholder sin sustituir es claramente un bug, no algo
+  subjetivo.
