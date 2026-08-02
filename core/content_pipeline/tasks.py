@@ -58,19 +58,19 @@ def _generate_product_reference_sample(job, brand_dna) -> None:
     product_gen = ProductReferenceGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
 
     if job.generation_mode == AnalysisJob.MODE_SAMPLE_PRODUCT_REEL:
-        video_url, poster_url = product_gen.generate_reel(
+        video_url, poster_url, reason = product_gen.generate_reel(
             photo_bytes, brand_dna.business_name, filename_prefix=f"{job.id}-product-sample",
         )
         image_url, fmt = poster_url, ContentPost.FORMAT_REEL
     else:
-        image_url = product_gen.generate_image(
+        image_url, reason = product_gen.generate_image(
             photo_bytes, brand_dna.business_name, filename=f"{job.id}-product-sample",
         )
         video_url, fmt = '', ContentPost.FORMAT_SINGLE
 
     if not image_url and not video_url:
         calendar.delete()
-        job.mark_failed('El control de calidad rechazó el resultado (posible alucinación de logo/texto). Reintenta.')
+        job.mark_failed(reason or 'El control de calidad rechazó el resultado. Reintenta.')
         return
 
     ContentPost.objects.create(
@@ -270,7 +270,16 @@ def _enqueue_post_images_then(post_ids: list, closing_fn, *closing_args) -> None
     jobs = []
     for post_id in post_ids:
         post = ContentPost.objects.get(id=post_id)
-        timeout = 600 if post.format == ContentPost.FORMAT_REEL else 300
+        # 600s era menor que el peor caso interno de un reel: Veo puede tardar
+        # hasta _VEO_POLL_TIMEOUT_SECONDS=1800s antes de rendirse a su propio
+        # fallback, y ese fallback llega DESPUES de portada+contraportada de
+        # HyperFrames (hasta 480s con 1 reintento cada una). RQ mataba el
+        # worker antes de que ese fallback ya existente tuviera oportunidad de
+        # correr -- mismo patron que el incidente de job huerfano documentado
+        # en project_rq_orphaned_job_2026_07_14. 2700s cubre 1800+480 con
+        # margen para TTS/musica/ffmpeg/uploads sin tocar ninguna logica de
+        # generacion.
+        timeout = 2700 if post.format == ContentPost.FORMAT_REEL else 300
         jobs.append(django_rq.enqueue(
             backfill_image_task, post_id,
             job_timeout=timeout,

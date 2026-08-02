@@ -78,3 +78,11 @@ def test_analyze_handles_vision_error():
 
     assert result['primary_colors'] == []
     assert result['logo_elements'] == ''
+
+
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global')
+def test_vertex_client_uses_global_text_location():
+    with patch('core.brand_dna.extractors.logo_analyzer.genai.Client') as mock_client:
+        from core.brand_dna.extractors.logo_analyzer import _vertex_client
+        _vertex_client()
+    mock_client.assert_called_once_with(vertexai=True, project='agente-cosmic', location='global')

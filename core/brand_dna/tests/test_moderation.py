@@ -58,3 +58,28 @@ def test_unparseable_response_fails_open():
         mock_client.return_value.models.generate_content.return_value = _mock_resp('respuesta sin json valido')
         is_legit, _ = check_business_legitimacy('Negocio', 'Descripción normal')
     assert is_legit is True
+
+
+@pytest.mark.django_db
+def test_vertex_client_uses_global_text_location():
+    from django.test import override_settings
+    with override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global'):
+        with patch('core.brand_dna.moderation.genai.Client') as mock_client:
+            from core.brand_dna.moderation import _vertex_client
+            _vertex_client()
+        mock_client.assert_called_once_with(vertexai=True, project='agente-cosmic', location='global')
+
+
+@pytest.mark.django_db
+def test_moderation_call_disables_thinking():
+    from django.test import override_settings
+    from core.brand_dna.moderation import check_business_legitimacy
+    with override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+                            VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash'):
+        with patch('core.brand_dna.moderation._vertex_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"is_legitimate_business": true, "reason": ""}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            check_business_legitimacy('Negocio', 'Descripcion')
+            call_kwargs = mock_vc.return_value.models.generate_content.call_args.kwargs
+        assert call_kwargs['config'].thinking_config.thinking_budget == 0

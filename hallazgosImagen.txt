@@ -989,3 +989,105 @@ Severidad: Media — no es un riesgo de seguridad/marca como IMG-09, pero
 Prioridad: Media-Alta — el fix es sencillo (agregar instruccion al
   prompt) y el placeholder sin sustituir es claramente un bug, no algo
   subjetivo.
+
+=================================================================
+HALLAZGO IMG-11 — El pilar de contenido "Producto" (dia 1) sigue
+  redactado en lenguaje literal/directo del producto, y ese caption
+  alimenta DIRECTAMENTE el guion del reel — el pivote del 27-jul
+  reescribio la capa visual (scene_prompts) pero nunca toco la capa
+  conceptual (el pilar) que la ancla, dejando un hueco real entre las
+  2 capas
+Categoría: Diseño de contenido — desalineacion entre el prompt de
+  captions (`text_generator.py`) y el prompt de guion de reel
+  (`reel_script_generator.py`); no es un bug de codigo, es una
+  decision de producto sin resolver
+Estado: 🟢 CAUSA RAIZ CONFIRMADA CON EVIDENCIA DE CODIGO — SIN FIX AUN
+  — 2026-07-31
+=================================================================
+Contexto: Anuar reviso el `_PROMPT` de `text_generator.py` (el que
+  genera los 7 captions/pilares del calendario) y noto que, pese a que
+  el equipo ya se habia enfocado en "la sensacion final del cliente
+  tras usar el producto/servicio" en el pivote del 27-jul (plan
+  `2026-07-27-image-reel-fidelity-fixes-plan.md`, ver
+  `project_image_reel_fidelity_fixes_2026_07_27` en memoria), el
+  contenido seguia sintiendose enfocado en el producto — y sospecho
+  que esto contribuye a las alucinaciones que se siguen viendo.
+
+Verificacion (2 hipotesis probadas contra el codigo real, no solo
+  contra el texto pegado por Anuar):
+
+1. HIPOTESIS DESCARTADA — `image_generator.py::_analyze_brand_scene()`
+   (linea 265) usa `caption` como PARAMETRO, pero solo como fallback:
+   `brand_ctx = description[:180] if description else caption[:180]`
+   (linea 271). `description` (del BrandDNA) casi siempre esta
+   poblado, asi que en la practica el caption casi nunca llega a
+   influir esta escena — el camino de imagenes de post simple
+   (dias 2,4,5,6,7) ya esta bien aislado desde el pivote del 27-jul.
+
+2. HIPOTESIS CONFIRMADA — `reel_script_generator.py::_PROMPT`
+   (linea 36) SI usa el caption como base explicita, no como fallback:
+   ```
+   "...Genera el guion completo para un reel...basado en este post:\n\n"
+   "CAPTION DEL POST: {caption}\n"
+   ```
+   El guion completo del reel (hook, narracion, 6 scene_prompts) se
+   arma "basado en este post" — el caption es el ancla conceptual de
+   todo el guion, no una referencia menor.
+
+   Y el caption del dia 1 (`REEL_DAY = 1` en `text_generator.py`, el
+   dia que efectivamente alimenta el reel) viene de
+   `CONTENT_PILLARS[0]`:
+   ```python
+   {'day': 1, 'name': 'Producto', 'angle': 'Presenta que vendes o que
+   servicio ofreces de forma directa y atractiva.'}
+   ```
+   Literal y directo, por diseño — exactamente lo opuesto al enfoque
+   de "sensacion/experiencia" que se establecio en el pivote del
+   27-jul. El pilar del dia 4 ("Beneficio en profundidad") tiene el
+   mismo sesgo hacia el producto, pero no alimenta el reel (solo
+   `REEL_DAY=1` lo hace), asi que su impacto es menor.
+
+Conclusion: el pivote del 27-jul corrigio la CAPA VISUAL (como se
+  describen las escenas dentro de `scene_prompts`) pero nunca toco la
+  CAPA CONCEPTUAL (el pilar/caption que le dice al guionista de que
+  trata el reel en primer lugar). El guionista de `reel_script_generator.py`
+  ya intenta compensar en su instruccion #5 ("la sensacion de
+  satisfaccion", "el cliente disfrutando") pero esta partiendo de un
+  caption que el propio sistema redacto en tono producto-literal — es
+  pelear contra su propia ancla.
+
+Nota de Anuar sobre el proceso: promptfoo esta orientado a evaluar
+  RIESGO (injection, seguridad, formato), no calidad/resultado de
+  contenido — este hallazgo es una decision de producto (que tan
+  literal/directo debe ser el pilar "Producto" del dia 1), no algo que
+  promptfoo vaya a decidir por nosotros. Se documenta aqui para
+  decidir con calma, no se ataca con el mismo proceso que los
+  hallazgos de seguridad de prompts.
+
+Propuesta de fix (no implementada, pendiente de decision de Anuar):
+  1. Reescribir el "angle" del pilar dia 1 en `CONTENT_PILLARS`
+     (`text_generator.py`) para que, sin dejar de presentar el
+     producto/servicio, enfatice la sensacion/resultado para el
+     cliente en vez de una descripcion directa — mismo espiritu que ya
+     tiene el pilar dia 7 ("Conexion emocional").
+  2. Evaluar si el pilar dia 4 ("Beneficio en profundidad") necesita el
+     mismo ajuste — impacto menor porque no alimenta el reel, pero
+     si alimenta imagenes de post simple.
+  3. Alternativa mas quirurgica: en vez de tocar el pilar (que tambien
+     define el TEXTO del caption que ve el cliente final, no solo el
+     insumo del reel), agregar una instruccion en
+     `reel_script_generator.py::_PROMPT` que le pida al guionista
+     REINTERPRETAR el caption hacia la sensacion/experiencia al armar
+     el guion, en vez de tomarlo literal — mantiene el caption del
+     dia 1 intacto (que puede ser intencionalmente directo como texto
+     de venta) y solo cambia como se traduce a guion visual. Requiere
+     decidir cual de las 2 rutas (o ambas) antes de implementar.
+
+Severidad: Media — no es un bug que rompa nada, es una desalineacion
+  de diseño que probablemente contribuye (no es la unica causa) a las
+  alucinaciones/enfoque-en-producto que documentan otros hallazgos de
+  este archivo (especialmente los relacionados a fidelidad de reel).
+Prioridad: Media — vale la pena resolverlo junto con el resto del
+  trabajo de prompts, pero requiere una decision de producto (que tan
+  literal debe ser el dia 1) antes de tocar codigo, no es un fix
+  mecanico como IMG-08/IMG-10.

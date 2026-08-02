@@ -115,21 +115,30 @@ def sensitive_brand_dna():
     GOOGLE_CLOUD_LOCATION='us-central1',
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
 )
-def test_generate_rejects_banned_language_in_sensitive_niche(sensitive_brand_dna):
+def test_generate_rejects_banned_language_in_sensitive_niche(sensitive_brand_dna, _mock_brand_consistency_qc):
     from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
+    _, mock_rewrite = _mock_brand_consistency_qc
+    mock_rewrite.return_value = 'Cuidamos tu salud con atencion profesional y cercana.'
     post_data = {'caption': 'Atencion pediatrica de calidad'}
     response_json = (
         '{"hook_text":"Garantizamos tu salud","highlight_word":"Garantizamos","tag_cta":"Agenda hoy",'
         '"narration_script":"Aseguramos resultados en cada consulta.","scene_prompts":'
         '["s1, no text, no logos, no people speaking to camera.",'
         '"s2, no text, no logos, no people speaking to camera.",'
-        '"s3, no text, no logos, no people speaking to camera."],"music_mood":"calm"}'
+        '"s3, no text, no logos, no people speaking to camera.",'
+        '"s4, no text, no logos, no people speaking to camera.",'
+        '"s5, no text, no logos, no people speaking to camera.",'
+        '"s6, no text, no logos, no people speaking to camera."],"music_mood":"calm"}'
     )
     with patch('core.content_pipeline.generators.reel_script_generator._vertex_client') as mock_vc:
         mock_vc.return_value = _mock_vertex_client(response_json)
         result = ReelScriptGenerator().generate(post_data, sensitive_brand_dna)
 
-    assert result['hook_text'] != 'Garantizamos tu salud'
+    assert result['hook_text'] == 'Cuidamos tu salud con atencion profesional y cercana.'
+    # el resto del guion NO cae a fallback completo — sigue siendo el generado por Gemini
+    assert result['tag_cta'] == 'Agenda hoy'
+    assert len(result['scene_prompts']) == 6
+    assert result['scene_prompts'][0].startswith('s1')
 
 
 def test_scrub_brand_leak_replaces_scene_mentioning_business_name():
@@ -167,6 +176,44 @@ def test_scrub_brand_leak_leaves_clean_scenes_untouched():
     scenes = ['clean shot describing texture and material, no text, no logos.'] * 6
     result = _scrub_brand_leak(scenes, 'MariBelas')
     assert result == scenes
+
+
+def test_fix_marca_placeholder_replaces_leading_marca():
+    from core.content_pipeline.generators.reel_script_generator import _fix_marca_placeholder
+    result = _fix_marca_placeholder('Marca. Creamos batas de carnicero disenadas para el rigor.', 'Batas de Carnicero')
+    assert result.startswith('Batas de Carnicero.')
+    assert 'Marca.' not in result
+
+
+def test_fix_marca_placeholder_replaces_bracketed_placeholder():
+    from core.content_pipeline.generators.reel_script_generator import _fix_marca_placeholder
+    result = _fix_marca_placeholder('[Marca] ofrece la mejor calidad del mercado.', 'Tacos El Primo')
+    assert '[Marca]' not in result
+    assert 'Tacos El Primo' in result
+
+
+def test_fix_marca_placeholder_leaves_legitimate_marca_mention_untouched():
+    from core.content_pipeline.generators.reel_script_generator import _fix_marca_placeholder
+    original = 'Nuestra marca de agua distintiva se ve en cada producto que entregamos.'
+    result = _fix_marca_placeholder(original, 'Tacos El Primo')
+    assert result == original
+
+
+def test_has_banned_promise_language_detects_direct_words():
+    from core.content_pipeline.generators.reel_script_generator import _has_banned_promise_language
+    assert _has_banned_promise_language('te garantizamos el mejor servicio') is True
+    assert _has_banned_promise_language('aseguramos tu satisfaccion') is True
+
+
+def test_has_banned_promise_language_ignores_neutral_100_percent():
+    from core.content_pipeline.generators.reel_script_generator import _has_banned_promise_language
+    assert _has_banned_promise_language('somos una empresa 100% mexicana dedicada a tu bienestar') is False
+
+
+def test_has_banned_promise_language_flags_100_percent_near_promise_word():
+    from core.content_pipeline.generators.reel_script_generator import _has_banned_promise_language
+    assert _has_banned_promise_language('resultados 100% garantizados para todos') is True
+    assert _has_banned_promise_language('un tratamiento 100% efectivo desde la primera sesion') is True
 
 
 @override_settings(
@@ -234,7 +281,7 @@ def test_prompt_avoids_manufacturing_process_and_requires_style_consistency(bran
 
     sent_prompt = mock_vc.return_value.models.generate_content.call_args.kwargs['contents']
     assert 'manos trabajando' not in sent_prompt
-    assert 'cliente disfrutando' in sent_prompt or 'sensacion de satisfaccion' in sent_prompt
+    assert 'SENSACION FINAL' in sent_prompt or 'expresion de satisfaccion' in sent_prompt
     assert 'mismo estilo fotografico consistente' in sent_prompt
 
 
@@ -313,3 +360,10 @@ def test_generate_skips_rewrite_when_audit_returns_no_issues(brand_dna, _mock_br
 
     mock_rewrite.assert_not_called()
 
+
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global')
+def test_vertex_client_uses_global_text_location():
+    with patch('core.content_pipeline.generators.reel_script_generator.genai.Client') as mock_client:
+        from core.content_pipeline.generators.reel_script_generator import _vertex_client
+        _vertex_client()
+    mock_client.assert_called_once_with(vertexai=True, project='agente-cosmic', location='global')

@@ -865,5 +865,41 @@ def test_dashboard_hides_early_cta_while_job_processing(client, user, settings):
     assert b'mes completo' not in response.content
 
 
+class TestRegenerateCaptionLocation:
+    @override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+                        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash')
+    def test_uses_global_text_location(self):
+        from unittest.mock import patch, MagicMock
+        from core.brand_dna.views import _regenerate_caption
+        post = MagicMock()
+        post.caption = 'Caption original'
+        post.calendar.brand_dna.business_name = 'Negocio'
+        post.calendar.brand_dna.tone = 'casual'
+        post.calendar.brand_dna.audience = 'Todos'
+        post.calendar.brand_dna.avg_caption_length = 200
+        with patch('core.brand_dna.views.genai.Client') as mock_client:
+            mock_resp = MagicMock()
+            mock_resp.text = 'Nuevo caption'
+            mock_client.return_value.models.generate_content.return_value = mock_resp
+            _regenerate_caption(post, 'hazlo mas corto')
+        mock_client.assert_called_once_with(vertexai=True, project='agente-cosmic', location='global')
+
+
+class TestReanalyzeBrandFieldLocation:
+    @override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+                        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash')
+    def test_uses_global_text_location(self):
+        from unittest.mock import patch, MagicMock
+        from core.brand_dna.views import _reanalyze_brand_field
+        brand_dna = MagicMock()
+        brand_dna.business_name = 'Negocio'
+        brand_dna.tone = 'casual'
+        brand_dna.description = 'Descripcion actual'
+        with patch('core.brand_dna.views.genai.Client') as mock_client:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"value": "Nueva descripcion"}'
+            mock_client.return_value.models.generate_content.return_value = mock_resp
+            _reanalyze_brand_field(brand_dna, MagicMock(), 'description', 'mas formal')
+        mock_client.assert_called_once_with(vertexai=True, project='agente-cosmic', location='global')
 
 

@@ -87,3 +87,24 @@ def test_extract_handles_request_error():
     assert result['business_name'] == 'Negocio'
     assert result['tone'] == 'profesional'
     assert isinstance(result['keywords'], list)
+
+
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global')
+def test_vertex_client_uses_global_text_location():
+    with patch('core.brand_dna.extractors.web_scraper.genai.Client') as mock_client:
+        from core.brand_dna.extractors.web_scraper import _vertex_client
+        _vertex_client()
+    mock_client.assert_called_once_with(vertexai=True, project='agente-cosmic', location='global')
+
+
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+                    VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash')
+def test_analyze_with_vertex_disables_thinking():
+    from core.brand_dna.extractors.web_scraper import WebScraper
+    with patch('core.brand_dna.extractors.web_scraper._vertex_client') as mock_vc:
+        mock_resp = MagicMock()
+        mock_resp.text = '{"business_name": "Negocio", "description": "Descripcion", "keywords": [], "audience": "Todos", "tone": "casual", "brand_colors": []}'
+        mock_vc.return_value.models.generate_content.return_value = mock_resp
+        WebScraper()._analyze_with_vertex('texto de sitio', [])
+        call_kwargs = mock_vc.return_value.models.generate_content.call_args.kwargs
+    assert call_kwargs['config'].thinking_config.thinking_budget == 0

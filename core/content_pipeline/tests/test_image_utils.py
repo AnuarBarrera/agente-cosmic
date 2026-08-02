@@ -2,7 +2,7 @@ import io
 
 from PIL import Image
 
-from core.content_pipeline.image_utils import normalize_image
+from core.content_pipeline.image_utils import normalize_image, enhance_photo_classic
 
 
 def _jpeg_with_orientation(width: int, height: int, orientation: int) -> bytes:
@@ -47,3 +47,40 @@ class TestNormalizeImage:
 
     def test_empty_bytes_returns_empty(self):
         assert normalize_image(b'') == b''
+
+
+class TestEnhancePhotoClassic:
+    def test_crops_rectangular_image_to_square(self):
+        img = Image.new('RGB', (200, 100), color='green')
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        result = enhance_photo_classic(buf.getvalue())
+        out = Image.open(io.BytesIO(result))
+        assert out.width == out.height == 100
+
+    def test_square_image_keeps_dimensions(self):
+        img = Image.new('RGB', (150, 150), color='blue')
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        result = enhance_photo_classic(buf.getvalue())
+        out = Image.open(io.BytesIO(result))
+        assert out.width == out.height == 150
+
+    def test_output_is_valid_png(self):
+        img = Image.new('RGB', (120, 80), color='red')
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        result = enhance_photo_classic(buf.getvalue())
+        out = Image.open(io.BytesIO(result))
+        assert out.format == 'PNG'
+
+    def test_returns_original_bytes_when_processing_fails(self):
+        garbage = b'not-a-real-image'
+        result = enhance_photo_classic(garbage)
+        assert result == garbage
+
+    def test_applies_exif_orientation_before_cropping(self):
+        raw = _jpeg_with_orientation(200, 100, orientation=6)
+        result = enhance_photo_classic(raw)
+        out = Image.open(io.BytesIO(result))
+        assert out.width == out.height == 100

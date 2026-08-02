@@ -68,3 +68,7 @@ google-cloud-cli-*.tar.gz
 ciberaudit.txt
 analisis.txt
 patch/
+
+# Documento de trabajo interno — pendientes entre sesiones
+ultimosCambios.md
+.test-photos/

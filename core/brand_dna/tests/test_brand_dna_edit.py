@@ -172,7 +172,7 @@ def test_field_reanalyze_description_calls_gemini(user, job_with_calendar):
     c.force_login(user)
     with patch('core.brand_dna.views.genai.Client') as MockClient:
         mock_resp = MockClient.return_value.models.generate_content.return_value
-        mock_resp.text = 'Descripcion corregida por IA'
+        mock_resp.text = '{"value": "Descripcion corregida por IA"}'
         mock_resp.usage_metadata = None
         response = c.post(
             f'/api/brand-dna/{job_with_calendar.id}/field/',

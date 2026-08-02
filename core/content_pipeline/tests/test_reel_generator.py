@@ -518,7 +518,7 @@ class TestValidateSceneStill:
     def test_returns_true_when_image_ok(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.reel_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"has_text": false, "is_abstract_3d": false, "has_screen_content": false, "ok": true}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -533,7 +533,7 @@ class TestValidateSceneStill:
     def test_returns_false_when_has_text(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.reel_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"has_text": true, "is_abstract_3d": false, "has_screen_content": false, "ok": false}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -548,10 +548,29 @@ class TestValidateSceneStill:
     def test_returns_true_on_api_error(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.reel_generator._vertex_text_client") as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             result = gen._validate_scene_still(b'fake-png')
         assert result is True  # don't block pipeline on QC error
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_false_when_suggestive_content_detected(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch("core.content_pipeline.generators.reel_generator._vertex_text_client") as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = (
+                '{"has_text": false, "is_abstract_3d": false, "has_screen_content": false, '
+                '"has_malformed_object": false, "has_unrealistic_grounding": false, '
+                '"has_suggestive_or_exposed_content": true, "ok": false}'
+            )
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._validate_scene_still(b'fake-png')
+        assert result is False
 
 
 class TestGenerateStillSceneClipQC:
@@ -612,7 +631,7 @@ class TestChooseReelTemplate:
     def test_returns_template_chosen_by_gemini(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.reel_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"template": "panel-wipe"}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -627,7 +646,7 @@ class TestChooseReelTemplate:
     def test_falls_back_to_random_on_api_error(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator, _REEL_TEMPLATES
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.reel_generator._vertex_text_client") as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             result = gen._choose_reel_template('Hook', 'CTA')
         assert result in _REEL_TEMPLATES
@@ -640,7 +659,7 @@ class TestChooseReelTemplate:
     def test_falls_back_to_random_on_invalid_template_name(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator, _REEL_TEMPLATES
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.reel_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"template": "not-a-real-template"}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -1600,4 +1619,53 @@ class TestRenderTextOverlayPlaywright:
         html_arg = mock_page.set_content.call_args[0][0]
         assert 'Compra ahora' in html_arg
         assert 'class="hook"' not in html_arg
+
+
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+                    GOOGLE_CLOUD_LOCATION='us-central1')
+def test_vertex_text_client_uses_global_location():
+    from unittest.mock import patch
+    with patch('core.content_pipeline.generators.reel_generator.genai.Client') as mock_client:
+        from core.content_pipeline.generators.reel_generator import _vertex_text_client, _vertex_client
+        _vertex_text_client()
+        _vertex_client()
+    calls = mock_client.call_args_list
+    assert calls[0].kwargs == {'vertexai': True, 'project': 'agente-cosmic', 'location': 'global'}
+    assert calls[1].kwargs == {'vertexai': True, 'project': 'agente-cosmic', 'location': 'us-central1'}
+
+
+class TestChooseReelTemplateThinking:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
+    )
+    def test_choose_reel_template_disables_thinking(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.reel_generator._vertex_text_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"template": "panel-wipe"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            gen._choose_reel_template('Hook de prueba', 'CTA de prueba')
+            call_kwargs = mock_vc.return_value.models.generate_content.call_args.kwargs
+        assert call_kwargs['config'].thinking_config.thinking_budget == 0
+
+
+class TestValidateSceneStillThinking:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
+    )
+    def test_validate_scene_still_disables_thinking(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.reel_generator._vertex_text_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"has_text": false, "is_abstract_3d": false, "has_screen_content": false, "has_malformed_object": false, "has_unrealistic_grounding": false, "has_suggestive_or_exposed_content": false, "ok": true}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            gen._validate_scene_still(b'fake-png')
+            call_kwargs = mock_vc.return_value.models.generate_content.call_args.kwargs
+        assert call_kwargs['config'].thinking_config.thinking_budget == 0
 

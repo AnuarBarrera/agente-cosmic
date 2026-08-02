@@ -20,7 +20,7 @@ def _vertex_client():
     return genai.Client(
         vertexai=True,
         project=settings.GOOGLE_CLOUD_PROJECT,
-        location=settings.GOOGLE_CLOUD_LOCATION,
+        location=settings.GOOGLE_CLOUD_LOCATION_TEXT,
     )
 
 

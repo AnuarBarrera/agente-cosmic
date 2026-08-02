@@ -114,3 +114,11 @@ def test_rewrite_returns_original_text_on_failure(brand_dna):
         original = 'Hecho con materiales reutilizados.'
         result = rewrite_for_brand_consistency('narration_script', original, 'razon', brand_dna)
     assert result == original
+
+
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global')
+def test_vertex_client_uses_global_text_location():
+    with patch('core.content_pipeline.generators.brand_consistency_qc.genai.Client') as mock_client:
+        from core.content_pipeline.generators.brand_consistency_qc import _vertex_client
+        _vertex_client()
+    mock_client.assert_called_once_with(vertexai=True, project='agente-cosmic', location='global')

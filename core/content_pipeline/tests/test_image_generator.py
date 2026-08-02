@@ -127,7 +127,7 @@ class TestGeneratePostContent:
     def test_returns_all_required_keys_on_fallback(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             result = gen._generate_post_content('Tu negocio necesita una web profesional')
         assert set(result.keys()) == {'headline', 'subtitle', 'cta', 'tag'}
@@ -143,7 +143,7 @@ class TestGeneratePostContent:
     def test_system_instruction_forbids_absolute_promise_words(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"headline":"H","subtitle":"S","cta":"C","tag":"T"}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -161,7 +161,7 @@ class TestGeneratePostContent:
     def test_parses_valid_gemini_response(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"headline":"Web en 48h","subtitle":"Sitio profesional listo en dos días","cta":"Empieza hoy","tag":"DISEÑO WEB"}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -179,7 +179,7 @@ class TestGeneratePostContent:
     def test_tag_is_uppercased(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"headline":"Impulsa tu marca","subtitle":"Resultados reales y medibles","cta":"Ver más","tag":"marketing digital"}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -196,7 +196,7 @@ class TestGeneratePostContent:
         gen = ImageGenerator(bucket_name='test-bucket')
         mock_resp = MagicMock()
         mock_resp.text = '{"headline":"H","subtitle":"S","cta":"C","tag":"T"}'
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc, \
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc, \
              patch('core.shared.rate_limiter.time.sleep'):
             mock_vc.return_value.models.generate_content.side_effect = [
                 Exception('429 Resource exhausted'), mock_resp,
@@ -214,7 +214,7 @@ class TestGeneratePostContent:
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         long_caption = 'palabra ' * 20
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             result = gen._generate_post_content(long_caption)
         subtitle = result['subtitle']
@@ -231,7 +231,7 @@ class TestGeneratePostContent:
     def test_fallback_subtitle_not_truncated_when_short(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             result = gen._generate_post_content('Caption corto')
         assert result['subtitle'] == 'Caption corto'
@@ -244,7 +244,7 @@ class TestGeneratePostContent:
     def test_sanitizes_cta_when_no_business_url(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"headline":"H","subtitle":"S","cta":"Visita nuestra web","tag":"T"}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -259,7 +259,7 @@ class TestGeneratePostContent:
     def test_keeps_cta_when_business_url_present(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"headline":"H","subtitle":"S","cta":"Visita nuestra web","tag":"T"}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -472,7 +472,7 @@ class TestValidateBackground:
     def test_returns_true_when_image_ok(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"has_text": false, "is_abstract_3d": false, "has_screen_content": false, "ok": true}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -487,7 +487,7 @@ class TestValidateBackground:
     def test_returns_false_when_has_text(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"has_text": true, "is_abstract_3d": false, "has_screen_content": false, "ok": false}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -502,7 +502,7 @@ class TestValidateBackground:
     def test_returns_true_on_api_error(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             result = gen._validate_background(b'fake-png')
         assert result is True  # don't block pipeline on QC error
@@ -515,7 +515,7 @@ class TestValidateBackground:
     def test_returns_false_when_has_malformed_object(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = (
                 '{"has_text": false, "is_abstract_3d": false, "has_screen_content": false, '
@@ -533,11 +533,30 @@ class TestValidateBackground:
     def test_returns_false_when_has_unrealistic_grounding(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = (
                 '{"has_text": false, "is_abstract_3d": false, "has_screen_content": false, '
                 '"has_malformed_object": false, "has_unrealistic_grounding": true, "ok": false}'
+            )
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._validate_background(b'fake-png')
+        assert result is False
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_false_when_suggestive_content_detected(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_text_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = (
+                '{"has_text": false, "is_abstract_3d": false, "has_screen_content": false, '
+                '"has_malformed_object": false, "has_unrealistic_grounding": false, '
+                '"has_suggestive_or_exposed_content": true, "ok": false}'
             )
             mock_vc.return_value.models.generate_content.return_value = mock_resp
             result = gen._validate_background(b'fake-png')
@@ -553,7 +572,7 @@ class TestAnalyzeBrandScene:
     def test_gemini_prompt_avoids_literal_product_depiction(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"mode": "lifestyle", "prompt": "A cozy scene"}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -572,7 +591,7 @@ class TestAnalyzeBrandScene:
     def test_fallback_prompt_does_not_promise_literal_product_focus(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API down')
             scene_prompt, product_mode = gen._analyze_brand_scene(
                 'Caption', ['keyword'], 'Descripcion', 'profesional', ['#1a1a2e'], audience='niños'
@@ -592,7 +611,7 @@ class TestChooseTemplateForImage:
     def test_maps_bottom_zone_to_lower_third_template(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"safe_zone": "bottom"}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -607,7 +626,7 @@ class TestChooseTemplateForImage:
     def test_maps_top_zone_to_upper_third_template(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"safe_zone": "top"}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -622,7 +641,7 @@ class TestChooseTemplateForImage:
     def test_maps_center_zone_to_centered_template(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"safe_zone": "center"}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -637,7 +656,7 @@ class TestChooseTemplateForImage:
     def test_falls_back_to_random_on_api_error(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             result = gen._choose_template_for_image(b'fake-png')
         assert result in gen._TEMPLATES
@@ -650,7 +669,7 @@ class TestChooseTemplateForImage:
     def test_falls_back_to_random_on_invalid_zone(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"safe_zone": "diagonal"}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -704,7 +723,7 @@ class TestValidateFinalImage:
     def test_returns_true_when_image_is_clean(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"has_background_text": false, "has_shadow_artifacts": false, "plain_white_background": false, "ok": true}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -719,7 +738,7 @@ class TestValidateFinalImage:
     def test_returns_false_when_shadow_artifacts_detected(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"has_background_text": false, "has_shadow_artifacts": true, "plain_white_background": false, "ok": false}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -734,7 +753,7 @@ class TestValidateFinalImage:
     def test_returns_false_when_background_text_detected(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"has_background_text": true, "has_shadow_artifacts": false, "plain_white_background": false, "ok": false}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -749,7 +768,7 @@ class TestValidateFinalImage:
     def test_returns_false_when_plain_white_background(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '{"has_background_text": false, "has_shadow_artifacts": false, "plain_white_background": true, "ok": false}'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -764,7 +783,7 @@ class TestValidateFinalImage:
     def test_returns_true_on_api_error(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             result = gen._validate_final_image(_png_bytes())
         assert result is True  # no bloquear pipeline si QC falla
@@ -810,7 +829,7 @@ class TestGenerateCarouselSlidesContent:
     def test_returns_num_slides_items_on_fallback(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             slides = gen._generate_carousel_slides_content('Nuestros clientes confian en nosotros', num_slides=4)
         assert len(slides) == 4
@@ -825,7 +844,7 @@ class TestGenerateCarouselSlidesContent:
     def test_only_last_slide_has_real_cta_on_fallback(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             slides = gen._generate_carousel_slides_content('Nuestros clientes confian en nosotros', num_slides=3)
         assert slides[-1]['cta'] == 'Contáctanos hoy'
@@ -839,7 +858,7 @@ class TestGenerateCarouselSlidesContent:
     def test_parses_valid_gemini_response_in_order(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = (
                 '[{"headline":"El problema","subtitle":"Antes batallaban","cta":"Desliza","tag":"TESTIMONIO"},'
@@ -859,7 +878,7 @@ class TestGenerateCarouselSlidesContent:
     def test_fills_missing_items_with_fallback_when_gemini_returns_fewer(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '[{"headline":"Unica slide","subtitle":"Sub","cta":"Desliza","tag":"TESTIMONIO"}]'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -875,7 +894,7 @@ class TestGenerateCarouselSlidesContent:
     def test_fallback_uses_transformacion_tag_and_headlines(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             slides = gen._generate_carousel_slides_content('Nuestro servicio ayuda a resolver X', num_slides=3)
         assert all(s['tag'] == 'TRANSFORMACION' for s in slides)
@@ -890,7 +909,7 @@ class TestGenerateCarouselSlidesContent:
     def test_prompt_does_not_mention_prueba_social_or_testimonio(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '[{"headline":"H","subtitle":"S","cta":"Desliza","tag":"TAG"}]'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -912,7 +931,7 @@ class TestGenerateCarouselSlidesContent:
         gen = ImageGenerator(bucket_name='test-bucket')
         mock_resp = MagicMock()
         mock_resp.text = '[{"headline":"H","subtitle":"S","cta":"Desliza","tag":"TAG"}]'
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc, \
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc, \
              patch('core.shared.rate_limiter.time.sleep'):
             mock_vc.return_value.models.generate_content.side_effect = [
                 Exception('429 Resource exhausted'), mock_resp,
@@ -930,7 +949,7 @@ class TestGenerateCarouselSlidesContent:
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         long_caption = 'palabra ' * 20
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
             slides = gen._generate_carousel_slides_content(long_caption, num_slides=1)
         subtitle = slides[0]['subtitle']
@@ -947,7 +966,7 @@ class TestGenerateCarouselSlidesContent:
     def test_sanitizes_cta_when_no_business_url(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '[{"headline":"H","subtitle":"S","cta":"Visita nuestra pagina web","tag":"T"}]'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -962,7 +981,7 @@ class TestGenerateCarouselSlidesContent:
     def test_keeps_cta_when_business_url_present(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vc:
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
             mock_resp = MagicMock()
             mock_resp.text = '[{"headline":"H","subtitle":"S","cta":"Visita nuestra pagina web","tag":"T"}]'
             mock_vc.return_value.models.generate_content.return_value = mock_resp
@@ -1064,4 +1083,71 @@ class TestSanitizeWebVisitMention:
         from core.content_pipeline.generators.image_generator import _sanitize_web_visit_mention
         result = _sanitize_web_visit_mention('Visita nuestra web hoy', 'https://ejemplo.com', 'Contáctanos hoy')
         assert result == 'Visita nuestra web hoy'
+
+
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+                    GOOGLE_CLOUD_LOCATION='us-central1')
+def test_vertex_text_client_uses_global_location():
+    from unittest.mock import patch
+    with patch('core.content_pipeline.generators.image_generator.genai.Client') as mock_client:
+        from core.content_pipeline.generators.image_generator import _vertex_text_client, _vertex_client
+        _vertex_text_client()
+        _vertex_client()
+    calls = mock_client.call_args_list
+    assert calls[0].kwargs == {'vertexai': True, 'project': 'agente-cosmic', 'location': 'global'}
+    assert calls[1].kwargs == {'vertexai': True, 'project': 'agente-cosmic', 'location': 'us-central1'}
+
+
+class TestValidateBackgroundThinking:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
+    )
+    def test_validate_background_disables_thinking(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_text_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"has_text": false, "is_abstract_3d": false, "has_screen_content": false, "has_malformed_object": false, "has_unrealistic_grounding": false, "has_suggestive_or_exposed_content": false, "ok": true}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            gen._validate_background(b'fake-png')
+            call_kwargs = mock_vc.return_value.models.generate_content.call_args.kwargs
+        assert call_kwargs['config'].thinking_config.thinking_budget == 0
+
+
+class TestValidateFinalImageThinking:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
+    )
+    def test_validate_final_image_disables_thinking(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_text_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"has_background_text": false, "has_shadow_artifacts": false, "plain_white_background": false, "ok": true}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            gen._validate_final_image(_png_bytes())
+            call_kwargs = mock_vc.return_value.models.generate_content.call_args.kwargs
+        assert call_kwargs['config'].thinking_config.thinking_budget == 0
+
+
+class TestChooseTemplateForImageThinking:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
+    )
+    def test_choose_template_for_image_disables_thinking(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_text_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"safe_zone": "bottom"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            gen._choose_template_for_image(b'fake-png')
+            call_kwargs = mock_vc.return_value.models.generate_content.call_args.kwargs
+        assert call_kwargs['config'].thinking_config.thinking_budget == 0
 

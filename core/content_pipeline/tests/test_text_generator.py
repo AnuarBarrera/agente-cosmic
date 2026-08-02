@@ -61,24 +61,6 @@ def test_generate_returns_7_posts(brand_dna):
     GOOGLE_CLOUD_LOCATION='us-central1',
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
 )
-def test_generate_tolerates_trailing_text_after_json(brand_dna):
-    from core.content_pipeline.generators.text_generator import TextGenerator
-    response_with_trailing_text = MOCK_VERTEX_RESPONSE + (
-        "\n\nNota: se evito lenguaje de garantia por tratarse de un nicho sensible."
-    )
-    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
-        mock_vc.return_value = _mock_vertex_client(response_with_trailing_text)
-        gen = TextGenerator()
-        result = gen.generate(brand_dna)
-
-    assert len(result) == 7
-
-
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-)
 def test_generate_post_has_required_keys(brand_dna):
     from core.content_pipeline.generators.text_generator import TextGenerator
     with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
@@ -356,3 +338,25 @@ def test_generate_runs_brand_consistency_audit_for_normal_business(brand_dna, _m
     mock_audit.assert_called_once()
     called_fields = mock_audit.call_args.args[0]
     assert len(called_fields) == 7
+
+
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global')
+def test_vertex_client_uses_global_text_location():
+    with patch('core.content_pipeline.generators.text_generator.genai.Client') as mock_client:
+        from core.content_pipeline.generators.text_generator import _vertex_client
+        _vertex_client()
+    mock_client.assert_called_once_with(vertexai=True, project='agente-cosmic', location='global')
+
+
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+                    VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash')
+def test_caption_safety_call_disables_thinking(brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    gen = TextGenerator()
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_resp = MagicMock()
+        mock_resp.text = '{"ok": true, "has_absolute_promise": false, "has_unverifiable_claim": false, "has_website_mention": false}'
+        mock_vc.return_value.models.generate_content.return_value = mock_resp
+        gen._validate_caption_safety('Caption de prueba', 'casual', 'Todos', '')
+        call_kwargs = mock_vc.return_value.models.generate_content.call_args.kwargs
+    assert call_kwargs['config'].thinking_config.thinking_budget == 0

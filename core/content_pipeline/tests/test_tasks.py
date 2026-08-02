@@ -366,7 +366,7 @@ def test_generate_sample_task_marks_failed_on_error(job_with_dna_sample_image):
 def test_generate_sample_task_product_image_mode_creates_post(job_with_dna_sample_product_image):
     with patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes') as mock_read, \
          patch('core.content_pipeline.tasks.ProductReferenceGenerator') as MockGen:
-        MockGen.return_value.generate_image.return_value = 'https://storage.test/product-scene.png'
+        MockGen.return_value.generate_image.return_value = ('https://storage.test/product-scene.png', '')
 
         from core.content_pipeline.tasks import generate_sample_task
         generate_sample_task(str(job_with_dna_sample_product_image.id))
@@ -395,7 +395,7 @@ def test_generate_sample_task_product_image_mode_creates_post(job_with_dna_sampl
 def test_generate_sample_task_product_reel_mode_creates_post(job_with_dna_sample_product_reel):
     with patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes'), \
          patch('core.content_pipeline.tasks.ProductReferenceGenerator') as MockGen:
-        MockGen.return_value.generate_reel.return_value = ('https://storage.test/video.mp4', 'https://storage.test/poster.png')
+        MockGen.return_value.generate_reel.return_value = ('https://storage.test/video.mp4', 'https://storage.test/poster.png', '')
 
         from core.content_pipeline.tasks import generate_sample_task
         generate_sample_task(str(job_with_dna_sample_product_reel.id))
@@ -417,7 +417,7 @@ def test_generate_sample_task_product_reel_mode_creates_post(job_with_dna_sample
 def test_generate_sample_task_product_image_mode_fails_when_qc_rejects(job_with_dna_sample_product_image):
     with patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes'), \
          patch('core.content_pipeline.tasks.ProductReferenceGenerator') as MockGen:
-        MockGen.return_value.generate_image.return_value = ''
+        MockGen.return_value.generate_image.return_value = ('', 'El control de calidad rechazó el resultado. Reintenta.')
 
         from core.content_pipeline.tasks import generate_sample_task
         generate_sample_task(str(job_with_dna_sample_product_image.id))
@@ -438,7 +438,7 @@ def test_generate_sample_task_product_image_mode_fails_when_qc_rejects(job_with_
 def test_generate_sample_task_product_reel_mode_fails_when_qc_rejects(job_with_dna_sample_product_reel):
     with patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes'), \
          patch('core.content_pipeline.tasks.ProductReferenceGenerator') as MockGen:
-        MockGen.return_value.generate_reel.return_value = ('', '')
+        MockGen.return_value.generate_reel.return_value = ('', '', 'El control de calidad rechazó el resultado. Reintenta.')
 
         from core.content_pipeline.tasks import generate_sample_task
         generate_sample_task(str(job_with_dna_sample_product_reel.id))
@@ -828,7 +828,7 @@ def test_enqueue_week_images_uses_longer_timeout_for_reel(job_with_dna):
     timeouts_by_post_id = {call.args[1]: call.kwargs['job_timeout'] for call in backfill_calls}
     reel_post = calendar.posts.get(day_number=8)
     single_post = calendar.posts.get(day_number=9)
-    assert timeouts_by_post_id[str(reel_post.id)] == 600
+    assert timeouts_by_post_id[str(reel_post.id)] == 2700
     assert timeouts_by_post_id[str(single_post.id)] == 300
 
 

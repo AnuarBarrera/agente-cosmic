@@ -1,6 +1,6 @@
 import io
 import logging
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFilter
 
 logger = logging.getLogger(__name__)
 
@@ -37,4 +37,31 @@ def normalize_image(image_bytes: bytes, max_dimension: int = _MAX_DIMENSION) -> 
         return result
     except Exception as e:
         logger.warning(f"normalize_image falló (usando original): {e}")
+        return image_bytes
+
+
+def enhance_photo_classic(image_bytes: bytes) -> bytes:
+    """Recorte 1:1 centrado + nitidez suave + autocontraste — sin IA generativa.
+
+    Usado por la ruta MEJORAR del triage de ProductReferenceGenerator: la foto
+    original ya es válida, solo necesita quedar lista para publicarse.
+    """
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img = ImageOps.exif_transpose(img)
+        img = img.convert('RGB')
+
+        side = min(img.width, img.height)
+        left = (img.width - side) // 2
+        top = (img.height - side) // 2
+        img = img.crop((left, top, left + side, top + side))
+
+        img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=60, threshold=3))
+        img = ImageOps.autocontrast(img, cutoff=1)
+
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning(f"enhance_photo_classic falló (usando original): {e}")
         return image_bytes
