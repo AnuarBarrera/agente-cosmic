@@ -2,6 +2,7 @@ import json
 import logging
 import re
 import requests
+from urllib.parse import urljoin
 import google.genai as genai
 from google.genai import types
 from bs4 import BeautifulSoup
@@ -14,6 +15,24 @@ from core.shared.metrics_utils import track_external_api, record_tokens, vertex_
 logger = logging.getLogger(__name__)
 
 _HEX_RE = re.compile(r'#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b')
+
+_MAX_REDIRECTS = 5
+
+
+def _safe_get(url: str, headers: dict, timeout: int) -> requests.Response:
+    """GET con validacion SSRF en CADA salto de redireccion, no solo en la URL
+    original. `allow_redirects=True` deja que `requests` siga automaticamente
+    un Location: sin pasar por `validate_url_safe` — un sitio malicioso podria
+    redirigir a una IP privada/link-local (ej. el metadata server de GCE,
+    169.254.169.254) y saltarse el chequeo por completo."""
+    for _ in range(_MAX_REDIRECTS):
+        validate_url_safe(url)
+        response = requests.get(url, timeout=timeout, headers=headers, allow_redirects=False)
+        if response.is_redirect and response.headers.get('Location'):
+            url = urljoin(url, response.headers['Location'])
+            continue
+        return response
+    raise ValueError(f"Demasiadas redirecciones (>{_MAX_REDIRECTS}) para {url}")
 
 _PROMPT_TEMPLATE = """
 Analiza el siguiente texto extraído de un sitio web de negocio y extrae su información de marca.
@@ -79,9 +98,8 @@ class WebScraper:
             return _FALLBACK.copy()
 
     def fetch_context(self, url: str) -> tuple[str, list[str]]:
-        validate_url_safe(url)
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, timeout=15, headers=headers, allow_redirects=True)
+        response = _safe_get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # 1. Inline <style> blocks
@@ -99,8 +117,7 @@ class WebScraper:
                 continue
             css_url = href if href.startswith('http') else f"{base_url}/{href.lstrip('/')}"
             try:
-                validate_url_safe(css_url)
-                css_resp = requests.get(css_url, timeout=6, headers=headers, allow_redirects=True)
+                css_resp = _safe_get(css_url, headers=headers, timeout=6)
                 css_text += ' ' + css_resp.text
             except Exception:
                 pass

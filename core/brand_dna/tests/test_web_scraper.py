@@ -40,6 +40,7 @@ def test_extract_returns_required_keys():
     with patch('requests.get') as mock_get, \
          patch('core.brand_dna.extractors.web_scraper._vertex_client') as mock_vc:
         mock_get.return_value.text = MOCK_HTML
+        mock_get.return_value.is_redirect = False
         mock_vc.return_value = _mock_vertex_client(MOCK_GEMINI_RESPONSE)
 
         result = scraper.extract('https://tuwebmx.com')
@@ -63,6 +64,7 @@ def test_extract_parses_vertex_json():
     with patch('requests.get') as mock_get, \
          patch('core.brand_dna.extractors.web_scraper._vertex_client') as mock_vc:
         mock_get.return_value.text = MOCK_HTML
+        mock_get.return_value.is_redirect = False
         mock_vc.return_value = _mock_vertex_client(MOCK_GEMINI_RESPONSE)
 
         result = scraper.extract('https://tuwebmx.com')
