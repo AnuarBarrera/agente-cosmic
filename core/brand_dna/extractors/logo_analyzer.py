@@ -35,7 +35,13 @@ class LogoAnalyzer:
             return _FALLBACK.copy()
 
     def _extract_colors(self, image_bytes: bytes) -> list[str]:
-        client = vision.ImageAnnotatorClient()
+        # Mismo fix que subtitle_generator.py (2026-08-02): sin project
+        # explicito, la cuenta de servicio de la VM usa su propio proyecto
+        # (infradash-*) como quota project en vez de agente-cosmic -> 403
+        # SERVICE_DISABLED silencioso (absorbido por el try/except de analyze()).
+        client = vision.ImageAnnotatorClient(
+            client_options={'quota_project_id': settings.GOOGLE_CLOUD_PROJECT},
+        )
         image = vision.Image(content=image_bytes)
         features = [vision.Feature(type_=vision.Feature.Type.IMAGE_PROPERTIES)]
         request = vision.AnnotateImageRequest(image=image, features=features)

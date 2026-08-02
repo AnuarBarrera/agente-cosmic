@@ -1,5 +1,6 @@
 import logging
 import re
+from django.conf import settings
 from google.cloud import speech
 from core.shared.metrics_utils import track_external_api, record_stt_call
 
@@ -19,7 +20,16 @@ def _split_into_phrases(script: str) -> list[str]:
 
 def _call_stt_attempt(narration_audio: bytes) -> list[dict] | None:
     try:
-        client = speech.SpeechClient()
+        # HALLAZGO 2026-08-02: SpeechClient() sin project explicito usaba el
+        # quota_project_id del ADC de usuario (agente-cosmic, por casualidad) —
+        # con la cuenta de servicio de la VM (sin ADC file) cae al proyecto
+        # DUEÑO de esa cuenta de servicio (infradash-*, no agente-cosmic),
+        # donde la API nunca se habilito -> 403 SERVICE_DISABLED en silencio,
+        # reel sale sin subtitulos. Mismo patron que _vertex_client()/
+        # storage.Client() ya usan: fijar el proyecto de forma explicita.
+        client = speech.SpeechClient(
+            client_options={'quota_project_id': settings.GOOGLE_CLOUD_PROJECT},
+        )
         config = speech.RecognitionConfig(
             encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
             sample_rate_hertz=_PCM_SAMPLE_RATE,
