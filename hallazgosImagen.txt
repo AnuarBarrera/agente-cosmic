@@ -1091,3 +1091,131 @@ Prioridad: Media — vale la pena resolverlo junto con el resto del
   trabajo de prompts, pero requiere una decision de producto (que tan
   literal debe ser el dia 1) antes de tocar codigo, no es un fix
   mecanico como IMG-08/IMG-10.
+
+=================================================================
+HALLAZGO IMG-12 — `generate_images` (Imagen 3) esta deprecado en el
+  SDK de google-genai, hay que migrar a `generate_content` con modelo
+  de imagen
+Categoría: Deuda tecnica / deprecacion de API (no rompe nada hoy)
+Estado: 🟡 REPORTADO — SIN FIX AUN — 2026-08-02
+=================================================================
+Contexto: al revisar logs de un reel de prueba, aparece en
+  `reel_generator.py:695` (y en cualquier otro sitio que use
+  `client.models.generate_images`, ej. `image_generator.py`,
+  `product_reference_generator.py`):
+  `ExperimentalWarning: The generate_images method is deprecated and
+  will be removed in the next major release (not before Jan. 1 2027).
+  Please use the generate_content method with image models instead.`
+
+No causa ningun error hoy — Imagen 3 sigue respondiendo bien via este
+  metodo (confirmado con llamada real durante la validacion de
+  credenciales de este mismo dia). Es aviso de deprecacion, no fallo
+  actual.
+
+Propuesta de fix (no implementada, no urgente): migrar los sitios que
+  llaman `generate_images` a `generate_content` con el modelo de
+  imagen correspondiente, siguiendo la guia oficial enlazada en el
+  warning (https://ai.google.dev/gemini-api/docs/deprecations#imagen-models).
+  Se puede hacer junto con cualquier otra migracion de modelos (ej. la
+  ya hecha de Gemini 2.5 -> 3.5 para texto) para no tocar estos
+  archivos 2 veces por separado.
+
+Severidad: Baja — sigue funcionando, deadline es "no antes de 2027".
+Prioridad: Baja — no urgente, agrupar con otras migraciones de SDK
+  cuando se haga la siguiente.
+
+=================================================================
+HALLAZGO IMG-13 — El triage nuevo de ProductReferenceGenerator (ver
+  `docs/superpowers/specs/2026-08-02-product-reference-triage-design.md`)
+  rechaza fotos legitimas — la deteccion en si es mayormente correcta,
+  pero (a) la politica "cualquier marca de agua visible = rechazo
+  total" es agresiva, y (b) el mensaje de "captura de pantalla" es
+  enganoso cuando la causa real es un flyer/collage, no un screenshot
+  de telefono
+Categoría: Falso-agresivo en clasificacion de fotos de referencia +
+  mensaje de usuario impreciso
+Estado: 🟢 CAUSA CONFIRMADA CON EVIDENCIA — SIN FIX AUN — 2026-08-02
+=================================================================
+Contexto: Anuar reporto que los ultimos intentos de generar
+  producto-referencia estan siendo rechazados "muy agresivamente" por
+  marca de agua y por screenshots, pero segun el "si tiene marca de
+  agua, eso si, pero no son screenshots". Se revisaron los 4 jobs
+  rechazados mas recientes (`18da6f83`, `a389e7d7`, `d00cd01b`,
+  `85aa05b3`, todos `contacto.neia@gmail.com`, 08:16-08:25 del
+  2026-08-02) — se descargaron las 4 fotos de referencia y se leyo el
+  log de `product_reference_triage` de cada una.
+
+Resultado por foto (`_TRIAGE_PROMPT` en
+  `core/content_pipeline/generators/product_reference_generator.py`):
+  - `18da6f83` (Gelatinas Marba): foto con titulo+pie de foto en texto
+    grande superpuesto ("Gelopaleta Tematica MARBA" / "Leche Entera,
+    Descremada o Deslactosada") → `has_aggressive_watermark: true`.
+    Razonable — es texto grande y central, aunque es mas "texto
+    promocional agregado" que "marca de agua" en el sentido estricto
+    de proteccion anti-robo.
+  - `d00cd01b` y `85aa05b3` (Yonderly Creativa, misma foto exacta):
+    foto real de un arreglo de globos/dulces con el texto
+    "Yonderly creativa" superpuesto en blanco semi-transparente cruzando
+    el centro de la imagen → `has_aggressive_watermark: true`. Este SI
+    es un watermark de proteccion clasico, deteccion correcta, y Anuar
+    mismo lo confirma ("si tiene marca de agua, eso si").
+  - `a389e7d7` (Gelatinas Marba): **no es una foto directa de producto —
+    es un COLLAGE/FLYER de diseño grafico**: 3 fotos distintas combinadas
+    en un solo cuadro, con titulo superpuesto ("Gelopaletas Artesanales
+    MARBA") y un logo circular tipo sello ("Gelosutinas MARBA Postres")
+    en la esquina — → `is_screenshot_or_ui: true`.
+
+Causa raiz de la confusion de Anuar: el campo `is_screenshot_or_ui` en
+  `_TRIAGE_PROMPT` (lineas 121-125) tiene una definicion MAS AMPLIA de
+  lo que su nombre sugiere — no es solo "screenshot de telefono", el
+  prompt explicitamente dice "OR a meme, flyer, or graphic-design
+  composition that is not a real photograph". El modelo esta
+  clasificando CORRECTAMENTE segun esa definicion (la foto de
+  `a389e7d7` es literalmente un flyer/collage de diseño, no una foto
+  cruda), **pero el mensaje que ve el usuario**
+  (`_describe_triage_rejection()`, linea 156-162) dice textualmente
+  "parece ser una captura de pantalla (de una app o red social)" —
+  una descripcion que NO aplica a un collage/flyer armado en una app
+  de diseño (Canva y similares). De ahi que Anuar, viendo su propia
+  foto, diga con razon "no son screenshots" — tiene razon en que no es
+  un screenshot de telefono/red social, pero el campo interno que
+  dispara ese mensaje SI estaba diseñado para cubrir tambien este caso
+  (flyer/collage), solo que el texto del mensaje no lo comunica bien.
+
+Dos problemas distintos, ambos reales:
+  1. **Mensaje impreciso** (el que causo la confusion directa): el
+     texto fijo "parece ser una captura de pantalla" no distingue entre
+     screenshot real de app/red social vs. flyer/collage de diseño —
+     son causas visualmente y conceptualmente distintas para el
+     usuario, aunque compartan el mismo booleano internamente.
+  2. **Politica de rechazo total ante CUALQUIER marca de agua visible**
+     (no solo el mensaje): 3 de 4 rechazos fueron por
+     `has_aggressive_watermark`, y la unica opcion que le da el mensaje
+     al usuario es "sube la misma foto sin la marca de agua" — que para
+     muchos negocios chicos (que solo tienen fotos ya publicadas en
+     redes, marcadas para evitar robo) puede ser una foto que
+     literalmente no existe sin marca de agua. El triage ya tiene una
+     ruta `MEJORAR` (mejora clasica sin IA) pensada para casos dificiles
+     — vale la pena evaluar si watermark moderado (no cubriendo el
+     producto en si) deberia caer en `MEJORAR` (con recorte/mejora)
+     en vez de `RECHAZAR` directo.
+
+Propuesta de fix (no implementada, pendiente de decision de Anuar):
+  1. Separar el campo interno en 2 (o mantener 1 booleano pero agregar
+     un sub-tipo) para poder dar un mensaje especifico: "parece ser una
+     captura de pantalla de una app/red social" vs. "parece ser un
+     flyer o diseño grafico (collage, logo superpuesto tipo Canva) en
+     vez de una foto directa del producto" — mensajes distintos para
+     causas distintas, aunque ambas terminen en rechazo.
+  2. Revisar si la politica de watermark deberia ser binaria
+     (rechazar/no) o si amerita enviar watermarks "moderados" (que no
+     tapan el producto) a la ruta `MEJORAR` en vez de `RECHAZAR` —
+     requiere decision de producto, no es un fix mecanico.
+
+Severidad: Media — no es un bug de seguridad ni de contenido sensible
+  como IMG-09, pero genera friccion real para negocios chicos (su
+  unica foto disponible frecuentemente tiene marca de agua) y mensajes
+  de error que no ayudan al usuario a entender que hacer distinto.
+Prioridad: Media-Alta — el fix del mensaje (punto 1) es sencillo y de
+  alto impacto en confusion del usuario; el fix de politica (punto 2)
+  requiere mas decision de producto.
