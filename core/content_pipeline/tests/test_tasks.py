@@ -372,7 +372,7 @@ def test_generate_sample_task_product_reel_mode_creates_post(job_with_dna_sample
 def test_generate_sample_task_product_reel_mode_fails_when_qc_rejects(job_with_dna_sample_product_reel):
     with patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes'), \
          patch('core.content_pipeline.tasks.ProductShowcaseGenerator') as MockGen:
-        MockGen.return_value.generate_reel.return_value = ('', '', 'El control de calidad rechazó el resultado. Reintenta.')
+        MockGen.return_value.generate_reel.return_value = ('', '', '')
 
         from core.content_pipeline.tasks import generate_sample_task
         generate_sample_task(str(job_with_dna_sample_product_reel.id))
@@ -381,7 +381,7 @@ def test_generate_sample_task_product_reel_mode_fails_when_qc_rejects(job_with_d
     assert posts.count() == 0
     job_with_dna_sample_product_reel.refresh_from_db()
     assert job_with_dna_sample_product_reel.status == AnalysisJob.STATUS_FAILED
-    assert 'calidad' in job_with_dna_sample_product_reel.error_message.lower()
+    assert 'problema generando el resultado' in job_with_dna_sample_product_reel.error_message.lower()
 
 
 def test_generate_sample_task_product_reel_mode_fails_without_photo():

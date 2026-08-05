@@ -63,7 +63,7 @@ def _generate_product_reference_sample(job, brand_dna) -> None:
 
     if not video_url:
         calendar.delete()
-        job.mark_failed(reason or 'El control de calidad rechazó el resultado. Reintenta.')
+        job.mark_failed(reason or 'Ocurrió un problema generando el resultado. Vuelve a intentar.')
         return
 
     ContentPost.objects.create(

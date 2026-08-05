@@ -39,6 +39,12 @@ node_modules/
 /landing/
 core/content_pipeline/hyperframes_reel/node_modules/
 
+# Fotos de producto temporales que ProductShowcaseGenerator escribe en cada
+# render (assets/tmp/<uuid>.png) — se borran solas al terminar, pero un worker
+# muerto a medias puede dejarlas huérfanas. placeholder.png sí es un asset real.
+core/content_pipeline/hyperframes_reel/assets/tmp/*
+!core/content_pipeline/hyperframes_reel/assets/tmp/placeholder.png
+
 # Credenciales
 google_credentials.json
 token.json

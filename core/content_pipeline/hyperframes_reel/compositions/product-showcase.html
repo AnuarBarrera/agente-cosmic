@@ -83,11 +83,15 @@
       photoMaterial.map = texture;
       photoMaterial.needsUpdate = true;
     }
-    if (photoImg.complete && photoImg.naturalWidth > 0) {
-      applyPhotoTexture();
-    } else {
-      photoImg.addEventListener("load", applyPhotoTexture, { once: true });
-    }
+
+    // Top-level await blocks this module script's completion — and therefore
+    // "DOMContentLoaded", the event HyperFrames' frame capture waits on (see
+    // the comment on the <img> tag above) — until the photo has actually
+    // decoded. Without this, the render call below fires before the <img>
+    // finishes loading and frame 0 is captured as a solid white rectangle
+    // (verified empirically: stddev 0, RGB≈(251,253,253)).
+    await photoImg.decode().catch(() => {});
+    applyPhotoTexture();
 
     const PARTICLE_COUNT = 60;
     const particlePositions = new Float32Array(PARTICLE_COUNT * 3);

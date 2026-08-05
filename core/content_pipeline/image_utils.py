@@ -43,7 +43,8 @@ def normalize_image(image_bytes: bytes, max_dimension: int = _MAX_DIMENSION) -> 
 def enhance_photo_classic(image_bytes: bytes) -> bytes:
     """Recorte 1:1 centrado + nitidez suave + autocontraste — sin IA generativa.
 
-    Usado por la ruta MEJORAR del triage de ProductReferenceGenerator: la foto
+    Usado por ProductShowcaseGenerator para preparar la foto real del producto
+    antes de componerla dentro de la escena 3D (HyperFrames/Three.js): la foto
     original ya es válida, solo necesita quedar lista para publicarse.
     """
     try:
