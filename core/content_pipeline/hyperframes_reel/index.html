@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="es" data-composition-variables='[
+  {"id":"photo_src","type":"string","label":"Foto del producto","default":"assets/tmp/placeholder.png"},
+  {"id":"primary_color","type":"color","label":"Color primario","default":"#e94560"},
+  {"id":"secondary_color","type":"color","label":"Color secundario","default":"#3ED694"}
+]'>
+<head>
+  <meta charset="UTF-8" />
+  <title>Product Showcase</title>
+  <script type="importmap">
+    { "imports": { "three": "./node_modules/three/build/three.module.js" } }
+  </script>
+  <style>
+    body { margin: 0; background: #0b0f14; overflow: hidden; }
+    #root { position: relative; width: 1080px; height: 1920px; overflow: hidden; }
+    .clip { position: absolute; inset: 0; }
+    #three-canvas { width: 100%; height: 100%; display: block; }
+    #product-photo { position: absolute; width: 1px; height: 1px; left: -9999px; top: -9999px; }
+  </style>
+</head>
+<body>
+  <div id="root" data-composition-id="product-showcase" data-no-timeline data-start="0" data-width="1080" data-height="1920" data-duration="6">
+    <section id="scene" class="clip" data-start="0" data-duration="6" data-track-index="0">
+      <img id="product-photo" data-var-src="photo_src" src="assets/tmp/placeholder.png" crossorigin="anonymous" />
+      <canvas id="three-canvas"></canvas>
+    </section>
+  </div>
+  <script type="module">
+    import * as THREE from "three";
+
+    const DURATION = 6;
+    const { primary_color, secondary_color } = window.__hyperframes.getVariables();
+
+    const canvas = document.getElementById("three-canvas");
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: false, antialias: true });
+    renderer.setSize(1080, 1920, false);
+    renderer.setPixelRatio(1);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b0f14);
+    const camera = new THREE.PerspectiveCamera(35, 1080 / 1920, 0.1, 100);
+    camera.position.set(0, 0, 7);
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 2.2));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    keyLight.position.set(2, 3, 4);
+    scene.add(keyLight);
+
+    const cardGroup = new THREE.Group();
+    scene.add(cardGroup);
+
+    const frameGeometry = new THREE.BoxGeometry(3.4, 3.4, 0.08);
+    const frameMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(primary_color), roughness: 0.35, metalness: 0.15,
+    });
+    const frame = new THREE.Mesh(frameGeometry, frameMaterial);
+    cardGroup.add(frame);
+
+    const photoImg = document.getElementById("product-photo");
+
+    // Get variables from HyperFrames
+    const vars = window.__hyperframes.getVariables();
+    console.log("[Photo] HyperFrames variables: photo_src=" + vars.photo_src);
+
+    // Manually set the src if data-var-src is not being substituted
+    if (vars.photo_src && vars.photo_src !== photoImg.src) {
+      console.log("[Photo] Setting src to: " + vars.photo_src);
+      photoImg.src = vars.photo_src;
+    }
+
+    // DIAGNOSTIC: Log photo element state
+    console.log("[Photo] id=" + photoImg.id);
+    console.log("[Photo] src=" + photoImg.src);
+    console.log("[Photo] getAttribute(data-var-src)=" + photoImg.getAttribute("data-var-src"));
+    console.log("[Photo] getAttribute(src)=" + photoImg.getAttribute("src"));
+    console.log("[Photo] complete=" + photoImg.complete);
+    console.log("[Photo] naturalWidth=" + photoImg.naturalWidth);
+    console.log("[Photo] naturalHeight=" + photoImg.naturalHeight);
+
+    const photoGeometry = new THREE.PlaneGeometry(3.0, 3.0);
+    const photoMaterial = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.5, metalness: 0 });
+    const photoMesh = new THREE.Mesh(photoGeometry, photoMaterial);
+    photoMesh.position.z = 0.05;
+    cardGroup.add(photoMesh);
+
+    // Create texture from canvas by drawing the image
+    const textureCanvas = document.createElement('canvas');
+    textureCanvas.width = 1024;
+    textureCanvas.height = 1024;
+    const canvasCtx = textureCanvas.getContext('2d');
+
+    // Wait for the image to load, then draw it
+    function applyCanvasTexture() {
+      if (photoImg.complete && photoImg.naturalWidth > 0) {
+        console.log("[Texture] Image ready, naturalWidth=" + photoImg.naturalWidth);
+        try {
+          // Draw the image on the canvas (fit to canvas)
+          canvasCtx.clearRect(0, 0, textureCanvas.width, textureCanvas.height);
+          canvasCtx.drawImage(photoImg, 0, 0, textureCanvas.width, textureCanvas.height);
+
+          // Check if canvas has content by sampling pixel data
+          const imageData = canvasCtx.getImageData(512, 512, 1, 1);
+          const rgba = imageData.data;
+          console.log("[Texture] Canvas center pixel RGBA: " + rgba[0] + "," + rgba[1] + "," + rgba[2] + "," + rgba[3]);
+
+          const texture = new THREE.CanvasTexture(textureCanvas);
+          texture.colorSpace = THREE.SRGBColorSpace;
+          photoMaterial.map = texture;
+          photoMaterial.needsUpdate = true;
+          console.log("[Texture] Canvas texture applied");
+        } catch (e) {
+          console.error("[Texture] Canvas error: " + e);
+          // Fallback: draw a test pattern
+          canvasCtx.fillStyle = '#FF00FF';
+          canvasCtx.fillRect(0, 0, textureCanvas.width, textureCanvas.height);
+          const texture = new THREE.CanvasTexture(textureCanvas);
+          photoMaterial.map = texture;
+          photoMaterial.needsUpdate = true;
+          console.log("[Texture] Applied test pattern (magenta)");
+        }
+      } else {
+        if (++window.__textureRetries > 20) {
+          console.log("[Texture] Max retries reached, using fallback");
+          canvasCtx.fillStyle = '#FFFF00';
+          canvasCtx.fillRect(0, 0, textureCanvas.width, textureCanvas.height);
+          const texture = new THREE.CanvasTexture(textureCanvas);
+          photoMaterial.map = texture;
+          photoMaterial.needsUpdate = true;
+        } else {
+          setTimeout(applyCanvasTexture, 100);
+        }
+      }
+    }
+
+    window.__textureRetries = 0;
+    // Apply texture immediately (image should be loaded since we're in a script tag)
+    // This must happen BEFORE the first hf-seek event
+    applyCanvasTexture();
+
+    const PARTICLE_COUNT = 60;
+    const particlePositions = new Float32Array(PARTICLE_COUNT * 3);
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const angle = (i / PARTICLE_COUNT) * Math.PI * 2;
+      const radius = 2.6 + (i % 3) * 0.25;
+      particlePositions[i * 3] = Math.cos(angle) * radius;
+      particlePositions[i * 3 + 1] = Math.sin(angle) * radius;
+      particlePositions[i * 3 + 2] = -0.5 - (i % 3) * 0.2;
+    }
+    const particleGeometry = new THREE.BufferGeometry();
+    particleGeometry.setAttribute("position", new THREE.BufferAttribute(particlePositions, 3));
+    const particleMaterial = new THREE.PointsMaterial({
+      color: new THREE.Color(secondary_color), size: 0.07, transparent: true, opacity: 0.85,
+    });
+    const particles = new THREE.Points(particleGeometry, particleMaterial);
+    scene.add(particles);
+
+    function renderAt(time) {
+      const t = Math.min(time, DURATION);
+      camera.position.z = 7 - (t / DURATION) * 1.5;
+      cardGroup.rotation.y = Math.sin(t * 0.5) * 0.35;
+      cardGroup.rotation.x = Math.sin(t * 0.35) * 0.08;
+      cardGroup.position.y = Math.sin(t * 1.2) * 0.15;
+      particles.rotation.z = t * 0.3;
+      renderer.render(scene, camera);
+    }
+
+    window.addEventListener("hf-seek", (event) => {
+      renderAt(event.detail.time);
+    });
+
+    renderAt(window.__hfThreeTime || 0);
+  </script>
+</body>
+</html>
