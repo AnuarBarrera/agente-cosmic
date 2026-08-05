@@ -41,7 +41,12 @@ def normalize_image(image_bytes: bytes, max_dimension: int = _MAX_DIMENSION) -> 
 
 
 def enhance_photo_classic(image_bytes: bytes) -> bytes:
-    """Recorte 1:1 centrado + nitidez suave + autocontraste — sin IA generativa.
+    """Nitidez suave + autocontraste — sin IA generativa. Preserva el aspect ratio
+    real de la foto (no recorta a cuadrado): el template 3D de ProductShowcaseGenerator
+    lee ese aspect ratio (variable `photo_aspect`) y dimensiona su propio plano para
+    encajarlo sin perder contenido. Un recorte 1:1 ciego aquí perdía contenido real en
+    fotos portrait/landscape (HALLAZGO 87: recortaba el texto superior de un globo y
+    parte del producto en la parte inferior de la foto).
 
     Usado por ProductShowcaseGenerator para preparar la foto real del producto
     antes de componerla dentro de la escena 3D (HyperFrames/Three.js): la foto
@@ -51,11 +56,6 @@ def enhance_photo_classic(image_bytes: bytes) -> bytes:
         img = Image.open(io.BytesIO(image_bytes))
         img = ImageOps.exif_transpose(img)
         img = img.convert('RGB')
-
-        side = min(img.width, img.height)
-        left = (img.width - side) // 2
-        top = (img.height - side) // 2
-        img = img.crop((left, top, left + side, top + side))
 
         img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=60, threshold=3))
         img = ImageOps.autocontrast(img, cutoff=1)

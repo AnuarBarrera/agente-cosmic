@@ -4247,3 +4247,153 @@ Severidad: Baja-Media — afecta la percepción de calidad/coherencia
   visual del reel, no rompe la generación ni bloquea publicación.
 Prioridad: Baja — revisar si se retoma cuando se evalúe un cambio de
   arquitectura mayor al pipeline de generación de escenas del reel.
+
+=================================================================
+HALLAZGO 85 — Pago por calendario individual: nuevo modelo de negocio,
+  no una feature de billing
+Categoría: Decisión de producto / modelo de negocio
+Estado: 🟡 POSPUESTO — 2026-08-03
+=================================================================
+Contexto: investigación previa
+  (`docs/superpowers/specs/2026-07-28-pago-por-calendario-investigacion.md`)
+  concluyó que la arquitectura de billing actual (Stripe, pago único
+  mensual recurrente por negocio, ver
+  `docs/superpowers/specs/2026-07-24-...monthly...` en memoria de
+  sesión) está armada 100% para suscripción de precio fijo, no para
+  pago por evento/uso puntual (ej. "quiero un calendario suelto, sin
+  suscribirme"). No es un fix incremental sobre el billing existente
+  — requeriría un flujo de compra, ciclo de vida y probablemente un
+  paywall distintos a los de un usuario en trial/suscripción mensual.
+
+Reclasificación (2026-08-03): al posponerlo, Anuar señaló que esto no
+  es una "feature pendiente" más — es una decisión de **modelo de
+  negocio** (¿ofrecer 2 tiers de producto: suscripción mensual vs.
+  compra puntual de un calendario? ¿qué precio, qué límites, qué
+  fricción de conversión introduce un tier de pago único frente al
+  actual trial→mensual?). Por eso se saca de `PENDIENTES.md` (que
+  trackea deuda técnica/hallazgos de calidad) y se deja documentado
+  aquí como idea de negocio sin decisión tomada.
+
+Fix: NINGUNO — no hay nada que implementar todavía. Antes de tocar
+  código hace falta una decisión de producto/negocio (ver también
+  `project_icp_agency_segmentation` en memoria de sesión, que ya
+  exploraba la idea de 2 tiers ICP vs. agencia — evaluar si conviene
+  fusionar ambos hilos de pensamiento cuando se retome).
+
+Severidad: N/A (no es un bug).
+Prioridad: Sin definir — depende de una decisión de negocio, no de
+  ingeniería. Retomar cuando Anuar quiera explorar el brainstorm de
+  monetización con este ángulo específico.
+
+=================================================================
+HALLAZGO 86 — Template 3D de ProductShowcaseGenerator (v1): los colores
+  de marca y las partículas NUNCA se ven — no es una preferencia de
+  estilo, es un bug geométrico real
+Categoría: Bug de composición Three.js (frustum de cámara)
+Estado: ✅ RESUELTO — 2026-08-05 (ver `docs/superpowers/plans/2026-08-05-product-showcase-template-v2-plan.md`, commit `17020fa`)
+=================================================================
+Contexto: al aprobar el v1 del template (plan
+  `docs/superpowers/plans/2026-08-05-product-showcase-3d-pipeline-plan.md`),
+  Anuar dijo "no es la idea que tenía en mente pero confirma que
+  funciona" — se registró como preferencia creativa/estética. La
+  revisión final de rama (Opus, 2026-08-05) encontró la causa real con
+  evidencia: es un bug geométrico, no de gusto.
+
+Causa raíz confirmada (medido sobre un render real, 4 frames): con la
+  cámara en fov=35°, aspect=0.5625, z entre 7 y 5.5, el semi-ancho
+  visible en el plano de la tarjeta es ~0.97-1.24 unidades. El marco de
+  color de marca (`BoxGeometry(3.4,...)`, semi-ancho 1.7) y las
+  partículas (radio XY 2.6-3.1) están SIEMPRE fuera del frustum de la
+  cámara — nunca se renderizan, sea cual sea el color. Lo único visible
+  es la foto del producto (semi-ancho 1.5, más grande que el frustum) y
+  una franja delgada del fondo `#0b0f14` arriba/abajo.
+
+Bug relacionado (mismo archivo, mismo template): la foto YA viene
+  recortada a 1:1 por `enhance_photo_classic` (principio del pipeline:
+  "la foto real nunca se toca/recorta de más"), pero el plano
+  (`PlaneGeometry(3.0,3.0)`) excede el ancho visible del frustum, así
+  que el dolly de cámara recorta un 21%-54% adicional del ancho a
+  medida que avanza — visible en el render real: la etiqueta de la
+  botella se corta en el borde izquierdo.
+
+Fix (2026-08-05): plano de la foto achicado a `PlaneGeometry(1.8,1.8)`
+  (semi-ancho 0.9, bajo el límite de 0.967) y marco a
+  `BoxGeometry(2.0,2.0,...)` (semi-ancho 1.0) — ambos caen dentro del
+  frustum en todo el dolly. Las 60 partículas puntuales se reemplazaron
+  por 8 formas 3D ("confeti geométrico": cubos/toroides/icosaedros)
+  orbitando a radio 1.05, más un destello de luz en los primeros 0.6s.
+  Duración 6s→8s. Verificado con 3 frames reales extraídos e
+  inspeccionados (por el controlador Y por Anuar) antes de comitear —
+  marco y confeti confirmados visibles, foto ya no se recorta de más.
+  Aprobado por Anuar ("me convence, sigamos").
+
+Nota: el test de cobertura para `colors=brand_dna.primary_colors` en
+  `tasks.py` (Minor diferido en la Tarea 3 de este plan) se deja
+  pendiente a propósito hasta que este bug se arregle — no tiene
+  sentido probar que un color se pasa correctamente si ese color nunca
+  se ve en el resultado final.
+
+Severidad: Media — no rompe el pipeline (el video se genera y sube
+  bien), pero el "efecto wow" de marca que era el objetivo de todo este
+  rediseño no se cumple hoy.
+Prioridad: Alta dentro de la próxima iteración del template — es la
+  pieza que más se acerca a resolver por qué el v1 "no era la idea que
+  tenía en mente".
+
+=================================================================
+HALLAZGO 87 — Template 3D de ProductShowcaseGenerator (Fase A): la foto
+  real del producto se ve recortada, perdiendo contenido importante
+  (texto/producto en los bordes)
+Categoría: Bug de preprocesamiento de imagen (Python, no Three.js)
+Estado: ✅ RESUELTO — 2026-08-05 (mismo día que Fase A, sesión de
+  seguimiento tras feedback real de Anuar con foto de prueba)
+=================================================================
+Contexto: Anuar reportó con evidencia (foto original + captura del
+  video renderizado) que una foto real de producto (globo "Feliz
+  Cumpleaños" + bouquet de dulces, portrait 1536x2048, aspect 0.75) se
+  veía cortada en el video: no se leía "Feliz" (arriba del todo) y
+  faltaba buena parte del bouquet (abajo del todo).
+
+Causa raíz confirmada (no era el frustum de cámara de HALLAZGO 86, ya
+  resuelto): `enhance_photo_classic()` en `image_utils.py` hacía un
+  recorte 1:1 CENTRADO Y SIMÉTRICO antes de que la foto llegara al
+  template 3D (`side = min(w,h)`, recorte igual arriba y abajo). Para
+  la foto de 1536x2048, eso recorta exactamente 256px arriba y 256px
+  abajo (512px de 2048, 25% del alto total) — matemáticamente idéntico
+  a lo que se ve en la captura: el texto "Feliz" y parte del bouquet
+  quedan fuera. El `PlaneGeometry` cuadrado del template heredaba una
+  imagen ya mutilada; nunca fue el causante.
+
+Fix (2026-08-05): se elimina el recorte de `enhance_photo_classic` —
+  ya no fuerza cuadrado, solo nitidez (`UnsharpMask`) + autocontraste.
+  `ProductShowcaseGenerator._generate_showcase` calcula el aspect ratio
+  real de la foto (ancho/alto vía PIL) y lo pasa como nueva variable de
+  composición `photo_aspect` (`data-composition-variables`, tipo
+  `number`). El template (`product-showcase.html`/`index.html`,
+  byte-idénticos) ya no usa un tamaño fijo cuadrado: calcula
+  `PHOTO_WIDTH`/`PHOTO_HEIGHT` con un "contain" (sin recorte) dentro de
+  límites máximos elegidos con margen bajo los límites de frustum de
+  cámara ya medidos en HALLAZGO 86 (ancho máx 1.8, alto máx 3.0), y el
+  marco de color sigue la misma forma con un margen fijo de 0.2. La
+  matemática de HALLAZGO 86 (semi-ancho/semi-alto visibles según
+  distancia de cámara) no cambió — solo se le agregó el límite vertical
+  que antes no hacía falta porque todo era cuadrado.
+
+Verificado con la foto real reportada por Anuar (no una imagen
+  sintética): recorte reproducido en Python de forma aislada
+  confirmando la pérdida exacta de 256px arriba/abajo, luego render
+  real con `hyperframes render` + `photo_aspect=0.75` + 3 frames
+  extraídos e inspeccionados — "Feliz Cumpleaños" completo y el bouquet
+  completo visibles, marco ahora rectangular siguiendo el aspect real
+  de la foto, confeti sin clipping. 23/23 tests actualizados pasan
+  (`test_image_utils.py`, `test_product_showcase_generator.py`),
+  `hyperframes lint` 0 errores.
+
+Nota para Fase B (catálogo de templates): a partir de ahora cualquier
+  template nuevo que reciba `photo_src` también debería recibir/usar
+  `photo_aspect` en vez de asumir cuadrado — es la convención que deja
+  este fix.
+
+Severidad: Alta — pérdida real de contenido de marca/producto en el
+  entregable final, no solo estético.
+Prioridad: Cerrado.

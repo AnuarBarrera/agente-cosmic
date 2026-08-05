@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="es" data-composition-variables='[
   {"id":"photo_src","type":"string","label":"Foto del producto","default":"assets/tmp/placeholder.png"},
+  {"id":"photo_aspect","type":"number","label":"Aspect ratio de la foto (ancho/alto)","default":1},
   {"id":"primary_color","type":"color","label":"Color primario","default":"#e94560"},
   {"id":"secondary_color","type":"color","label":"Color secundario","default":"#3ED694"}
 ]'>
@@ -34,7 +35,7 @@
     import * as THREE from "three";
 
     const DURATION = 8;
-    const { primary_color, secondary_color } = window.__hyperframes.getVariables();
+    const { primary_color, secondary_color, photo_aspect } = window.__hyperframes.getVariables();
 
     const canvas = document.getElementById("three-canvas");
     const renderer = new THREE.WebGLRenderer({ canvas, alpha: false, antialias: true });
@@ -56,15 +57,29 @@
     scene.add(cardGroup);
 
     // FIX HALLAZGO 86: a distancia d de la camara, el semi-ancho visible es
-    // d * tan(17.5deg) * aspect ~= d * 0.1774. Con el dolly de camara yendo de
-    // z=7 a z=5.5 (foto en z~0.05), el punto mas ajustado (d~5.45) da un
-    // semi-ancho visible de ~0.967 -- CUALQUIER geometria mas ancha que eso
-    // queda fuera de camara en algun punto del dolly. FRAME_SIZE y PHOTO_SIZE
-    // se elijen con margen bajo ese limite.
-    const FRAME_SIZE = 2.0; // semi-ancho 1.0, margen bajo 0.967
-    const PHOTO_SIZE = 1.8; // semi-ancho 0.9, margen bajo 0.967 -- ya no se recorta
+    // d * tan(17.5deg) * aspect ~= d * 0.1774 y el semi-alto visible es
+    // d * tan(17.5deg) ~= d * 0.3153. Con el dolly de camara yendo de z=7 a
+    // z=5.5 (foto en z~0.05), el punto mas ajustado (d~5.45) da un semi-ancho
+    // visible de ~0.967 y un semi-alto visible de ~1.719 -- cualquier
+    // geometria mas grande que eso queda fuera de camara en algun punto del
+    // dolly.
+    //
+    // FIX HALLAZGO 87: la foto ya NO se recorta a cuadrado en Python (perdia
+    // contenido real en fotos portrait/landscape). En vez de un tamano fijo,
+    // el plano de la foto se ajusta ("contain", sin recorte) al aspect ratio
+    // real (photo_aspect = ancho/alto) dentro de estos limites maximos --
+    // elegidos con margen bajo los limites de camara de arriba.
+    const PHOTO_MAX_WIDTH = 1.8; // semi-ancho 0.9, margen bajo 0.967
+    const PHOTO_MAX_HEIGHT = 3.0; // semi-alto 1.5, margen bajo 1.719
+    const FRAME_MARGIN = 0.2; // borde de marco visible alrededor de la foto
 
-    const frameGeometry = new THREE.BoxGeometry(FRAME_SIZE, FRAME_SIZE, 0.08);
+    const aspect = photo_aspect > 0 ? photo_aspect : 1;
+    const PHOTO_WIDTH = Math.min(PHOTO_MAX_WIDTH, PHOTO_MAX_HEIGHT * aspect);
+    const PHOTO_HEIGHT = PHOTO_WIDTH / aspect;
+    const FRAME_WIDTH = PHOTO_WIDTH + FRAME_MARGIN;
+    const FRAME_HEIGHT = PHOTO_HEIGHT + FRAME_MARGIN;
+
+    const frameGeometry = new THREE.BoxGeometry(FRAME_WIDTH, FRAME_HEIGHT, 0.08);
     const frameMaterial = new THREE.MeshStandardMaterial({
       color: new THREE.Color(primary_color), roughness: 0.35, metalness: 0.15,
     });
@@ -80,7 +95,7 @@
       photoImg.src = vars.photo_src;
     }
 
-    const photoGeometry = new THREE.PlaneGeometry(PHOTO_SIZE, PHOTO_SIZE);
+    const photoGeometry = new THREE.PlaneGeometry(PHOTO_WIDTH, PHOTO_HEIGHT);
     const photoMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const photoMesh = new THREE.Mesh(photoGeometry, photoMaterial);
     photoMesh.position.z = 0.05;

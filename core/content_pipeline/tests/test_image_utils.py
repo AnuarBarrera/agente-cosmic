@@ -50,13 +50,17 @@ class TestNormalizeImage:
 
 
 class TestEnhancePhotoClassic:
-    def test_crops_rectangular_image_to_square(self):
+    def test_preserves_aspect_ratio_of_rectangular_image(self):
+        # HALLAZGO 87: recortar a cuadrado perdia contenido real de la foto
+        # (texto/producto en los bordes). enhance_photo_classic ya no recorta --
+        # el aspect ratio real se preserva y se pasa al template 3D como variable.
         img = Image.new('RGB', (200, 100), color='green')
         buf = io.BytesIO()
         img.save(buf, format='PNG')
         result = enhance_photo_classic(buf.getvalue())
         out = Image.open(io.BytesIO(result))
-        assert out.width == out.height == 100
+        assert out.width == 200
+        assert out.height == 100
 
     def test_square_image_keeps_dimensions(self):
         img = Image.new('RGB', (150, 150), color='blue')
@@ -79,8 +83,11 @@ class TestEnhancePhotoClassic:
         result = enhance_photo_classic(garbage)
         assert result == garbage
 
-    def test_applies_exif_orientation_before_cropping(self):
+    def test_applies_exif_orientation_before_processing(self):
+        # Pixeles guardados en landscape (200x100) pero EXIF orientation=6 indica
+        # que debe mostrarse en portrait (100x200) -- sin recorte, debe conservarse.
         raw = _jpeg_with_orientation(200, 100, orientation=6)
         result = enhance_photo_classic(raw)
         out = Image.open(io.BytesIO(result))
-        assert out.width == out.height == 100
+        assert out.width == 100
+        assert out.height == 200

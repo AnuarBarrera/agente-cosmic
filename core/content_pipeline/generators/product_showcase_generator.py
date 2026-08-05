@@ -1,3 +1,4 @@
+import io
 import logging
 import json
 import os
@@ -8,6 +9,7 @@ import uuid
 
 from django.conf import settings
 from google.cloud import storage, vision
+from PIL import Image
 
 from core.content_pipeline.image_utils import enhance_photo_classic
 from core.shared.metrics import GCS_OPERATIONS
@@ -75,6 +77,14 @@ class ProductShowcaseGenerator:
             logger.warning(f"ProductShowcaseGenerator._check_photo_safety error (fail-open): {e}")
             return ''
 
+    def _compute_photo_aspect(self, photo_bytes: bytes) -> float:
+        try:
+            with Image.open(io.BytesIO(photo_bytes)) as img:
+                return img.width / img.height
+        except Exception as e:
+            logger.warning(f"ProductShowcaseGenerator._compute_photo_aspect fallo (usando 1.0): {e}")
+            return 1.0
+
     def _generate_showcase(self, enhanced_photo_bytes: bytes, primary_color: str, secondary_color: str) -> bytes | None:
         assets_tmp_dir = os.path.join(_HYPERFRAMES_PROJECT_DIR, 'assets', 'tmp')
         os.makedirs(assets_tmp_dir, exist_ok=True)
@@ -85,6 +95,7 @@ class ProductShowcaseGenerator:
         try:
             variables = {
                 'photo_src': f'assets/tmp/{photo_filename}',
+                'photo_aspect': self._compute_photo_aspect(enhanced_photo_bytes),
                 'primary_color': primary_color,
                 'secondary_color': secondary_color,
             }
