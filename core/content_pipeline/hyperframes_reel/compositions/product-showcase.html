@@ -21,6 +21,11 @@
 <body>
   <div id="root" data-composition-id="product-showcase" data-no-timeline data-start="0" data-width="1080" data-height="1920" data-duration="6">
     <section id="scene" class="clip" data-start="0" data-duration="6" data-track-index="0">
+      <!-- data-var-src is inert here: HyperFrames only substitutes it on document
+           "DOMContentLoaded", which fires AFTER this composition's module script has
+           already run and read .src. The actual src is set manually below via
+           window.__hyperframes.getVariables(). Keep the attribute for tooling/discovery,
+           but don't assume it performs the substitution. -->
       <img id="product-photo" data-var-src="photo_src" src="assets/tmp/placeholder.png" crossorigin="anonymous" />
       <canvas id="three-canvas"></canvas>
     </section>
@@ -58,24 +63,12 @@
 
     const photoImg = document.getElementById("product-photo");
 
-    // Get variables from HyperFrames
+    // Manually set src from HyperFrames variables: data-var-src does not substitute
+    // in time for this synchronous script (see comment on the <img> tag above).
     const vars = window.__hyperframes.getVariables();
-    console.log("[Photo] HyperFrames variables: photo_src=" + vars.photo_src);
-
-    // Manually set the src if data-var-src is not being substituted
     if (vars.photo_src && vars.photo_src !== photoImg.src) {
-      console.log("[Photo] Setting src to: " + vars.photo_src);
       photoImg.src = vars.photo_src;
     }
-
-    // DIAGNOSTIC: Log photo element state
-    console.log("[Photo] id=" + photoImg.id);
-    console.log("[Photo] src=" + photoImg.src);
-    console.log("[Photo] getAttribute(data-var-src)=" + photoImg.getAttribute("data-var-src"));
-    console.log("[Photo] getAttribute(src)=" + photoImg.getAttribute("src"));
-    console.log("[Photo] complete=" + photoImg.complete);
-    console.log("[Photo] naturalWidth=" + photoImg.naturalWidth);
-    console.log("[Photo] naturalHeight=" + photoImg.naturalHeight);
 
     const photoGeometry = new THREE.PlaneGeometry(3.0, 3.0);
     const photoMaterial = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.5, metalness: 0 });
@@ -83,59 +76,18 @@
     photoMesh.position.z = 0.05;
     cardGroup.add(photoMesh);
 
-    // Create texture from canvas by drawing the image
-    const textureCanvas = document.createElement('canvas');
-    textureCanvas.width = 1024;
-    textureCanvas.height = 1024;
-    const canvasCtx = textureCanvas.getContext('2d');
-
-    // Wait for the image to load, then draw it
-    function applyCanvasTexture() {
-      if (photoImg.complete && photoImg.naturalWidth > 0) {
-        console.log("[Texture] Image ready, naturalWidth=" + photoImg.naturalWidth);
-        try {
-          // Draw the image on the canvas (fit to canvas)
-          canvasCtx.clearRect(0, 0, textureCanvas.width, textureCanvas.height);
-          canvasCtx.drawImage(photoImg, 0, 0, textureCanvas.width, textureCanvas.height);
-
-          // Check if canvas has content by sampling pixel data
-          const imageData = canvasCtx.getImageData(512, 512, 1, 1);
-          const rgba = imageData.data;
-          console.log("[Texture] Canvas center pixel RGBA: " + rgba[0] + "," + rgba[1] + "," + rgba[2] + "," + rgba[3]);
-
-          const texture = new THREE.CanvasTexture(textureCanvas);
-          texture.colorSpace = THREE.SRGBColorSpace;
-          photoMaterial.map = texture;
-          photoMaterial.needsUpdate = true;
-          console.log("[Texture] Canvas texture applied");
-        } catch (e) {
-          console.error("[Texture] Canvas error: " + e);
-          // Fallback: draw a test pattern
-          canvasCtx.fillStyle = '#FF00FF';
-          canvasCtx.fillRect(0, 0, textureCanvas.width, textureCanvas.height);
-          const texture = new THREE.CanvasTexture(textureCanvas);
-          photoMaterial.map = texture;
-          photoMaterial.needsUpdate = true;
-          console.log("[Texture] Applied test pattern (magenta)");
-        }
-      } else {
-        if (++window.__textureRetries > 20) {
-          console.log("[Texture] Max retries reached, using fallback");
-          canvasCtx.fillStyle = '#FFFF00';
-          canvasCtx.fillRect(0, 0, textureCanvas.width, textureCanvas.height);
-          const texture = new THREE.CanvasTexture(textureCanvas);
-          photoMaterial.map = texture;
-          photoMaterial.needsUpdate = true;
-        } else {
-          setTimeout(applyCanvasTexture, 100);
-        }
-      }
+    function applyPhotoTexture() {
+      const texture = new THREE.Texture(photoImg);
+      texture.needsUpdate = true;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      photoMaterial.map = texture;
+      photoMaterial.needsUpdate = true;
     }
-
-    window.__textureRetries = 0;
-    // Apply texture immediately (image should be loaded since we're in a script tag)
-    // This must happen BEFORE the first hf-seek event
-    applyCanvasTexture();
+    if (photoImg.complete && photoImg.naturalWidth > 0) {
+      applyPhotoTexture();
+    } else {
+      photoImg.addEventListener("load", applyPhotoTexture, { once: true });
+    }
 
     const PARTICLE_COUNT = 60;
     const particlePositions = new Float32Array(PARTICLE_COUNT * 3);
