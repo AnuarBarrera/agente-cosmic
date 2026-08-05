@@ -8,6 +8,14 @@ es el índice para decidir por dónde seguir.
 
 Nada de esto está implementado salvo lo marcado ✅.
 
+**Cierre de ciclo (2026-08-03)**: todas las secciones de este archivo
+están ✅ RESUELTAS o MOVIDAS, salvo **IMG-07** (sección 3, punto 4 —
+narración TTS que se corta, logging ya implementado, esperando el
+próximo caso real para diagnosticar causa exacta — no bloquea nada).
+El punto 5 (pago por calendario) se reclasificó como decisión de
+modelo de negocio y se movió a `hallazgos.txt` (HALLAZGO 85). Próximo
+uso de este archivo: reabrir con hallazgos nuevos cuando aparezcan.
+
 ---
 
 ## 0. Recién resuelto
@@ -375,27 +383,82 @@ Orden por prioridad según las propias notas del archivo:
 
 ---
 
-## 4. Migración de modelo Gemini 2.5 → 3.x
+## 4. ✅ RESUELTO (2026-08-02) — Migración de modelo Gemini 2.5 → 3.5
 
-Ver `migracionDeModelo.txt` para el detalle completo. Resumen:
+Ver `migracionDeModelo.txt` para el detalle de la investigación
+original y `docs/superpowers/specs/2026-08-02-gemini-3.5-migration-design.md`
++ `docs/superpowers/plans/2026-08-02-gemini-3.5-migration-plan.md` para
+el diseño/plan ejecutado. Resumen:
 
-- **Diferido por decisión explícita de Anuar (2026-07-31)** — no es
-  urgente, el precio no sube hasta el 28-ene-2027.
-- Ya validado con llamadas reales: `gemini-3.5-flash`,
-  `gemini-3.1-flash-image`, `gemini-3-pro-image` solo funcionan en
-  `global`, no en `us-central1` (404). Veo (todas las variantes) y
-  Gemini Omni Flash NO están disponibles en `global` — deben quedarse
-  en `us-central1`.
+- `VERTEX_TEXT_MODEL` → `gemini-3.5-flash` (validado con llamadas
+  reales), región nueva `GOOGLE_CLOUD_LOCATION_TEXT='global'` para
+  todas las llamadas de texto (Veo/Imagen 3/Omni Flash se quedan en
+  `us-central1`, no disponibles en `global`).
+- `thinking_config=ThinkingConfig(thinking_budget=0)` aplicado a los
+  11 call sites de clasificación/QC/extracción/elección de template
+  (validado con llamada real: -46%/-53% tokens, mismo output
+  correcto); generación creativa (captions, guion de reel) mantiene
+  thinking por defecto.
+- 4 tareas vía subagentes Haiku + revisión final (Opus). 689/689 tests.
+  Commiteado y subido a origin (`e3ccd70`, 2026-08-02).
 
 ---
 
-## 5. Pago por calendario individual
+## 5. Pago por calendario individual — MOVIDO
 
-Ver `docs/superpowers/specs/2026-07-28-pago-por-calendario-investigacion.md`.
+Ya no se trackea aquí. Anuar lo reclasificó (2026-08-03) como una
+decisión de **modelo de negocio**, no deuda técnica/hallazgo de
+calidad — ver **HALLAZGO 85** en `hallazgos.txt` para el detalle y el
+estado (pospuesto, sin decisión tomada).
 
-- Conclusión: hoy **no se puede** con la arquitectura actual — el
-  billing está armado 100% para suscripción recurrente de precio fijo,
-  no para pago por evento/uso. Sin decisión de producto tomada.
+---
+
+## 6. ⚠️ PENDIENTE (bloqueante para producción, 2026-08-05) — Deploy de `hyperframes_reel` requiere `npm ci` manual en el host
+
+Encontrado en la revisión final de rama del plan
+`docs/superpowers/plans/2026-08-05-product-showcase-3d-pipeline-plan.md`
+(`ProductShowcaseGenerator`, composición `product-showcase.html`).
+
+- La Tarea 1 de ese plan agregó `three` (`0.181.2`) como dependencia
+  de `core/content_pipeline/hyperframes_reel/package.json`, usada por
+  la composición Three.js que renderiza `_generate_showcase`.
+- `node_modules/` está en `.gitignore` — no se versiona.
+  `Dockerfile.worker` corre `npm ci` dentro de la imagen (línea 35),
+  así que la imagen sí trae `node_modules` con `three` instalado.
+- **Pero** `docker-compose.yml` monta el repo completo con un bind
+  mount `.:/app` en los servicios `backend` y `rqworker`. Ese mount
+  tapa el `node_modules` que la imagen construyó con el `node_modules`
+  del **host** (el directorio real en el filesystem de la VM/laptop).
+  Si el host nunca corrió `npm install`/`npm ci` para esta dependencia
+  nueva, el contenedor ve el `node_modules` viejo del host (sin
+  `three`), no el de la imagen.
+- Efecto en producción: un `git pull` + reinicio de contenedores (sin
+  tocar el host) deja `three` sin instalar en el host. `_generate_showcase`
+  (en `product_showcase_generator.py`) falla ambos intentos de forma
+  silenciosa y retorna `None` — `generate_reel` termina devolviendo el
+  mensaje genérico `'No se pudo generar el video. Vuelve a intentar.'`
+  sin ningún error visible en logs que apunte a la causa real (módulo
+  `three` no encontrado).
+- **Esto no es nuevo de esta dependencia específica**: la Parte B de
+  reels (HyperFrames) ya dependía de `gsap` de la misma forma desde
+  antes de este plan — el mismo problema ya existía, simplemente nadie
+  lo había documentado ni disparado en un deploy real hasta ahora que
+  se agregó `three` y se hizo evidente en la revisión.
+
+**Paso manual requerido** antes (o inmediatamente después) de cualquier
+deploy que toque `core/content_pipeline/hyperframes_reel/package.json`:
+
+```bash
+cd core/content_pipeline/hyperframes_reel && npm ci
+```
+
+Correrlo directamente en el host de deploy (la VM), no dentro del
+contenedor — el bind mount hace que el resultado quede en el
+filesystem del host, que es justo lo que el contenedor termina viendo.
+
+Sin decisión tomada todavía sobre automatizar esto (ej. hook de
+deploy, Dockerfile separado sin bind mount de `node_modules`,
+healthcheck que valide `three` instalado). Por ahora, checklist manual.
 
 ---
 
