@@ -151,7 +151,7 @@ def analyze_submit(request):
     requested_mode = request.POST.get('generation_mode', AnalysisJob.MODE_FULL)
     valid_modes = {
         AnalysisJob.MODE_FULL, AnalysisJob.MODE_SAMPLE_IMAGE, AnalysisJob.MODE_SAMPLE_REEL,
-        AnalysisJob.MODE_SAMPLE_PRODUCT_IMAGE, AnalysisJob.MODE_SAMPLE_PRODUCT_REEL,
+        AnalysisJob.MODE_SAMPLE_PRODUCT_REEL,
     }
     if requested_mode not in valid_modes or not get_user_plan(request.user).allows_sample_generation:
         requested_mode = AnalysisJob.MODE_FULL

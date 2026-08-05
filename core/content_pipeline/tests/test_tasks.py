@@ -242,22 +242,6 @@ def job_with_dna_sample_reel():
 
 
 @pytest.fixture
-def job_with_dna_sample_product_image():
-    job = AnalysisJob.objects.create(
-        email='t@t.com', business_url='https://tuwebmx.com',
-        status=AnalysisJob.STATUS_PROCESSING, stage=AnalysisJob.STAGE_CONTENT, progress=78,
-        generation_mode=AnalysisJob.MODE_SAMPLE_PRODUCT_IMAGE,
-        product_reference_image_path='uploads/product_ref_test.jpg',
-    )
-    BrandDNA.objects.create(
-        job=job, business_name='Gelatinas Marba', business_url='https://tuwebmx.com',
-        description='Gelatinas artesanales', keywords=['gelatinas'], audience='Familias',
-        tone='alegre', primary_colors=['#e94560'],
-    )
-    return job
-
-
-@pytest.fixture
 def job_with_dna_sample_product_reel():
     job = AnalysisJob.objects.create(
         email='t@t.com', business_url='https://tuwebmx.com',
@@ -363,38 +347,9 @@ def test_generate_sample_task_marks_failed_on_error(job_with_dna_sample_image):
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
     GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
 )
-def test_generate_sample_task_product_image_mode_creates_post(job_with_dna_sample_product_image):
-    with patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes') as mock_read, \
-         patch('core.content_pipeline.tasks.ProductReferenceGenerator') as MockGen:
-        MockGen.return_value.generate_image.return_value = ('https://storage.test/product-scene.png', '')
-
-        from core.content_pipeline.tasks import generate_sample_task
-        generate_sample_task(str(job_with_dna_sample_product_image.id))
-
-    mock_read.assert_called_once_with('uploads/product_ref_test.jpg')
-    MockGen.return_value.generate_image.assert_called_once()
-    call_kwargs = MockGen.return_value.generate_image.call_args
-    assert call_kwargs.args[0] == b'fake-photo-bytes'
-    assert call_kwargs.args[1] == 'Gelatinas Marba'
-
-    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna_sample_product_image)
-    assert posts.count() == 1
-    post = posts.first()
-    assert post.format == ContentPost.FORMAT_SINGLE
-    assert post.image_url == 'https://storage.test/product-scene.png'
-    job_with_dna_sample_product_image.refresh_from_db()
-    assert job_with_dna_sample_product_image.status == AnalysisJob.STATUS_DONE
-
-
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-)
 def test_generate_sample_task_product_reel_mode_creates_post(job_with_dna_sample_product_reel):
     with patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes'), \
-         patch('core.content_pipeline.tasks.ProductReferenceGenerator') as MockGen:
+         patch('core.content_pipeline.tasks.ProductShowcaseGenerator') as MockGen:
         MockGen.return_value.generate_reel.return_value = ('https://storage.test/video.mp4', 'https://storage.test/poster.png', '')
 
         from core.content_pipeline.tasks import generate_sample_task
@@ -414,30 +369,9 @@ def test_generate_sample_task_product_reel_mode_creates_post(job_with_dna_sample
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
     GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
 )
-def test_generate_sample_task_product_image_mode_fails_when_qc_rejects(job_with_dna_sample_product_image):
-    with patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes'), \
-         patch('core.content_pipeline.tasks.ProductReferenceGenerator') as MockGen:
-        MockGen.return_value.generate_image.return_value = ('', 'El control de calidad rechazó el resultado. Reintenta.')
-
-        from core.content_pipeline.tasks import generate_sample_task
-        generate_sample_task(str(job_with_dna_sample_product_image.id))
-
-    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna_sample_product_image)
-    assert posts.count() == 0
-    job_with_dna_sample_product_image.refresh_from_db()
-    assert job_with_dna_sample_product_image.status == AnalysisJob.STATUS_FAILED
-    assert 'calidad' in job_with_dna_sample_product_image.error_message.lower()
-
-
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-)
 def test_generate_sample_task_product_reel_mode_fails_when_qc_rejects(job_with_dna_sample_product_reel):
     with patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes'), \
-         patch('core.content_pipeline.tasks.ProductReferenceGenerator') as MockGen:
+         patch('core.content_pipeline.tasks.ProductShowcaseGenerator') as MockGen:
         MockGen.return_value.generate_reel.return_value = ('', '', 'El control de calidad rechazó el resultado. Reintenta.')
 
         from core.content_pipeline.tasks import generate_sample_task
@@ -450,10 +384,10 @@ def test_generate_sample_task_product_reel_mode_fails_when_qc_rejects(job_with_d
     assert 'calidad' in job_with_dna_sample_product_reel.error_message.lower()
 
 
-def test_generate_sample_task_product_mode_fails_without_photo():
+def test_generate_sample_task_product_reel_mode_fails_without_photo():
     job = AnalysisJob.objects.create(
         email='t@t.com', business_url='https://tuwebmx.com',
-        generation_mode=AnalysisJob.MODE_SAMPLE_PRODUCT_IMAGE,
+        generation_mode=AnalysisJob.MODE_SAMPLE_PRODUCT_REEL,
         product_reference_image_path='',
     )
     BrandDNA.objects.create(

@@ -16,7 +16,7 @@ from core.content_pipeline.generators.text_generator import TextGenerator
 from core.content_pipeline.generators.image_generator import ImageGenerator
 from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
 from core.content_pipeline.generators.reel_generator import ReelGenerator
-from core.content_pipeline.generators.product_reference_generator import ProductReferenceGenerator
+from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator
 from core.shared.gcs_uploads import read_upload
 from core.content_pipeline.email_sender import EmailSender
 from core.content_pipeline.scheduler import schedule_daily_emails
@@ -55,20 +55,13 @@ def _generate_product_reference_sample(job, brand_dna) -> None:
 
     photo_bytes = read_upload(job.product_reference_image_path)
     calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
-    product_gen = ProductReferenceGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+    product_gen = ProductShowcaseGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
 
-    if job.generation_mode == AnalysisJob.MODE_SAMPLE_PRODUCT_REEL:
-        video_url, poster_url, reason = product_gen.generate_reel(
-            photo_bytes, brand_dna.business_name, filename_prefix=f"{job.id}-product-sample",
-        )
-        image_url, fmt = poster_url, ContentPost.FORMAT_REEL
-    else:
-        image_url, reason = product_gen.generate_image(
-            photo_bytes, brand_dna.business_name, filename=f"{job.id}-product-sample",
-        )
-        video_url, fmt = '', ContentPost.FORMAT_SINGLE
+    video_url, poster_url, reason = product_gen.generate_reel(
+        photo_bytes, filename_prefix=f"{job.id}-product-sample", colors=brand_dna.primary_colors,
+    )
 
-    if not image_url and not video_url:
+    if not video_url:
         calendar.delete()
         job.mark_failed(reason or 'El control de calidad rechazó el resultado. Reintenta.')
         return
@@ -77,10 +70,10 @@ def _generate_product_reference_sample(job, brand_dna) -> None:
         calendar=calendar,
         day_number=1,
         caption='Prueba: producto real como referencia (solo admin)',
-        image_url=image_url,
+        image_url=poster_url,
         image_urls=[],
         video_url=video_url,
-        format=fmt,
+        format=ContentPost.FORMAT_REEL,
         suggested_time='09:00',
         hashtags=[],
         scheduled_at=timezone.now(),
@@ -154,7 +147,7 @@ def generate_sample_task(job_id: str) -> None:
     try:
         job.update_progress(AnalysisJob.STAGE_CONTENT, 80)
 
-        if job.generation_mode in (AnalysisJob.MODE_SAMPLE_PRODUCT_IMAGE, AnalysisJob.MODE_SAMPLE_PRODUCT_REEL):
+        if job.generation_mode == AnalysisJob.MODE_SAMPLE_PRODUCT_REEL:
             _generate_product_reference_sample(job, brand_dna)
             return
 
