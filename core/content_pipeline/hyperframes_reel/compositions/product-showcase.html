@@ -71,7 +71,7 @@
     }
 
     const photoGeometry = new THREE.PlaneGeometry(3.0, 3.0);
-    const photoMaterial = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.5, metalness: 0 });
+    const photoMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const photoMesh = new THREE.Mesh(photoGeometry, photoMaterial);
     photoMesh.position.z = 0.05;
     cardGroup.add(photoMesh);
