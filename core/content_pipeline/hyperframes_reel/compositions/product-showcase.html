@@ -19,8 +19,8 @@
   </style>
 </head>
 <body>
-  <div id="root" data-composition-id="product-showcase" data-no-timeline data-start="0" data-width="1080" data-height="1920" data-duration="6">
-    <section id="scene" class="clip" data-start="0" data-duration="6" data-track-index="0">
+  <div id="root" data-composition-id="product-showcase" data-no-timeline data-start="0" data-width="1080" data-height="1920" data-duration="8">
+    <section id="scene" class="clip" data-start="0" data-duration="8" data-track-index="0">
       <!-- data-var-src is inert here: HyperFrames only substitutes it on document
            "DOMContentLoaded", which fires AFTER this composition's module script has
            already run and read .src. The actual src is set manually below via
@@ -33,7 +33,7 @@
   <script type="module">
     import * as THREE from "three";
 
-    const DURATION = 6;
+    const DURATION = 8;
     const { primary_color, secondary_color } = window.__hyperframes.getVariables();
 
     const canvas = document.getElementById("three-canvas");
@@ -46,7 +46,8 @@
     const camera = new THREE.PerspectiveCamera(35, 1080 / 1920, 0.1, 100);
     camera.position.set(0, 0, 7);
 
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 2.2));
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x223344, 2.2);
+    scene.add(hemiLight);
     const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
     keyLight.position.set(2, 3, 4);
     scene.add(keyLight);
@@ -54,7 +55,16 @@
     const cardGroup = new THREE.Group();
     scene.add(cardGroup);
 
-    const frameGeometry = new THREE.BoxGeometry(3.4, 3.4, 0.08);
+    // FIX HALLAZGO 86: a distancia d de la camara, el semi-ancho visible es
+    // d * tan(17.5deg) * aspect ~= d * 0.1774. Con el dolly de camara yendo de
+    // z=7 a z=5.5 (foto en z~0.05), el punto mas ajustado (d~5.45) da un
+    // semi-ancho visible de ~0.967 -- CUALQUIER geometria mas ancha que eso
+    // queda fuera de camara en algun punto del dolly. FRAME_SIZE y PHOTO_SIZE
+    // se elijen con margen bajo ese limite.
+    const FRAME_SIZE = 2.0; // semi-ancho 1.0, margen bajo 0.967
+    const PHOTO_SIZE = 1.8; // semi-ancho 0.9, margen bajo 0.967 -- ya no se recorta
+
+    const frameGeometry = new THREE.BoxGeometry(FRAME_SIZE, FRAME_SIZE, 0.08);
     const frameMaterial = new THREE.MeshStandardMaterial({
       color: new THREE.Color(primary_color), roughness: 0.35, metalness: 0.15,
     });
@@ -70,7 +80,7 @@
       photoImg.src = vars.photo_src;
     }
 
-    const photoGeometry = new THREE.PlaneGeometry(3.0, 3.0);
+    const photoGeometry = new THREE.PlaneGeometry(PHOTO_SIZE, PHOTO_SIZE);
     const photoMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const photoMesh = new THREE.Mesh(photoGeometry, photoMaterial);
     photoMesh.position.z = 0.05;
@@ -93,22 +103,39 @@
     await photoImg.decode().catch(() => {});
     applyPhotoTexture();
 
-    const PARTICLE_COUNT = 60;
-    const particlePositions = new Float32Array(PARTICLE_COUNT * 3);
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      const angle = (i / PARTICLE_COUNT) * Math.PI * 2;
-      const radius = 2.6 + (i % 3) * 0.25;
-      particlePositions[i * 3] = Math.cos(angle) * radius;
-      particlePositions[i * 3 + 1] = Math.sin(angle) * radius;
-      particlePositions[i * 3 + 2] = -0.5 - (i % 3) * 0.2;
+    // "Confeti geometrico": formas 3D pequenas orbitando la tarjeta, con el
+    // color secundario de marca. Radio 1.05 -- dentro del semi-ancho visible
+    // al INICIO del dolly (~1.233), asi que se ven durante todo el recorrido
+    // salvo quiza el ultimo instante (mismo margen que FRAME_SIZE).
+    const CONFETTI_COUNT = 8;
+    const CONFETTI_RADIUS = 1.05;
+    const CONFETTI_ORBIT_SPEED = 0.6;
+    const confettiGroup = new THREE.Group();
+    scene.add(confettiGroup);
+    const confettiMeshes = [];
+    for (let i = 0; i < CONFETTI_COUNT; i++) {
+      const shapeIndex = i % 3;
+      let geometry;
+      if (shapeIndex === 0) geometry = new THREE.BoxGeometry(0.18, 0.18, 0.18);
+      else if (shapeIndex === 1) geometry = new THREE.TorusGeometry(0.12, 0.05, 8, 16);
+      else geometry = new THREE.IcosahedronGeometry(0.12, 0);
+      const material = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(secondary_color), roughness: 0.4, metalness: 0.1,
+        emissive: new THREE.Color(secondary_color), emissiveIntensity: 0.3,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.userData.angleOffset = (i / CONFETTI_COUNT) * Math.PI * 2;
+      mesh.userData.spinSpeedX = 0.8 + i * 0.05;
+      mesh.userData.spinSpeedY = 0.6 + i * 0.03;
+      confettiGroup.add(mesh);
+      confettiMeshes.push(mesh);
     }
-    const particleGeometry = new THREE.BufferGeometry();
-    particleGeometry.setAttribute("position", new THREE.BufferAttribute(particlePositions, 3));
-    const particleMaterial = new THREE.PointsMaterial({
-      color: new THREE.Color(secondary_color), size: 0.07, transparent: true, opacity: 0.85,
-    });
-    const particles = new THREE.Points(particleGeometry, particleMaterial);
-    scene.add(particles);
+
+    // Destello inicial ("pattern interrupt"): boost de intensidad de luz que
+    // decae en los primeros BURST_DURATION_SECONDS -- funcion pura de time.
+    const BURST_DURATION_SECONDS = 0.6;
+    const BURST_PEAK_INTENSITY = 2.5;
+    const KEY_LIGHT_BASE_INTENSITY = 1.2;
 
     function renderAt(time) {
       const t = Math.min(time, DURATION);
@@ -116,7 +143,19 @@
       cardGroup.rotation.y = Math.sin(t * 0.5) * 0.35;
       cardGroup.rotation.x = Math.sin(t * 0.35) * 0.08;
       cardGroup.position.y = Math.sin(t * 1.2) * 0.15;
-      particles.rotation.z = t * 0.3;
+
+      confettiMeshes.forEach((mesh) => {
+        const angle = mesh.userData.angleOffset + t * CONFETTI_ORBIT_SPEED;
+        mesh.position.x = Math.cos(angle) * CONFETTI_RADIUS;
+        mesh.position.y = Math.sin(angle) * CONFETTI_RADIUS;
+        mesh.position.z = 0.1 + Math.sin(t * 0.8 + mesh.userData.angleOffset) * 0.1;
+        mesh.rotation.x = t * mesh.userData.spinSpeedX;
+        mesh.rotation.y = t * mesh.userData.spinSpeedY;
+      });
+
+      const burst = Math.max(0, 1 - t / BURST_DURATION_SECONDS) * BURST_PEAK_INTENSITY;
+      keyLight.intensity = KEY_LIGHT_BASE_INTENSITY + burst;
+
       renderer.render(scene, camera);
     }
 
