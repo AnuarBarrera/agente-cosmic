@@ -78,22 +78,36 @@
       photoImg.src = vars.photo_src;
     }
 
-    const photoGeometry = new THREE.PlaneGeometry(PHOTO_WIDTH, PHOTO_HEIGHT);
-    const photoMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const photoMesh = new THREE.Mesh(photoGeometry, photoMaterial);
-    photoMesh.position.z = 0.05;
-    cardGroup.add(photoMesh);
+    await photoImg.decode().catch(() => {});
 
-    function applyPhotoTexture() {
+    // La foto se parte en 4 cuadrantes que vuelan desde fuera de camara y se
+    // ensamblan -- cada cuadrante usa su propia Texture (misma imagen fuente,
+    // distinto repeat/offset) para mostrar solo su porcion de la foto. Comparte
+    // el mismo ASSEMBLY_DURATION/OFFSET_DISTANCE que las barras del marco (mas
+    // abajo) para que todo encaje al mismo tiempo.
+    const qW = PHOTO_WIDTH / 2;
+    const qH = PHOTO_HEIGHT / 2;
+    const quadrantMeshes = [];
+
+    function makeQuadrant(finalX, finalY, offsetU, offsetV, startX, startY, startRotZ) {
+      const geometry = new THREE.PlaneGeometry(qW, qH);
       const texture = new THREE.Texture(photoImg);
       texture.needsUpdate = true;
       texture.colorSpace = THREE.SRGBColorSpace;
-      photoMaterial.map = texture;
-      photoMaterial.needsUpdate = true;
+      texture.repeat.set(0.5, 0.5);
+      texture.offset.set(offsetU, offsetV);
+      const material = new THREE.MeshBasicMaterial({ color: 0xffffff, map: texture });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.z = 0.05;
+      mesh.userData.finalX = finalX;
+      mesh.userData.finalY = finalY;
+      mesh.userData.startX = startX;
+      mesh.userData.startY = startY;
+      mesh.userData.startRotZ = startRotZ;
+      cardGroup.add(mesh);
+      quadrantMeshes.push(mesh);
+      return mesh;
     }
-
-    await photoImg.decode().catch(() => {});
-    applyPhotoTexture();
 
     // Marco construido con 4 barras (arriba/abajo/izquierda/derecha) en vez de
     // una sola caja solida -- permite que cada barra "vuele" desde fuera de
@@ -108,6 +122,11 @@
 
     const ASSEMBLY_DURATION = 2.0; // segundos que tardan las barras en llegar a su lugar
     const OFFSET_DISTANCE = 3.0; // unidades fuera de camara desde donde vuelan (frustum inicial semi-alto ~2.19)
+
+    makeQuadrant(-qW / 2, qH / 2, 0, 0.5, -qW / 2 - OFFSET_DISTANCE, qH / 2 + OFFSET_DISTANCE, -Math.PI / 8);
+    makeQuadrant(qW / 2, qH / 2, 0.5, 0.5, qW / 2 + OFFSET_DISTANCE, qH / 2 + OFFSET_DISTANCE, Math.PI / 8);
+    makeQuadrant(-qW / 2, -qH / 2, 0, 0, -qW / 2 - OFFSET_DISTANCE, -qH / 2 - OFFSET_DISTANCE, Math.PI / 8);
+    makeQuadrant(qW / 2, -qH / 2, 0.5, 0, qW / 2 + OFFSET_DISTANCE, -qH / 2 - OFFSET_DISTANCE, -Math.PI / 8);
 
     function makeBar(width, height, finalX, finalY, startX, startY, startRotZ) {
       const geometry = new THREE.BoxGeometry(width, height, 0.08);
@@ -153,6 +172,12 @@
         bar.position.x = THREE.MathUtils.lerp(bar.userData.startX, bar.userData.finalX, eased);
         bar.position.y = THREE.MathUtils.lerp(bar.userData.startY, bar.userData.finalY, eased);
         bar.rotation.z = THREE.MathUtils.lerp(bar.userData.startRotZ, 0, eased);
+      });
+
+      quadrantMeshes.forEach((mesh) => {
+        mesh.position.x = THREE.MathUtils.lerp(mesh.userData.startX, mesh.userData.finalX, eased);
+        mesh.position.y = THREE.MathUtils.lerp(mesh.userData.startY, mesh.userData.finalY, eased);
+        mesh.rotation.z = THREE.MathUtils.lerp(mesh.userData.startRotZ, 0, eased);
       });
 
       const burst = Math.max(0, 1 - Math.abs(t - ASSEMBLY_DURATION) / BURST_WINDOW_SECONDS) * BURST_PEAK_INTENSITY;
