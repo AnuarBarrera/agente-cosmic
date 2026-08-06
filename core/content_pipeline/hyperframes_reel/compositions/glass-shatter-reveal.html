@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="es" data-composition-variables='[
+  {"id":"photo_src","type":"string","label":"Foto del producto","default":"assets/tmp/placeholder.png"},
+  {"id":"photo_aspect","type":"number","label":"Aspect ratio de la foto (ancho/alto)","default":1},
+  {"id":"primary_color","type":"color","label":"Color primario","default":"#e94560"},
+  {"id":"secondary_color","type":"color","label":"Color secundario","default":"#3ED694"}
+]'>
+<head>
+  <meta charset="UTF-8" />
+  <title>Glass Shatter Reveal</title>
+  <script type="importmap">
+    { "imports": { "three": "./node_modules/three/build/three.module.js" } }
+  </script>
+  <style>
+    body { margin: 0; background: #0b0f14; overflow: hidden; }
+    #root { position: relative; width: 1080px; height: 1920px; overflow: hidden; }
+    .clip { position: absolute; inset: 0; }
+    #three-canvas { width: 100%; height: 100%; display: block; }
+    #product-photo { position: absolute; width: 1px; height: 1px; left: -9999px; top: -9999px; }
+  </style>
+</head>
+<body>
+  <div id="root" data-composition-id="glass-shatter-reveal" data-no-timeline data-start="0" data-width="1080" data-height="1920" data-duration="8">
+    <section id="scene" class="clip" data-start="0" data-duration="8" data-track-index="0">
+      <img id="product-photo" data-var-src="photo_src" src="assets/tmp/placeholder.png" crossorigin="anonymous" />
+      <canvas id="three-canvas"></canvas>
+    </section>
+  </div>
+  <script type="module">
+    import * as THREE from "three";
+
+    const DURATION = 8;
+    const { primary_color, secondary_color, photo_aspect } = window.__hyperframes.getVariables();
+
+    const canvas = document.getElementById("three-canvas");
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: false, antialias: true });
+    renderer.setSize(1080, 1920, false);
+    renderer.setPixelRatio(1);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b0f14);
+    const camera = new THREE.PerspectiveCamera(35, 1080 / 1920, 0.1, 100);
+    camera.position.set(0, 0, 7);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+    scene.add(ambientLight);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
+    keyLight.position.set(2, 3, 4);
+    scene.add(keyLight);
+    const fillLight = new THREE.DirectionalLight(0xaad4ff, 0.6);
+    fillLight.position.set(-3, 1, 2);
+    scene.add(fillLight);
+    const rimLight = new THREE.DirectionalLight(new THREE.Color(secondary_color), 1.5);
+    rimLight.position.set(-1, 2, -3);
+    scene.add(rimLight);
+
+    const cardGroup = new THREE.Group();
+    scene.add(cardGroup);
+
+    // Misma camara que confetti-fall.html -- mismos limites de frustum.
+    const PHOTO_MAX_WIDTH = 1.8;
+    const PHOTO_MAX_HEIGHT = 3.0;
+
+    const aspect = photo_aspect > 0 ? photo_aspect : 1;
+    const PHOTO_WIDTH = Math.min(PHOTO_MAX_WIDTH, PHOTO_MAX_HEIGHT * aspect);
+    const PHOTO_HEIGHT = PHOTO_WIDTH / aspect;
+
+    const photoImg = document.getElementById("product-photo");
+    const vars = window.__hyperframes.getVariables();
+    if (vars.photo_src && vars.photo_src !== photoImg.src) {
+      photoImg.src = vars.photo_src;
+    }
+
+    const photoGeometry = new THREE.PlaneGeometry(PHOTO_WIDTH, PHOTO_HEIGHT);
+    const photoMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const photoMesh = new THREE.Mesh(photoGeometry, photoMaterial);
+    photoMesh.position.z = 0.05;
+    cardGroup.add(photoMesh);
+
+    function applyPhotoTexture() {
+      const texture = new THREE.Texture(photoImg);
+      texture.needsUpdate = true;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      photoMaterial.map = texture;
+      photoMaterial.needsUpdate = true;
+    }
+
+    await photoImg.decode().catch(() => {});
+    applyPhotoTexture();
+
+    // Panel de vidrio en frente de la foto, dividido en una grilla 3x3 de
+    // fragmentos que en conjunto forman un panel solido en t=0 (ocultando la
+    // foto), y que se separan/desvanecen en los primeros SHATTER_DURATION
+    // segundos revelandola -- identidad de movimiento propia: "reveal
+    // dramatico".
+    const SHATTER_DURATION = 1.5;
+    const SHATTER_FLY_DISTANCE = 1.5;
+    const GRID = 3;
+    const fragW = PHOTO_WIDTH / GRID;
+    const fragH = PHOTO_HEIGHT / GRID;
+    const fragments = [];
+    for (let row = 0; row < GRID; row++) {
+      for (let col = 0; col < GRID; col++) {
+        const fragGeometry = new THREE.PlaneGeometry(fragW, fragH);
+        const fragMaterial = new THREE.MeshPhysicalMaterial({
+          color: new THREE.Color(primary_color), roughness: 0.6, metalness: 0.1,
+          clearcoat: 1.0, clearcoatRoughness: 0.05, transmission: 0.6, thickness: 0.1, ior: 1.5,
+          transparent: true, opacity: 1,
+        });
+        const frag = new THREE.Mesh(fragGeometry, fragMaterial);
+        const cx = (col - (GRID - 1) / 2) * fragW;
+        const cy = ((GRID - 1) / 2 - row) * fragH;
+        frag.position.set(cx, cy, 0.1);
+        frag.userData.finalX = cx;
+        frag.userData.finalY = cy;
+        const dirLen = Math.hypot(cx, cy) || 1;
+        frag.userData.flyX = cx + (cx / dirLen) * SHATTER_FLY_DISTANCE;
+        frag.userData.flyY = cy + (cy / dirLen) * SHATTER_FLY_DISTANCE;
+        frag.userData.spinSpeed = 1.0 + (row * GRID + col) * 0.15;
+        cardGroup.add(frag);
+        fragments.push(frag);
+      }
+    }
+
+    // Destello en el momento del impacto (t=0), igual que confetti-fall.
+    const BURST_DURATION_SECONDS = 0.6;
+    const BURST_PEAK_INTENSITY = 2.5;
+    const KEY_LIGHT_BASE_INTENSITY = 2.0;
+
+    function renderAt(time) {
+      const t = Math.min(time, DURATION);
+      camera.position.z = 7 - (t / DURATION) * 1.5;
+      cardGroup.rotation.y = Math.sin(t * 0.5) * 0.35;
+      cardGroup.rotation.x = Math.sin(t * 0.35) * 0.08;
+      cardGroup.position.y = Math.sin(t * 1.2) * 0.15;
+
+      const shatterP = Math.min(t / SHATTER_DURATION, 1);
+      const eased = shatterP * shatterP; // ease-in, se siente como una explosion
+      fragments.forEach((frag) => {
+        frag.position.x = THREE.MathUtils.lerp(frag.userData.finalX, frag.userData.flyX, eased);
+        frag.position.y = THREE.MathUtils.lerp(frag.userData.finalY, frag.userData.flyY, eased);
+        frag.rotation.z = eased * frag.userData.spinSpeed * Math.PI;
+        frag.material.opacity = 1 - eased;
+      });
+
+      const burst = Math.max(0, 1 - t / BURST_DURATION_SECONDS) * BURST_PEAK_INTENSITY;
+      keyLight.intensity = KEY_LIGHT_BASE_INTENSITY + burst;
+
+      renderer.render(scene, camera);
+    }
+
+    window.addEventListener("hf-seek", (event) => {
+      renderAt(event.detail.time);
+    });
+
+    renderAt(window.__hfThreeTime || 0);
+  </script>
+</body>
+</html>
