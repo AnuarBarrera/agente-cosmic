@@ -140,27 +140,54 @@
     // de web noventera"). Cada pieza tiene X fijo y una fase de caida propia,
     // ambos deterministicos (formula por indice, sin Math.random). Recicla
     // via modulo: al salir por abajo del rango, reaparece arriba.
+    //
+    // FIX feedback Anuar (fix round 1): pseudoRandom() es una funcion pura de
+    // la semilla (parte fraccionaria de un seno escalado) -- determinista,
+    // cero entropia real, cero Math.random(). Se usa para (a) mezclar colores
+    // de marca por pieza (sin inventar colores nuevos) y (b) descorrelacionar
+    // startX/startOffset entre si, para que la dispersion no se vea como una
+    // franja diagonal (X y fase de caida ya no dependen linealmente de i).
+    function pseudoRandom(seed) {
+      const x = Math.sin(seed * 12.9898) * 43758.5453;
+      return x - Math.floor(x); // parte fraccionaria, siempre en [0,1)
+    }
+
+    // Forma unica "gota" (teardrop) por pedido de Anuar, en vez de
+    // Box/Torus/Icosahedron alternados. Geometria compartida entre las 10
+    // piezas (valido y mas eficiente en Three.js reutilizar el mismo objeto
+    // de geometria en varios meshes) -- solo cambia el material/color.
+    function createDropGeometry(size) {
+      const points = [
+        new THREE.Vector2(0.00, -0.60 * size),
+        new THREE.Vector2(0.42 * size, -0.35 * size),
+        new THREE.Vector2(0.55 * size, 0.00),
+        new THREE.Vector2(0.40 * size, 0.30 * size),
+        new THREE.Vector2(0.22 * size, 0.52 * size),
+        new THREE.Vector2(0.08 * size, 0.68 * size),
+        new THREE.Vector2(0.00, 0.80 * size),
+      ];
+      return new THREE.LatheGeometry(points, 14);
+    }
+
     const CONFETTI_COUNT = 10;
     const CONFETTI_SPREAD_X = 0.85; // semi-ancho, margen bajo el limite mas ajustado (0.967)
     const CONFETTI_FALL_RANGE = 3.0; // recorrido vertical total, de +1.5 a -1.5 (margen bajo 1.719)
     const CONFETTI_FALL_SPEED = 0.5; // unidades/segundo
+    const dropGeometry = createDropGeometry(0.14);
     const confettiGroup = new THREE.Group();
     scene.add(confettiGroup);
     const confettiMeshes = [];
     for (let i = 0; i < CONFETTI_COUNT; i++) {
-      const shapeIndex = i % 3;
-      let geometry;
-      if (shapeIndex === 0) geometry = new THREE.BoxGeometry(0.16, 0.16, 0.16);
-      else if (shapeIndex === 1) geometry = new THREE.TorusGeometry(0.1, 0.045, 8, 16);
-      else geometry = new THREE.IcosahedronGeometry(0.11, 0);
+      const mixT = pseudoRandom(i * 7.73);
+      const pieceColor = new THREE.Color(secondary_color).lerp(new THREE.Color(primary_color), mixT);
       const material = new THREE.MeshPhysicalMaterial({
-        color: new THREE.Color(secondary_color), roughness: 0.15, metalness: 0.0,
+        color: pieceColor, roughness: 0.15, metalness: 0.0,
         clearcoat: 1.0, clearcoatRoughness: 0.1, transmission: 0.5, thickness: 0.2, ior: 1.4,
-        emissive: new THREE.Color(secondary_color), emissiveIntensity: 0.15,
+        emissive: pieceColor, emissiveIntensity: 0.15,
       });
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.userData.startX = (i / (CONFETTI_COUNT - 1) * 2 - 1) * CONFETTI_SPREAD_X;
-      mesh.userData.startOffset = (i / CONFETTI_COUNT) * CONFETTI_FALL_RANGE;
+      const mesh = new THREE.Mesh(dropGeometry, material);
+      mesh.userData.startX = (pseudoRandom(i * 2.17) * 2 - 1) * CONFETTI_SPREAD_X;
+      mesh.userData.startOffset = pseudoRandom(i * 5.31) * CONFETTI_FALL_RANGE;
       mesh.userData.spinSpeedX = 0.8 + i * 0.05;
       mesh.userData.spinSpeedY = 0.6 + i * 0.03;
       mesh.userData.zWobbleOffset = i * 0.7;
