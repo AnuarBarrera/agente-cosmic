@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="es" data-composition-variables='[
+  {"id":"photo_src","type":"string","label":"Foto del producto","default":"assets/tmp/placeholder.png"},
+  {"id":"photo_aspect","type":"number","label":"Aspect ratio de la foto (ancho/alto)","default":1},
+  {"id":"primary_color","type":"color","label":"Color primario","default":"#e94560"},
+  {"id":"secondary_color","type":"color","label":"Color secundario","default":"#3ED694"}
+]'>
+<head>
+  <meta charset="UTF-8" />
+  <title>Frame Assembly</title>
+  <script type="importmap">
+    { "imports": { "three": "./node_modules/three/build/three.module.js" } }
+  </script>
+  <style>
+    body { margin: 0; background: #0b0f14; overflow: hidden; }
+    #root { position: relative; width: 1080px; height: 1920px; overflow: hidden; }
+    .clip { position: absolute; inset: 0; }
+    #three-canvas { width: 100%; height: 100%; display: block; }
+    #product-photo { position: absolute; width: 1px; height: 1px; left: -9999px; top: -9999px; }
+  </style>
+</head>
+<body>
+  <div id="root" data-composition-id="frame-assembly" data-no-timeline data-start="0" data-width="1080" data-height="1920" data-duration="8">
+    <section id="scene" class="clip" data-start="0" data-duration="8" data-track-index="0">
+      <!-- data-var-src is inert here: HyperFrames only substitutes it on document
+           "DOMContentLoaded", which fires AFTER this composition's module script has
+           already run and read .src. The actual src is set manually below via
+           window.__hyperframes.getVariables(). -->
+      <img id="product-photo" data-var-src="photo_src" src="assets/tmp/placeholder.png" crossorigin="anonymous" />
+      <canvas id="three-canvas"></canvas>
+    </section>
+  </div>
+  <script type="module">
+    import * as THREE from "three";
+
+    const DURATION = 8;
+    const { primary_color, secondary_color, photo_aspect } = window.__hyperframes.getVariables();
+
+    const canvas = document.getElementById("three-canvas");
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: false, antialias: true });
+    renderer.setSize(1080, 1920, false);
+    renderer.setPixelRatio(1);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b0f14);
+    const camera = new THREE.PerspectiveCamera(35, 1080 / 1920, 0.1, 100);
+    camera.position.set(0, 0, 7);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+    scene.add(ambientLight);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
+    keyLight.position.set(2, 3, 4);
+    scene.add(keyLight);
+    const fillLight = new THREE.DirectionalLight(0xaad4ff, 0.6);
+    fillLight.position.set(-3, 1, 2);
+    scene.add(fillLight);
+    const rimLight = new THREE.DirectionalLight(new THREE.Color(secondary_color), 1.5);
+    rimLight.position.set(-1, 2, -3);
+    scene.add(rimLight);
+
+    const cardGroup = new THREE.Group();
+    scene.add(cardGroup);
+
+    // Misma camara que confetti-fall.html -- mismos limites de frustum
+    // (HALLAZGO 86/87): semi-ancho visible ~0.967-1.233, semi-alto visible
+    // ~1.719-2.192 segun el punto del dolly (z=7 a z=5.5).
+    const PHOTO_MAX_WIDTH = 1.8;
+    const PHOTO_MAX_HEIGHT = 3.0;
+    const BORDER_THICKNESS = 0.1; // grosor de cada barra del marco (borde visible)
+
+    const aspect = photo_aspect > 0 ? photo_aspect : 1;
+    const PHOTO_WIDTH = Math.min(PHOTO_MAX_WIDTH, PHOTO_MAX_HEIGHT * aspect);
+    const PHOTO_HEIGHT = PHOTO_WIDTH / aspect;
+
+    const photoImg = document.getElementById("product-photo");
+    const vars = window.__hyperframes.getVariables();
+    if (vars.photo_src && vars.photo_src !== photoImg.src) {
+      photoImg.src = vars.photo_src;
+    }
+
+    const photoGeometry = new THREE.PlaneGeometry(PHOTO_WIDTH, PHOTO_HEIGHT);
+    const photoMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const photoMesh = new THREE.Mesh(photoGeometry, photoMaterial);
+    photoMesh.position.z = 0.05;
+    cardGroup.add(photoMesh);
+
+    function applyPhotoTexture() {
+      const texture = new THREE.Texture(photoImg);
+      texture.needsUpdate = true;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      photoMaterial.map = texture;
+      photoMaterial.needsUpdate = true;
+    }
+
+    await photoImg.decode().catch(() => {});
+    applyPhotoTexture();
+
+    // Marco construido con 4 barras (arriba/abajo/izquierda/derecha) en vez de
+    // una sola caja solida -- permite que cada barra "vuele" desde fuera de
+    // camara y se ensamble en su lugar (identidad de movimiento propia de
+    // este template: "reveal por construccion").
+    const barMaterial = new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color(primary_color),
+      roughness: 0.2, metalness: 0.0,
+      clearcoat: 1.0, clearcoatRoughness: 0.15,
+      transmission: 0.4, thickness: 0.3, ior: 1.45,
+    });
+
+    const ASSEMBLY_DURATION = 2.0; // segundos que tardan las barras en llegar a su lugar
+    const OFFSET_DISTANCE = 3.0; // unidades fuera de camara desde donde vuelan (frustum inicial semi-alto ~2.19)
+
+    function makeBar(width, height, finalX, finalY, startX, startY, startRotZ) {
+      const geometry = new THREE.BoxGeometry(width, height, 0.08);
+      const mesh = new THREE.Mesh(geometry, barMaterial);
+      mesh.userData.finalX = finalX;
+      mesh.userData.finalY = finalY;
+      mesh.userData.startX = startX;
+      mesh.userData.startY = startY;
+      mesh.userData.startRotZ = startRotZ;
+      cardGroup.add(mesh);
+      return mesh;
+    }
+
+    const topBarY = PHOTO_HEIGHT / 2 + BORDER_THICKNESS / 2;
+    const bottomBarY = -topBarY;
+    const sideBarX = PHOTO_WIDTH / 2 + BORDER_THICKNESS / 2;
+    const barWidth = PHOTO_WIDTH + 2 * BORDER_THICKNESS;
+
+    const frameBars = [
+      makeBar(barWidth, BORDER_THICKNESS, 0, topBarY, 0, topBarY + OFFSET_DISTANCE, Math.PI / 6),
+      makeBar(barWidth, BORDER_THICKNESS, 0, bottomBarY, 0, bottomBarY - OFFSET_DISTANCE, -Math.PI / 6),
+      makeBar(BORDER_THICKNESS, PHOTO_HEIGHT, -sideBarX, 0, -sideBarX - OFFSET_DISTANCE, 0, -Math.PI / 4),
+      makeBar(BORDER_THICKNESS, PHOTO_HEIGHT, sideBarX, 0, sideBarX + OFFSET_DISTANCE, 0, Math.PI / 4),
+    ];
+
+    // Destello ("pattern interrupt") centrado en el momento en que el marco
+    // termina de ensamblarse (t=ASSEMBLY_DURATION), no al inicio -- se siente
+    // como un "click" al encajar en su lugar.
+    const BURST_WINDOW_SECONDS = 0.4;
+    const BURST_PEAK_INTENSITY = 2.0;
+    const KEY_LIGHT_BASE_INTENSITY = 2.0;
+
+    function renderAt(time) {
+      const t = Math.min(time, DURATION);
+      camera.position.z = 7 - (t / DURATION) * 1.5;
+      cardGroup.rotation.y = Math.sin(t * 0.5) * 0.35;
+      cardGroup.rotation.x = Math.sin(t * 0.35) * 0.08;
+      cardGroup.position.y = Math.sin(t * 1.2) * 0.15;
+
+      const assembleP = Math.min(t / ASSEMBLY_DURATION, 1);
+      const eased = 1 - Math.pow(1 - assembleP, 3); // ease-out cubico
+      frameBars.forEach((bar) => {
+        bar.position.x = THREE.MathUtils.lerp(bar.userData.startX, bar.userData.finalX, eased);
+        bar.position.y = THREE.MathUtils.lerp(bar.userData.startY, bar.userData.finalY, eased);
+        bar.rotation.z = THREE.MathUtils.lerp(bar.userData.startRotZ, 0, eased);
+      });
+
+      const burst = Math.max(0, 1 - Math.abs(t - ASSEMBLY_DURATION) / BURST_WINDOW_SECONDS) * BURST_PEAK_INTENSITY;
+      keyLight.intensity = KEY_LIGHT_BASE_INTENSITY + burst;
+
+      renderer.render(scene, camera);
+    }
+
+    window.addEventListener("hf-seek", (event) => {
+      renderAt(event.detail.time);
+    });
+
+    renderAt(window.__hfThreeTime || 0);
+  </script>
+</body>
+</html>
