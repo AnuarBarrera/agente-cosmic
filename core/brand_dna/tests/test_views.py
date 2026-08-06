@@ -198,6 +198,49 @@ def test_analyze_submit_rejects_invalid_product_reference_photo(user, free_plan)
     assert b'no es una imagen v\xc3\xa1lida' in response.content
 
 
+def test_analyze_submit_logo_upload_failure_shows_error_and_does_not_orphan_job(user):
+    # HALLAZGO (2026-08-06): si la subida a GCS truena (ej. credenciales de
+    # Google expiradas) DESPUES de crear el AnalysisJob pero ANTES de
+    # encolar la tarea, el job queda huerfano en 'pending' para siempre
+    # (nunca llega a RQ) y ademas bloquea reintentos legitimos via el guard
+    # de duplicados. El fix crea el job SOLO si todas las subidas ya
+    # tuvieron exito.
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.django_rq') as mock_rq, \
+         patch('core.brand_dna.moderation.check_business_legitimacy', return_value=(True, '')), \
+         patch('core.brand_dna.views.save_upload', side_effect=Exception('boom')):
+        response = c.post('/analizar/', {
+            'business_name': 'Tu Web MX',
+            'business_description': 'Agencia digital que hace sitios web.',
+            'logo': _fake_product_photo(),
+        })
+    assert response.status_code == 200
+    assert b'No pudimos subir tu logo' in response.content
+    assert not AnalysisJob.objects.filter(user=user).exists()
+    mock_rq.enqueue.assert_not_called()
+
+
+def test_analyze_submit_product_photo_upload_failure_shows_error_and_does_not_orphan_job(user, free_plan):
+    free_plan.allows_sample_generation = True
+    free_plan.save(update_fields=['allows_sample_generation'])
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.django_rq') as mock_rq, \
+         patch('core.brand_dna.moderation.check_business_legitimacy', return_value=(True, '')), \
+         patch('core.brand_dna.views.save_upload', side_effect=Exception('boom')):
+        response = c.post('/analizar/', {
+            'business_name': 'Gelatinas Marba',
+            'business_description': 'Gelatinas artesanales.',
+            'generation_mode': 'sample_product_reel',
+            'product_reference_photo': _fake_product_photo(),
+        })
+    assert response.status_code == 200
+    assert b'No pudimos subir tu foto de producto' in response.content
+    assert not AnalysisJob.objects.filter(user=user).exists()
+    mock_rq.enqueue.assert_not_called()
+
+
 def test_analyze_submit_ignores_product_mode_without_permission(user):
     c = Client()
     c.force_login(user)

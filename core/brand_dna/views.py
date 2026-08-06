@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time as _time
+import uuid
 from urllib.parse import urlparse
 import django_rq
 import google.genai as genai
@@ -156,13 +157,13 @@ def analyze_submit(request):
     if requested_mode not in valid_modes or not get_user_plan(request.user).allows_sample_generation:
         requested_mode = AnalysisJob.MODE_FULL
 
-    job = AnalysisJob.objects.create(
-        email=email,
-        business_url=business_url,
-        business_description=business_description,
-        user=request.user,
-        generation_mode=requested_mode,
-    )
+    # HALLAZGO (2026-08-06): las subidas a GCS se resuelven ANTES de crear el
+    # AnalysisJob (y no al reves, como antes) -- si truenan (ej. credenciales
+    # de Google expiradas), no queda ningun job huerfano en 'pending' que
+    # nunca se encola y bloquea reintentos legitimos via el guard de arriba.
+    job_id = uuid.uuid4()
+    logo_path = ''
+    product_reference_path = ''
 
     if 'logo' in request.FILES:
         logo_file = request.FILES['logo']
@@ -170,10 +171,14 @@ def analyze_submit(request):
         if not _validate_image_bytes(logo_bytes):
             return render(request, 'brand_dna/new_analysis.html', {'error': 'El logo no es una imagen válida.'})
         ext = _safe_extension(logo_file.name)
-        logo_path = f'uploads/logo_{job.id}.{ext}'
-        save_upload(logo_bytes, logo_path)
-        job.logo_file_path = logo_path
-        job.save(update_fields=['logo_file_path'])
+        logo_path = f'uploads/logo_{job_id}.{ext}'
+        try:
+            save_upload(logo_bytes, logo_path)
+        except Exception:
+            logger.exception('Fallo al subir el logo a GCS (job_id=%s)', job_id)
+            return render(request, 'brand_dna/new_analysis.html', {
+                'error': 'No pudimos subir tu logo. Intenta de nuevo en unos minutos.',
+            })
 
     if 'product_reference_photo' in request.FILES:
         photo_file = request.FILES['product_reference_photo']
@@ -181,10 +186,25 @@ def analyze_submit(request):
         if not _validate_image_bytes(photo_bytes):
             return render(request, 'brand_dna/new_analysis.html', {'error': 'La foto del producto no es una imagen válida.'})
         ext = _safe_extension(photo_file.name)
-        photo_path = f'uploads/product_ref_{job.id}.{ext}'
-        save_upload(photo_bytes, photo_path)
-        job.product_reference_image_path = photo_path
-        job.save(update_fields=['product_reference_image_path'])
+        product_reference_path = f'uploads/product_ref_{job_id}.{ext}'
+        try:
+            save_upload(photo_bytes, product_reference_path)
+        except Exception:
+            logger.exception('Fallo al subir la foto de producto a GCS (job_id=%s)', job_id)
+            return render(request, 'brand_dna/new_analysis.html', {
+                'error': 'No pudimos subir tu foto de producto. Intenta de nuevo en unos minutos.',
+            })
+
+    job = AnalysisJob.objects.create(
+        id=job_id,
+        email=email,
+        business_url=business_url,
+        business_description=business_description,
+        user=request.user,
+        generation_mode=requested_mode,
+        logo_file_path=logo_path,
+        product_reference_image_path=product_reference_path,
+    )
 
     from core.brand_dna.tasks import analyze_brand_task
     django_rq.enqueue(analyze_brand_task, str(job.id))
