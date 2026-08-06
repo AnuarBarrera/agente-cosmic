@@ -2,7 +2,8 @@
 <html lang="es" data-composition-variables='[
   {"id":"photo_src","type":"string","label":"Foto del producto","default":"assets/tmp/placeholder.png"},
   {"id":"photo_aspect","type":"number","label":"Aspect ratio de la foto (ancho/alto)","default":1},
-  {"id":"secondary_color","type":"color","label":"Color secundario","default":"#3ED694"}
+  {"id":"secondary_color","type":"color","label":"Color secundario","default":"#3ED694"},
+  {"id":"camera_motion","type":"string","label":"Movimiento de camara","default":"sway_dolly"}
 ]'>
 <head>
   <meta charset="UTF-8" />
@@ -29,7 +30,7 @@
     import * as THREE from "three";
 
     const DURATION = 8;
-    const { secondary_color, photo_aspect } = window.__hyperframes.getVariables();
+    const { secondary_color, photo_aspect, camera_motion } = window.__hyperframes.getVariables();
 
     const canvas = document.getElementById("three-canvas");
     const renderer = new THREE.WebGLRenderer({ canvas, alpha: false, antialias: true });
@@ -179,12 +180,56 @@
     const BURST_PEAK_INTENSITY = 2.5;
     const KEY_LIGHT_BASE_INTENSITY = 2.0;
 
-    function renderAt(time) {
-      const t = Math.min(time, DURATION);
+    // 3 movimientos de camara seleccionables independientemente del efecto de
+    // este template (feedback Anuar: el balanceo/dolly no debe ser la norma
+    // fija de todo video). swayDolly es el comportamiento historico (Fase A/B)
+    // -- debe quedar visualmente identico a como estaba antes de este cambio.
+    // Ninguna de las 3 acerca la camara a menos de 5.45 unidades del origen
+    // (limite mas ajustado ya validado, HALLAZGO 86/87) para no recortar la foto.
+    function applyCameraMotion_swayDolly(t, camera, cardGroup) {
+      camera.position.x = 0;
       camera.position.z = 7 - (t / DURATION) * 1.5;
       cardGroup.rotation.y = Math.sin(t * 0.5) * 0.35;
       cardGroup.rotation.x = Math.sin(t * 0.35) * 0.08;
       cardGroup.position.y = Math.sin(t * 1.2) * 0.15;
+    }
+
+    function applyCameraMotion_staticHold(t, camera, cardGroup) {
+      camera.position.x = 0;
+      camera.position.z = 6; // por encima del limite de 5.45, sin balanceo
+      cardGroup.rotation.y = 0;
+      cardGroup.rotation.x = 0;
+      cardGroup.position.y = 0;
+    }
+
+    function applyCameraMotion_slowOrbit(t, camera, cardGroup) {
+      // Radio CONSTANTE (nunca menor a 5.45): x = sin(angulo)*radio,
+      // z = cos(angulo)*radio siempre da distancia = radio al origen,
+      // sea cual sea el angulo -- por eso es seguro aunque el angulo cambie.
+      const radius = 6.5;
+      const ARC_RANGE = 0.6; // radianes de vaiven (~34 grados), arco lento y sutil
+      const angle = Math.sin(t * 0.25) * ARC_RANGE;
+      camera.position.x = Math.sin(angle) * radius;
+      camera.position.z = Math.cos(angle) * radius;
+      camera.lookAt(0, 0, 0);
+      cardGroup.rotation.y = 0;
+      cardGroup.rotation.x = 0;
+      cardGroup.position.y = 0;
+    }
+
+    const _cameraMotionFns = {
+      sway_dolly: applyCameraMotion_swayDolly,
+      static_hold: applyCameraMotion_staticHold,
+      slow_orbit: applyCameraMotion_slowOrbit,
+    };
+    function applyCameraMotion(t, camera, cardGroup) {
+      const fn = _cameraMotionFns[camera_motion] || applyCameraMotion_swayDolly;
+      fn(t, camera, cardGroup);
+    }
+
+    function renderAt(time) {
+      const t = Math.min(time, DURATION);
+      applyCameraMotion(t, camera, cardGroup);
 
       const shatterP = Math.min(t / SHATTER_DURATION, 1);
       const eased = shatterP * shatterP; // ease-in, se siente como una explosion
