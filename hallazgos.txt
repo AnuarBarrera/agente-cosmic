@@ -4397,3 +4397,52 @@ Nota para Fase B (catálogo de templates): a partir de ahora cualquier
 Severidad: Alta — pérdida real de contenido de marca/producto en el
   entregable final, no solo estético.
 Prioridad: Cerrado.
+
+=================================================================
+HALLAZGO 88 — Spike de validación de rendimiento: GLB animado con
+  esqueleto (SkinnedMesh + AnimationMixer) para el catálogo de
+  templates de personaje (Fase B)
+Categoría: Spike de performance (bloqueante, Plan de catálogo de
+  personajes 2026-08-06)
+Estado: ✅ RESUELTO — 2026-08-06 (spike ejecutado, veredicto GO)
+=================================================================
+Contexto: antes de construir los 3 templates completos del catálogo de
+  showcase con personaje (Tareas 4-6), había que confirmar que un GLB
+  con esqueleto (`mascot.glb`, modelo Xbot de Three.js, `SkinnedMesh` +
+  `AnimationMixer`) no repite la regresión de rendimiento real que ya
+  causó un timeout en producción con `MeshPhysicalMaterial.transmission`
+  (Fase B de HALLAZGO 86/87, corregida en `53db9f4`). Esa regresión solo
+  se detectó corriendo el render a través del pipeline real (`rqworker`,
+  con su timeout real de 120s) — nunca con `hyperframes render` suelto
+  por CLI (sin timeout). Este spike repite ese mismo método: composición
+  mínima (`_spike-character-perf-test.html`, temporal, ya borrada) que
+  carga `mascot.glb`, reproduce el primer clip disponible con
+  `AnimationMixer`, y se renderiza vía
+  `ProductShowcaseGenerator._generate_showcase` dentro del contenedor
+  que realmente ejecuta el pipeline en producción.
+
+Nota de entorno (no estaba en el brief original): el comando de medición
+  debe apuntar al contenedor `rqworker` (`Dockerfile.worker`, con
+  Node.js instalado), no a `backend` (`Dockerfile`, sin Node.js) — al
+  correrlo contra `backend` el subproceso `hyperframes render` falla con
+  exit 127 (`node: command not found`) antes de medir nada real. `_generate_showcase`
+  es el mismo código en ambos contenedores (repo montado completo), pero
+  solo `rqworker` tiene el binario `node` en el PATH, que es donde corre
+  el pipeline real de producción.
+
+Medido a través del pipeline real (`ProductShowcaseGenerator._generate_showcase`
+  dentro de `rqworker`, no CLI suelto), 2 corridas para descartar ruido:
+  32.1s y 32.1s para un `SkinnedMesh` + `AnimationMixer` (clip "agree",
+  1.83s) vs el timeout de 120s. Verificado sin jobs reales compitiendo
+  por CPU (`AnalysisJob.objects.filter(status='processing').count()` = 0
+  antes de medir).
+
+Veredicto: GO. 32.1s está holgadamente por debajo del margen de 90s
+  (25% bajo el timeout de 120s, mismo criterio de margen real usado en
+  Fase B) — de hecho por debajo del 30% del timeout total. Ningún
+  indicio de la regresión de `transmission`. Las Tareas 3-7 del plan de
+  catálogo de personajes pueden continuar sin cambios de alcance
+  (poly count del GLB, elección del pack, etc.).
+
+Severidad: N/A — spike de validación, no bug.
+Prioridad: Cerrado.
