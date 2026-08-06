@@ -35,6 +35,17 @@ _SHOWCASE_COMPOSITIONS = {
     'frame-assembly': 'compositions/frame-assembly.html',
     'glass-shatter-reveal': 'compositions/glass-shatter-reveal.html',
 }
+# Offset (segundos) para extraer el frame que se usa como poster/miniatura.
+# Debe caer DESPUES de que el reveal de cada template haya terminado --
+# revision final de rama (I2): con un 1.0 fijo, frame-assembly (reveal de
+# ASSEMBLY_DURATION=2.0s) y glass-shatter-reveal (SHATTER_DURATION=1.5s)
+# quedaban a mitad de su animacion y la miniatura salia rota (foto partida
+# por una cruz negra, o tapada por fragmentos semi-opacos).
+_SHOWCASE_POSTER_OFFSETS = {
+    'confetti-fall': 1.0,
+    'frame-assembly': 2.5,
+    'glass-shatter-reveal': 2.0,
+}
 
 _SCREENSHOT_LABELS = {'screenshot', 'user interface', 'software'}
 _SCREENSHOT_LABEL_THRESHOLD = 0.5
@@ -238,7 +249,7 @@ class ProductShowcaseGenerator:
             if video_bytes is None:
                 return '', '', 'No se pudo generar el video. Vuelve a intentar.'
 
-            poster_bytes = self._extract_frame(video_bytes, offset_seconds=1.0)
+            poster_bytes = self._extract_frame(video_bytes, offset_seconds=_SHOWCASE_POSTER_OFFSETS[template])
             poster_url = self._upload_to_storage(
                 poster_bytes if poster_bytes else enhanced_bytes, f'{filename_prefix}-poster', 'image/png', 'product-samples',
             )

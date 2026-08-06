@@ -81,7 +81,14 @@
     // elegidos con margen bajo los limites de camara de arriba.
     const PHOTO_MAX_WIDTH = 1.8; // semi-ancho 0.9, margen bajo 0.967
     const PHOTO_MAX_HEIGHT = 3.0; // semi-alto 1.5, margen bajo 1.719
-    const FRAME_MARGIN = 0.2; // borde de marco visible alrededor de la foto
+    // borde de marco visible alrededor de la foto. OJO: este margen es correcto
+    // solo para la FOTO (semi-ancho 0.9 < 0.9755 visible a z=5.5). El borde
+    // decorativo del marco SI extiende la geometria real a semi-ancho 1.0
+    // (PHOTO_WIDTH/2 + FRAME_MARGIN), que se recorta minimamente en el punto
+    // mas ajustado del dolly (semi-ancho visible 0.9755 a z=5.5). Es
+    // preexistente de Fase A, afecta solo al borde (nunca a la foto), y ya
+    // fue aprobado visualmente asi -- trade-off aceptado, no un bug.
+    const FRAME_MARGIN = 0.2;
 
     const aspect = photo_aspect > 0 ? photo_aspect : 1;
     const PHOTO_WIDTH = Math.min(PHOTO_MAX_WIDTH, PHOTO_MAX_HEIGHT * aspect);
@@ -89,19 +96,20 @@
     const FRAME_WIDTH = PHOTO_WIDTH + FRAME_MARGIN;
     const FRAME_HEIGHT = PHOTO_HEIGHT + FRAME_MARGIN;
 
-    // Material tipo vidrio (antes: MeshStandardMaterial plano). transmission
-    // usa el backbuffer del propio renderer para "ver a traves" -- funciona
-    // sin un environment map manual. Si en el render real se ve demasiado
-    // transparente/invisible contra el fondo oscuro, reducir transmission a
-    // ~0.2 y subir roughness/clearcoatRoughness; si aun asi no convence,
-    // fallback aceptable: transmission=0, solo roughness bajo + clearcoat
-    // (sigue siendo mejora real sobre MeshStandardMaterial plano).
+    // Material tipo vidrio (antes: MeshStandardMaterial plano). Se probo
+    // transmission (backbuffer del propio renderer para "ver a traves", sin
+    // environment map manual) pero se quito por completo (revision final de
+    // rama, C1): cada objeto con transmission > 0 fuerza una pasada de render
+    // extra por frame, y con 11 objetos transmisivos (este marco + 10 gotas
+    // mas abajo) el render end-to-end excedia el timeout de 120s en
+    // produccion (medido: timeout/None vs 43.3s del baseline sin
+    // transmission). roughness bajo + clearcoat siguen dando aspecto de
+    // vidrio con brillo sin ese costo -- NO reintroducir transmission aqui.
     const frameGeometry = new THREE.BoxGeometry(FRAME_WIDTH, FRAME_HEIGHT, 0.08);
     const frameMaterial = new THREE.MeshPhysicalMaterial({
       color: new THREE.Color(primary_color),
       roughness: 0.2, metalness: 0.0,
       clearcoat: 1.0, clearcoatRoughness: 0.15,
-      transmission: 0.4, thickness: 0.3, ior: 1.45,
     });
     const frame = new THREE.Mesh(frameGeometry, frameMaterial);
     cardGroup.add(frame);
@@ -188,7 +196,7 @@
       const pieceColor = new THREE.Color(DROP_COLOR_SKY).lerp(new THREE.Color(DROP_COLOR_WHITE), mixT);
       const material = new THREE.MeshPhysicalMaterial({
         color: pieceColor, roughness: 0.15, metalness: 0.0,
-        clearcoat: 1.0, clearcoatRoughness: 0.1, transmission: 0.5, thickness: 0.2, ior: 1.4,
+        clearcoat: 1.0, clearcoatRoughness: 0.1,
         emissive: pieceColor, emissiveIntensity: 0.15,
       });
       const mesh = new THREE.Mesh(dropGeometry, material);

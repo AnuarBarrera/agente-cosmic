@@ -417,7 +417,9 @@ estado (pospuesto, sin decisión tomada).
 
 Encontrado en la revisión final de rama del plan
 `docs/superpowers/plans/2026-08-05-product-showcase-3d-pipeline-plan.md`
-(`ProductShowcaseGenerator`, composición `product-showcase.html`).
+(`ProductShowcaseGenerator`, composiciones de `hyperframes_reel` —
+catálogo de 3 templates: `confetti-fall.html`, `frame-assembly.html`,
+`glass-shatter-reveal.html`).
 
 - La Tarea 1 de ese plan agregó `three` (`0.181.2`) como dependencia
   de `core/content_pipeline/hyperframes_reel/package.json`, usada por

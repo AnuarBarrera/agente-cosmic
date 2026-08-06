@@ -2,7 +2,6 @@
 <html lang="es" data-composition-variables='[
   {"id":"photo_src","type":"string","label":"Foto del producto","default":"assets/tmp/placeholder.png"},
   {"id":"photo_aspect","type":"number","label":"Aspect ratio de la foto (ancho/alto)","default":1},
-  {"id":"primary_color","type":"color","label":"Color primario","default":"#e94560"},
   {"id":"secondary_color","type":"color","label":"Color secundario","default":"#3ED694"}
 ]'>
 <head>
@@ -30,7 +29,7 @@
     import * as THREE from "three";
 
     const DURATION = 8;
-    const { primary_color, secondary_color, photo_aspect } = window.__hyperframes.getVariables();
+    const { secondary_color, photo_aspect } = window.__hyperframes.getVariables();
 
     const canvas = document.getElementById("three-canvas");
     const renderer = new THREE.WebGLRenderer({ canvas, alpha: false, antialias: true });
@@ -149,9 +148,17 @@
 
         const mixT = pseudoRandom((row * GRID + col) * 7.73);
         const fragColor = new THREE.Color(GLASS_COLOR_SKY).lerp(new THREE.Color(GLASS_COLOR_WHITE), mixT);
+        // roughness 0.6 (el brief original pedia 0.1): con roughness bajo la
+        // foto se veia a traves del panel en t=0, rompiendo el efecto de
+        // "reveal" -- 0.6 da un aspecto de vidrio esmerilado que sigue
+        // ocultando la foto por completo. NO bajar este valor.
+        // transmission removido por completo (revision final de rama, C1):
+        // con 9 shards transmisivos el render end-to-end excedia el timeout
+        // de 120s (timeout/None, igual que confetti-fall). clearcoat +
+        // roughness siguen dando aspecto de vidrio sin ese costo.
         const fragMaterial = new THREE.MeshPhysicalMaterial({
           color: fragColor, roughness: 0.6, metalness: 0.1,
-          clearcoat: 1.0, clearcoatRoughness: 0.05, transmission: 0.6, thickness: 0.1, ior: 1.5,
+          clearcoat: 1.0, clearcoatRoughness: 0.05,
           transparent: true, opacity: 1,
         });
         const frag = new THREE.Mesh(fragGeometry, fragMaterial);

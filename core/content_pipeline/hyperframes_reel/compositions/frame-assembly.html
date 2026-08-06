@@ -66,7 +66,14 @@
     // ~1.719-2.192 segun el punto del dolly (z=7 a z=5.5).
     const PHOTO_MAX_WIDTH = 1.8;
     const PHOTO_MAX_HEIGHT = 3.0;
-    const BORDER_THICKNESS = 0.1; // grosor de cada barra del marco (borde visible)
+    // grosor de cada barra del marco (borde visible). OJO: igual que en
+    // confetti-fall.html, este margen es correcto solo para la FOTO. Las
+    // barras SI extienden la geometria real a semi-extension
+    // PHOTO_WIDTH/2 + BORDER_THICKNESS = 1.0, que se recorta minimamente en
+    // el punto mas ajustado del dolly (semi-ancho visible 0.9755 a z=5.5).
+    // Preexistente de Fase A, afecta solo al borde (nunca a la foto), y ya
+    // fue aprobado visualmente asi -- trade-off aceptado, no un bug.
+    const BORDER_THICKNESS = 0.1;
 
     const aspect = photo_aspect > 0 ? photo_aspect : 1;
     const PHOTO_WIDTH = Math.min(PHOTO_MAX_WIDTH, PHOTO_MAX_HEIGHT * aspect);
@@ -113,15 +120,26 @@
     // una sola caja solida -- permite que cada barra "vuele" desde fuera de
     // camara y se ensamble en su lugar (identidad de movimiento propia de
     // este template: "reveal por construccion").
+    // transmission removido por completo (revision final de rama, C1): con
+    // 4 barras transmisivas el render end-to-end tardaba 116.8s, 2.7% de
+    // margen bajo el timeout de 120s -- no es margen real bajo carga.
+    // roughness bajo + clearcoat siguen dando aspecto de vidrio sin ese
+    // costo. NO reintroducir transmission aqui.
     const barMaterial = new THREE.MeshPhysicalMaterial({
       color: new THREE.Color(primary_color),
       roughness: 0.2, metalness: 0.0,
       clearcoat: 1.0, clearcoatRoughness: 0.15,
-      transmission: 0.4, thickness: 0.3, ior: 1.45,
     });
 
     const ASSEMBLY_DURATION = 2.0; // segundos que tardan las barras en llegar a su lugar
-    const OFFSET_DISTANCE = 3.0; // unidades fuera de camara desde donde vuelan (frustum inicial semi-alto ~2.19)
+    // Unidades fuera de camara desde donde vuelan las barras/cuadrantes.
+    // Bajado de 3.0 a 1.3 (revision final de rama, I3): con 3.0 y ease-out
+    // cubico, ni las barras ni los cuadrantes cruzaban el frustum hasta
+    // t~0.5-0.74s -- los primeros ~12 frames del reel eran un rectangulo
+    // solido uniforme (sin ningun contenido), lo cual contradice el
+    // "momento wow desde el primer segundo". Verificado con stddev de
+    // pixeles: con 1.3 el frame en t=0.04 ya no es uniforme.
+    const OFFSET_DISTANCE = 1.3;
 
     makeQuadrant(-qW / 2, qH / 2, 0, 0.5, -qW / 2 - OFFSET_DISTANCE, qH / 2 + OFFSET_DISTANCE, -Math.PI / 8);
     makeQuadrant(qW / 2, qH / 2, 0.5, 0.5, qW / 2 + OFFSET_DISTANCE, qH / 2 + OFFSET_DISTANCE, Math.PI / 8);

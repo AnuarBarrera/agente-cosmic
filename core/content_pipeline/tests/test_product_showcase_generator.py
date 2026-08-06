@@ -288,3 +288,15 @@ class TestGenerateReelUsesChosenTemplate:
 
         assert reason == ''
         mock_choose.assert_called_once_with('')
+
+
+class TestShowcaseCatalogIntegrity:
+    def test_composition_keys_match_templates_list(self):
+        from core.content_pipeline.generators.product_showcase_generator import _SHOWCASE_TEMPLATES, _SHOWCASE_COMPOSITIONS
+        assert set(_SHOWCASE_COMPOSITIONS.keys()) == set(_SHOWCASE_TEMPLATES)
+
+    def test_all_composition_files_exist_on_disk(self):
+        import os
+        from core.content_pipeline.generators.product_showcase_generator import _SHOWCASE_COMPOSITIONS, _HYPERFRAMES_PROJECT_DIR
+        for path in _SHOWCASE_COMPOSITIONS.values():
+            assert os.path.exists(os.path.join(_HYPERFRAMES_PROJECT_DIR, path)), f"falta {path}"
