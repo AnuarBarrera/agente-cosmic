@@ -95,25 +95,70 @@
     // dramatico".
     const SHATTER_DURATION = 1.5;
     const SHATTER_FLY_DISTANCE = 1.5;
+    function pseudoRandom(seed) {
+      const x = Math.sin(seed * 12.9898) * 43758.5453;
+      return x - Math.floor(x); // parte fraccionaria, deterministico -- NO es Math.random()
+    }
+
+    const GLASS_COLOR_SKY = '#87CEEB';
+    const GLASS_COLOR_WHITE = '#FFFFFF';
+
     const GRID = 3;
-    const fragW = PHOTO_WIDTH / GRID;
-    const fragH = PHOTO_HEIGHT / GRID;
+    const cellW = PHOTO_WIDTH / GRID;
+    const cellH = PHOTO_HEIGHT / GRID;
+    const JITTER = Math.min(cellW, cellH) * 0.3;
+
+    function latticePoint(row, col) {
+      const baseX = -PHOTO_WIDTH / 2 + col * cellW;
+      const baseY = PHOTO_HEIGHT / 2 - row * cellH;
+      const isBoundary = row === 0 || row === GRID || col === 0 || col === GRID;
+      if (isBoundary) return { x: baseX, y: baseY };
+      const seedX = (row * 7 + col * 13) * 3.17;
+      const seedY = (row * 11 + col * 17) * 2.31;
+      const jitterX = (pseudoRandom(seedX) - 0.5) * 2 * JITTER;
+      const jitterY = (pseudoRandom(seedY) - 0.5) * 2 * JITTER;
+      return { x: baseX + jitterX, y: baseY + jitterY };
+    }
+
+    const lattice = [];
+    for (let row = 0; row <= GRID; row++) {
+      const rowPoints = [];
+      for (let col = 0; col <= GRID; col++) {
+        rowPoints.push(latticePoint(row, col));
+      }
+      lattice.push(rowPoints);
+    }
+
     const fragments = [];
     for (let row = 0; row < GRID; row++) {
       for (let col = 0; col < GRID; col++) {
-        const fragGeometry = new THREE.PlaneGeometry(fragW, fragH);
+        const p1 = lattice[row][col];
+        const p2 = lattice[row][col + 1];
+        const p3 = lattice[row + 1][col + 1];
+        const p4 = lattice[row + 1][col];
+        const cx = (p1.x + p2.x + p3.x + p4.x) / 4;
+        const cy = (p1.y + p2.y + p3.y + p4.y) / 4;
+
+        const shape = new THREE.Shape();
+        shape.moveTo(p1.x - cx, p1.y - cy);
+        shape.lineTo(p2.x - cx, p2.y - cy);
+        shape.lineTo(p3.x - cx, p3.y - cy);
+        shape.lineTo(p4.x - cx, p4.y - cy);
+        shape.closePath();
+        const fragGeometry = new THREE.ShapeGeometry(shape);
+
+        const mixT = pseudoRandom((row * GRID + col) * 7.73);
+        const fragColor = new THREE.Color(GLASS_COLOR_SKY).lerp(new THREE.Color(GLASS_COLOR_WHITE), mixT);
         const fragMaterial = new THREE.MeshPhysicalMaterial({
-          color: new THREE.Color(primary_color), roughness: 0.6, metalness: 0.1,
+          color: fragColor, roughness: 0.6, metalness: 0.1,
           clearcoat: 1.0, clearcoatRoughness: 0.05, transmission: 0.6, thickness: 0.1, ior: 1.5,
           transparent: true, opacity: 1,
         });
         const frag = new THREE.Mesh(fragGeometry, fragMaterial);
-        const cx = (col - (GRID - 1) / 2) * fragW;
-        const cy = ((GRID - 1) / 2 - row) * fragH;
         frag.position.set(cx, cy, 0.1);
+        const dirLen = Math.hypot(cx, cy) || 1;
         frag.userData.finalX = cx;
         frag.userData.finalY = cy;
-        const dirLen = Math.hypot(cx, cy) || 1;
         frag.userData.flyX = cx + (cx / dirLen) * SHATTER_FLY_DISTANCE;
         frag.userData.flyY = cy + (cy / dirLen) * SHATTER_FLY_DISTANCE;
         frag.userData.spinSpeed = 1.0 + (row * GRID + col) * 0.15;
