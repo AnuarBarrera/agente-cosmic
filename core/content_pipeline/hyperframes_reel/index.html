@@ -174,12 +174,18 @@
     const CONFETTI_FALL_RANGE = 3.0; // recorrido vertical total, de +1.5 a -1.5 (margen bajo 1.719)
     const CONFETTI_FALL_SPEED = 0.5; // unidades/segundo
     const dropGeometry = createDropGeometry(0.14);
+    // Paleta fija azul cielo/blanco para las gotas (feedback Anuar, fix round
+    // 2): se ve mas a gota de agua real, independiente de la marca del
+    // negocio. El marco SIGUE usando primary_color de marca -- este cambio es
+    // solo para el color de las gotas.
+    const DROP_COLOR_SKY = '#87CEEB';
+    const DROP_COLOR_WHITE = '#FFFFFF';
     const confettiGroup = new THREE.Group();
     scene.add(confettiGroup);
     const confettiMeshes = [];
     for (let i = 0; i < CONFETTI_COUNT; i++) {
       const mixT = pseudoRandom(i * 7.73);
-      const pieceColor = new THREE.Color(secondary_color).lerp(new THREE.Color(primary_color), mixT);
+      const pieceColor = new THREE.Color(DROP_COLOR_SKY).lerp(new THREE.Color(DROP_COLOR_WHITE), mixT);
       const material = new THREE.MeshPhysicalMaterial({
         color: pieceColor, roughness: 0.15, metalness: 0.0,
         clearcoat: 1.0, clearcoatRoughness: 0.1, transmission: 0.5, thickness: 0.2, ior: 1.4,
