@@ -47,11 +47,22 @@
     const camera = new THREE.PerspectiveCamera(35, 1080 / 1920, 0.1, 100);
     camera.position.set(0, 0, 7);
 
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x223344, 2.2);
-    scene.add(hemiLight);
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    // Iluminacion de 3 puntos (antes: hemisferio + 1 direccional) -- necesaria
+    // para que MeshPhysicalMaterial con clearcoat/transmission tenga brillos
+    // especulares que leer (el material responde a luces directas, no solo a
+    // un environment map). ambientLight bajo a proposito: demasiada luz
+    // ambiental aplana el efecto de vidrio.
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+    scene.add(ambientLight);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
     keyLight.position.set(2, 3, 4);
     scene.add(keyLight);
+    const fillLight = new THREE.DirectionalLight(0xaad4ff, 0.6);
+    fillLight.position.set(-3, 1, 2);
+    scene.add(fillLight);
+    const rimLight = new THREE.DirectionalLight(new THREE.Color(secondary_color), 1.5);
+    rimLight.position.set(-1, 2, -3);
+    scene.add(rimLight);
 
     const cardGroup = new THREE.Group();
     scene.add(cardGroup);
@@ -64,9 +75,8 @@
     // geometria mas grande que eso queda fuera de camara en algun punto del
     // dolly.
     //
-    // FIX HALLAZGO 87: la foto ya NO se recorta a cuadrado en Python (perdia
-    // contenido real en fotos portrait/landscape). En vez de un tamano fijo,
-    // el plano de la foto se ajusta ("contain", sin recorte) al aspect ratio
+    // FIX HALLAZGO 87: la foto ya NO se recorta a cuadrado en Python. El
+    // plano de la foto se ajusta ("contain", sin recorte) al aspect ratio
     // real (photo_aspect = ancho/alto) dentro de estos limites maximos --
     // elegidos con margen bajo los limites de camara de arriba.
     const PHOTO_MAX_WIDTH = 1.8; // semi-ancho 0.9, margen bajo 0.967
@@ -79,9 +89,19 @@
     const FRAME_WIDTH = PHOTO_WIDTH + FRAME_MARGIN;
     const FRAME_HEIGHT = PHOTO_HEIGHT + FRAME_MARGIN;
 
+    // Material tipo vidrio (antes: MeshStandardMaterial plano). transmission
+    // usa el backbuffer del propio renderer para "ver a traves" -- funciona
+    // sin un environment map manual. Si en el render real se ve demasiado
+    // transparente/invisible contra el fondo oscuro, reducir transmission a
+    // ~0.2 y subir roughness/clearcoatRoughness; si aun asi no convence,
+    // fallback aceptable: transmission=0, solo roughness bajo + clearcoat
+    // (sigue siendo mejora real sobre MeshStandardMaterial plano).
     const frameGeometry = new THREE.BoxGeometry(FRAME_WIDTH, FRAME_HEIGHT, 0.08);
-    const frameMaterial = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(primary_color), roughness: 0.35, metalness: 0.15,
+    const frameMaterial = new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color(primary_color),
+      roughness: 0.2, metalness: 0.0,
+      clearcoat: 1.0, clearcoatRoughness: 0.15,
+      transmission: 0.4, thickness: 0.3, ior: 1.45,
     });
     const frame = new THREE.Mesh(frameGeometry, frameMaterial);
     cardGroup.add(frame);
@@ -110,38 +130,40 @@
     }
 
     // Top-level await blocks this module script's completion — and therefore
-    // "DOMContentLoaded", the event HyperFrames' frame capture waits on (see
-    // the comment on the <img> tag above) — until the photo has actually
-    // decoded. Without this, the render call below fires before the <img>
-    // finishes loading and frame 0 is captured as a solid white rectangle
-    // (verified empirically: stddev 0, RGB≈(251,253,253)).
+    // "DOMContentLoaded", the event HyperFrames' frame capture waits on — until
+    // the photo has actually decoded. Sin esto, el frame 0 se captura como un
+    // rectangulo blanco solido (verificado empiricamente en Fase A).
     await photoImg.decode().catch(() => {});
     applyPhotoTexture();
 
-    // "Confeti geometrico": formas 3D pequenas orbitando la tarjeta, con el
-    // color secundario de marca. Radio 1.05 -- dentro del semi-ancho visible
-    // al INICIO del dolly (~1.233), asi que se ven durante todo el recorrido
-    // salvo quiza el ultimo instante (mismo margen que FRAME_SIZE).
-    const CONFETTI_COUNT = 8;
-    const CONFETTI_RADIUS = 1.05;
-    const CONFETTI_ORBIT_SPEED = 0.6;
+    // Confeti que CAE en loop continuo (antes: orbitaba -- Anuar: "se siente
+    // de web noventera"). Cada pieza tiene X fijo y una fase de caida propia,
+    // ambos deterministicos (formula por indice, sin Math.random). Recicla
+    // via modulo: al salir por abajo del rango, reaparece arriba.
+    const CONFETTI_COUNT = 10;
+    const CONFETTI_SPREAD_X = 0.85; // semi-ancho, margen bajo el limite mas ajustado (0.967)
+    const CONFETTI_FALL_RANGE = 3.0; // recorrido vertical total, de +1.5 a -1.5 (margen bajo 1.719)
+    const CONFETTI_FALL_SPEED = 0.5; // unidades/segundo
     const confettiGroup = new THREE.Group();
     scene.add(confettiGroup);
     const confettiMeshes = [];
     for (let i = 0; i < CONFETTI_COUNT; i++) {
       const shapeIndex = i % 3;
       let geometry;
-      if (shapeIndex === 0) geometry = new THREE.BoxGeometry(0.18, 0.18, 0.18);
-      else if (shapeIndex === 1) geometry = new THREE.TorusGeometry(0.12, 0.05, 8, 16);
-      else geometry = new THREE.IcosahedronGeometry(0.12, 0);
-      const material = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(secondary_color), roughness: 0.4, metalness: 0.1,
-        emissive: new THREE.Color(secondary_color), emissiveIntensity: 0.3,
+      if (shapeIndex === 0) geometry = new THREE.BoxGeometry(0.16, 0.16, 0.16);
+      else if (shapeIndex === 1) geometry = new THREE.TorusGeometry(0.1, 0.045, 8, 16);
+      else geometry = new THREE.IcosahedronGeometry(0.11, 0);
+      const material = new THREE.MeshPhysicalMaterial({
+        color: new THREE.Color(secondary_color), roughness: 0.15, metalness: 0.0,
+        clearcoat: 1.0, clearcoatRoughness: 0.1, transmission: 0.5, thickness: 0.2, ior: 1.4,
+        emissive: new THREE.Color(secondary_color), emissiveIntensity: 0.15,
       });
       const mesh = new THREE.Mesh(geometry, material);
-      mesh.userData.angleOffset = (i / CONFETTI_COUNT) * Math.PI * 2;
+      mesh.userData.startX = (i / (CONFETTI_COUNT - 1) * 2 - 1) * CONFETTI_SPREAD_X;
+      mesh.userData.startOffset = (i / CONFETTI_COUNT) * CONFETTI_FALL_RANGE;
       mesh.userData.spinSpeedX = 0.8 + i * 0.05;
       mesh.userData.spinSpeedY = 0.6 + i * 0.03;
+      mesh.userData.zWobbleOffset = i * 0.7;
       confettiGroup.add(mesh);
       confettiMeshes.push(mesh);
     }
@@ -150,7 +172,7 @@
     // decae en los primeros BURST_DURATION_SECONDS -- funcion pura de time.
     const BURST_DURATION_SECONDS = 0.6;
     const BURST_PEAK_INTENSITY = 2.5;
-    const KEY_LIGHT_BASE_INTENSITY = 1.2;
+    const KEY_LIGHT_BASE_INTENSITY = 2.0;
 
     function renderAt(time) {
       const t = Math.min(time, DURATION);
@@ -160,10 +182,10 @@
       cardGroup.position.y = Math.sin(t * 1.2) * 0.15;
 
       confettiMeshes.forEach((mesh) => {
-        const angle = mesh.userData.angleOffset + t * CONFETTI_ORBIT_SPEED;
-        mesh.position.x = Math.cos(angle) * CONFETTI_RADIUS;
-        mesh.position.y = Math.sin(angle) * CONFETTI_RADIUS;
-        mesh.position.z = 0.1 + Math.sin(t * 0.8 + mesh.userData.angleOffset) * 0.1;
+        const fallDistance = (t * CONFETTI_FALL_SPEED + mesh.userData.startOffset) % CONFETTI_FALL_RANGE;
+        mesh.position.x = mesh.userData.startX;
+        mesh.position.y = CONFETTI_FALL_RANGE / 2 - fallDistance;
+        mesh.position.z = 0.1 + Math.sin(t * 0.8 + mesh.userData.zWobbleOffset) * 0.1;
         mesh.rotation.x = t * mesh.userData.spinSpeedX;
         mesh.rotation.y = t * mesh.userData.spinSpeedY;
       });
