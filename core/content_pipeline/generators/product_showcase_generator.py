@@ -22,7 +22,7 @@ _HYPERFRAMES_PROJECT_DIR = os.path.normpath(os.path.join(
 ))
 _HYPERFRAMES_BINARY = os.path.join(_HYPERFRAMES_PROJECT_DIR, 'node_modules', '.bin', 'hyperframes')
 _HYPERFRAMES_TIMEOUT_SECONDS = 120
-_SHOWCASE_COMPOSITION = 'compositions/product-showcase.html'
+_SHOWCASE_COMPOSITION = 'compositions/confetti-fall.html'
 
 _SCREENSHOT_LABELS = {'screenshot', 'user interface', 'software'}
 _SCREENSHOT_LABEL_THRESHOLD = 0.5

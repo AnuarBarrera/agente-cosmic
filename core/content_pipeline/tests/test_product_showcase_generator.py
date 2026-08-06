@@ -106,7 +106,7 @@ class TestGenerateShowcase:
         assert captured['variables']['photo_src'].startswith('assets/tmp/')
         # 'fake-enhanced-photo' no es una imagen real -- fallback seguro a 1.0 (cuadrado)
         assert captured['variables']['photo_aspect'] == 1.0
-        assert captured['cmd'][captured['cmd'].index('-c') + 1] == 'compositions/product-showcase.html'
+        assert captured['cmd'][captured['cmd'].index('-c') + 1] == 'compositions/confetti-fall.html'
         mock_record.assert_called_once_with('product_showcase')
         # El archivo temporal de la foto se limpia despues del render
         from core.content_pipeline.generators.product_showcase_generator import _HYPERFRAMES_PROJECT_DIR
