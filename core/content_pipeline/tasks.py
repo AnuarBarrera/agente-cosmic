@@ -59,6 +59,7 @@ def _generate_product_reference_sample(job, brand_dna) -> None:
 
     video_url, poster_url, reason = product_gen.generate_reel(
         photo_bytes, filename_prefix=f"{job.id}-product-sample", colors=brand_dna.primary_colors,
+        tone=brand_dna.tone,
     )
 
     if not video_url:

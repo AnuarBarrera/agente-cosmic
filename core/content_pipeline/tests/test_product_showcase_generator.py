@@ -98,7 +98,7 @@ class TestGenerateShowcase:
 
         with patch('core.content_pipeline.generators.product_showcase_generator.subprocess.run', side_effect=fake_run), \
              patch('core.content_pipeline.generators.product_showcase_generator.record_hyperframes_generation') as mock_record:
-            result = gen._generate_showcase(b'fake-enhanced-photo', '#1a1a2e', '#3ED694')
+            result = gen._generate_showcase(b'fake-enhanced-photo', '#1a1a2e', '#3ED694', 'compositions/confetti-fall.html')
 
         assert result == fake_output
         assert captured['variables']['primary_color'] == '#1a1a2e'
@@ -131,7 +131,7 @@ class TestGenerateShowcase:
 
         with patch('core.content_pipeline.generators.product_showcase_generator.subprocess.run', side_effect=fake_run), \
              patch('core.content_pipeline.generators.product_showcase_generator.record_hyperframes_generation'):
-            gen._generate_showcase(buf.getvalue(), '#1a1a2e', '#3ED694')
+            gen._generate_showcase(buf.getvalue(), '#1a1a2e', '#3ED694', 'compositions/confetti-fall.html')
 
         assert captured['variables']['photo_aspect'] == 2.0
 
@@ -140,7 +140,7 @@ class TestGenerateShowcase:
         gen = ProductShowcaseGenerator(bucket_name='test-bucket')
         with patch('core.content_pipeline.generators.product_showcase_generator.subprocess.run',
                    side_effect=Exception('render failed')):
-            result = gen._generate_showcase(b'fake-enhanced-photo', '#1a1a2e', '#3ED694')
+            result = gen._generate_showcase(b'fake-enhanced-photo', '#1a1a2e', '#3ED694', 'compositions/confetti-fall.html')
         assert result is None
 
 
@@ -154,11 +154,12 @@ class TestGenerateReel:
         assert reason == 'mensaje de rechazo'
 
     def test_happy_path_uploads_video_and_poster(self):
-        from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator
+        from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator, _SHOWCASE_COMPOSITIONS
         gen = ProductShowcaseGenerator(bucket_name='test-bucket')
         with patch.object(gen, '_check_photo_safety', return_value=''), \
              patch('core.content_pipeline.generators.product_showcase_generator.enhance_photo_classic',
                    return_value=b'enhanced'), \
+             patch.object(gen, '_choose_showcase_template', return_value='confetti-fall'), \
              patch.object(gen, '_generate_showcase', return_value=b'video-bytes') as mock_showcase, \
              patch.object(gen, '_extract_frame', return_value=b'poster-bytes'), \
              patch.object(gen, '_upload_to_storage', side_effect=['https://poster.url', 'https://video.url']) as mock_upload:
@@ -167,7 +168,7 @@ class TestGenerateReel:
         assert reason == ''
         assert poster_url == 'https://poster.url'
         assert video_url == 'https://video.url'
-        mock_showcase.assert_called_once_with(b'enhanced', '#111111', '#222222')
+        mock_showcase.assert_called_once_with(b'enhanced', '#111111', '#222222', _SHOWCASE_COMPOSITIONS['confetti-fall'])
 
     def test_retries_once_when_showcase_generation_fails(self):
         from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator
@@ -175,6 +176,7 @@ class TestGenerateReel:
         with patch.object(gen, '_check_photo_safety', return_value=''), \
              patch('core.content_pipeline.generators.product_showcase_generator.enhance_photo_classic',
                    return_value=b'enhanced'), \
+             patch.object(gen, '_choose_showcase_template', return_value='confetti-fall'), \
              patch.object(gen, '_generate_showcase', side_effect=[None, b'video-bytes']) as mock_showcase, \
              patch.object(gen, '_extract_frame', return_value=b'poster-bytes'), \
              patch.object(gen, '_upload_to_storage', side_effect=['https://poster.url', 'https://video.url']):
@@ -188,6 +190,7 @@ class TestGenerateReel:
         with patch.object(gen, '_check_photo_safety', return_value=''), \
              patch('core.content_pipeline.generators.product_showcase_generator.enhance_photo_classic',
                    return_value=b'enhanced'), \
+             patch.object(gen, '_choose_showcase_template', return_value='confetti-fall'), \
              patch.object(gen, '_generate_showcase', return_value=None) as mock_showcase:
             video_url, poster_url, reason = gen.generate_reel(b'fake-photo', 'job1-sample')
         assert video_url == '' and poster_url == ''
@@ -195,13 +198,93 @@ class TestGenerateReel:
         assert mock_showcase.call_count == 2
 
     def test_uses_fallback_colors_when_none_provided(self):
+        from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator, _SHOWCASE_COMPOSITIONS
+        gen = ProductShowcaseGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_check_photo_safety', return_value=''), \
+             patch('core.content_pipeline.generators.product_showcase_generator.enhance_photo_classic',
+                   return_value=b'enhanced'), \
+             patch.object(gen, '_choose_showcase_template', return_value='confetti-fall'), \
+             patch.object(gen, '_generate_showcase', return_value=b'video-bytes') as mock_showcase, \
+             patch.object(gen, '_extract_frame', return_value=b'poster-bytes'), \
+             patch.object(gen, '_upload_to_storage', side_effect=['https://poster.url', 'https://video.url']):
+            gen.generate_reel(b'fake-photo', 'job1-sample')
+        mock_showcase.assert_called_once_with(b'enhanced', '#e94560', '#3ED694', _SHOWCASE_COMPOSITIONS['confetti-fall'])
+
+
+class TestChooseShowcaseTemplate:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
+    )
+    def test_returns_template_chosen_by_gemini(self):
+        from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator
+        gen = ProductShowcaseGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.product_showcase_generator._vertex_text_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"template": "frame-assembly"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._choose_showcase_template('elegante y premium')
+        assert result == 'frame-assembly'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
+    )
+    def test_falls_back_to_random_on_api_error(self):
+        from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator, _SHOWCASE_TEMPLATES
+        gen = ProductShowcaseGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.product_showcase_generator._vertex_text_client') as mock_vc:
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            result = gen._choose_showcase_template('tono cualquiera')
+        assert result in _SHOWCASE_TEMPLATES
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
+    )
+    def test_falls_back_to_random_on_invalid_template_name(self):
+        from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator, _SHOWCASE_TEMPLATES
+        gen = ProductShowcaseGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.product_showcase_generator._vertex_text_client') as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"template": "not-a-real-template"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._choose_showcase_template('tono cualquiera')
+        assert result in _SHOWCASE_TEMPLATES
+
+
+class TestGenerateReelUsesChosenTemplate:
+    def test_generate_reel_passes_composition_path_from_chosen_template(self):
+        from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator, _SHOWCASE_COMPOSITIONS
+        gen = ProductShowcaseGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_check_photo_safety', return_value=''), \
+             patch('core.content_pipeline.generators.product_showcase_generator.enhance_photo_classic',
+                   return_value=b'enhanced'), \
+             patch.object(gen, '_choose_showcase_template', return_value='glass-shatter-reveal') as mock_choose, \
+             patch.object(gen, '_generate_showcase', return_value=b'video-bytes') as mock_showcase, \
+             patch.object(gen, '_extract_frame', return_value=b'poster-bytes'), \
+             patch.object(gen, '_upload_to_storage', side_effect=['https://poster.url', 'https://video.url']):
+            gen.generate_reel(b'fake-photo', 'job1-sample', colors=['#111111', '#222222'], tone='dramatico')
+
+        mock_choose.assert_called_once_with('dramatico')
+        mock_showcase.assert_called_once_with(
+            b'enhanced', '#111111', '#222222', _SHOWCASE_COMPOSITIONS['glass-shatter-reveal'],
+        )
+
+    def test_generate_reel_works_with_empty_tone(self):
         from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator
         gen = ProductShowcaseGenerator(bucket_name='test-bucket')
         with patch.object(gen, '_check_photo_safety', return_value=''), \
              patch('core.content_pipeline.generators.product_showcase_generator.enhance_photo_classic',
                    return_value=b'enhanced'), \
-             patch.object(gen, '_generate_showcase', return_value=b'video-bytes') as mock_showcase, \
+             patch.object(gen, '_choose_showcase_template', return_value='confetti-fall') as mock_choose, \
+             patch.object(gen, '_generate_showcase', return_value=b'video-bytes'), \
              patch.object(gen, '_extract_frame', return_value=b'poster-bytes'), \
              patch.object(gen, '_upload_to_storage', side_effect=['https://poster.url', 'https://video.url']):
-            gen.generate_reel(b'fake-photo', 'job1-sample')
-        mock_showcase.assert_called_once_with(b'enhanced', '#e94560', '#3ED694')
+            video_url, poster_url, reason = gen.generate_reel(b'fake-photo', 'job1-sample')
+
+        assert reason == ''
+        mock_choose.assert_called_once_with('')
