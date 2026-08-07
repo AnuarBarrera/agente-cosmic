@@ -36,6 +36,8 @@
     const renderer = new THREE.WebGLRenderer({ canvas, alpha: false, antialias: true });
     renderer.setSize(1080, 1920, false);
     renderer.setPixelRatio(1);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b0f14);
@@ -46,6 +48,15 @@
     scene.add(ambientLight);
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
     keyLight.position.set(2, 3, 4);
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.width = 1024;
+    keyLight.shadow.mapSize.height = 1024;
+    keyLight.shadow.camera.left = -1.6;
+    keyLight.shadow.camera.right = 1.6;
+    keyLight.shadow.camera.top = 2.2;
+    keyLight.shadow.camera.bottom = -2.2;
+    keyLight.shadow.camera.near = 1;
+    keyLight.shadow.camera.far = 10;
     scene.add(keyLight);
     const fillLight = new THREE.DirectionalLight(0xaad4ff, 0.6);
     fillLight.position.set(-3, 1, 2);
@@ -76,6 +87,18 @@
     const photoMesh = new THREE.Mesh(photoGeometry, photoMaterial);
     photoMesh.position.z = 0.05;
     cardGroup.add(photoMesh);
+
+    // Plano invisible salvo donde le cae sombra encima. No se toca el
+    // material de la foto (MeshBasicMaterial) para no alterar sus colores.
+    // Los fragmentos de vidrio (z=0.1) quedan delante de este plano, en la
+    // trayectoria de la luz hacia -z, por eso reciben la sombra correctamente.
+    const SHADOW_CATCHER_BASE_OPACITY = 0.4;
+    const shadowCatcherGeometry = new THREE.PlaneGeometry(PHOTO_WIDTH, PHOTO_HEIGHT);
+    const shadowCatcherMaterial = new THREE.ShadowMaterial({ opacity: SHADOW_CATCHER_BASE_OPACITY });
+    const shadowCatcher = new THREE.Mesh(shadowCatcherGeometry, shadowCatcherMaterial);
+    shadowCatcher.position.z = 0.055;
+    shadowCatcher.receiveShadow = true;
+    cardGroup.add(shadowCatcher);
 
     function applyPhotoTexture() {
       const texture = new THREE.Texture(photoImg);
@@ -162,7 +185,18 @@
           clearcoat: 1.0, clearcoatRoughness: 0.05,
           transparent: true, opacity: 1,
         });
+        // ShapeGeometry es plana (2D, una sola capa de triangulos, sin
+        // "reverso" real). Three.js renderiza el shadow map usando el lado
+        // OPUESTO a material.side por defecto (evita peter-panning en
+        // solidos con volumen real) -- para una geometria sin reverso eso
+        // deja el shadow map sin nada que dibujar y el fragmento nunca
+        // proyecta sombra (verificado: renderer.shadowMap.enabled
+        // true/false daba frames identicos byte a byte hasta este fix).
+        // DoubleSide en el shadow pass evita depender de la orientacion del
+        // winding de cada shard.
+        fragMaterial.shadowSide = THREE.DoubleSide;
         const frag = new THREE.Mesh(fragGeometry, fragMaterial);
+        frag.castShadow = true;
         frag.position.set(cx, cy, 0.1);
         const dirLen = Math.hypot(cx, cy) || 1;
         frag.userData.finalX = cx;
@@ -239,6 +273,13 @@
         frag.rotation.z = eased * frag.userData.spinSpeed * Math.PI;
         frag.material.opacity = 1 - eased;
       });
+      // Todos los fragmentos comparten el mismo `eased` (no hay variacion
+      // por-fragmento en su opacidad), asi que la sombra combinada se puede
+      // atar 1:1 a esa misma curva: en t=0 el panel esta opaco y la sombra
+      // a su intensidad base; al terminar SHATTER_DURATION los fragmentos ya
+      // son invisibles (opacity=0) y la sombra tambien llega a 0 -- evita el
+      // artefacto de una sombra opaca "fantasma" sobre vidrio ya transparente.
+      shadowCatcherMaterial.opacity = SHADOW_CATCHER_BASE_OPACITY * (1 - eased);
 
       const burst = Math.max(0, 1 - t / BURST_DURATION_SECONDS) * BURST_PEAK_INTENSITY;
       keyLight.intensity = KEY_LIGHT_BASE_INTENSITY + burst;
