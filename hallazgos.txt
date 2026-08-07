@@ -4512,3 +4512,155 @@ Actualización 2026-08-07 (revisión final de rama): la revisión final midió
   medir con la carga completa (o al menos documentar explícitamente el
   factor de subestimación esperado) en vez de asumir que un solo objeto
   representa el caso real.
+
+=================================================================
+HALLAZGO 90 — Migracion Imagen 3/4 -> Gemini 3.1 Flash Image
+  (deadline real de Google: 2026-08-17)
+Estado: ✅ RESUELTO — 2026-08-07
+=================================================================
+Contexto: Google Cloud notifico (2 correos, 2026-08-07) que la fecha limite
+  de discontinuacion de los endpoints imagen-3.0-*/imagen-4.0-* es el
+  17 de agosto de 2026 (un correo de correccion reemplazo una fecha
+  anterior de 2027 por error tipografico de Google). Esto ya estaba
+  documentado como HALLAZGO IMG-12 en el archivo hallazgosImagen.txt
+  (2026-08-02, ya no existe en el repo -- este hallazgo continua esa
+  numeracion aqui en hallazgos.txt), con severidad Baja ("no urgente,
+  deadline 2027") -- quedo obsoleto por el nuevo deadline.
+
+Cambios reales (spec completo:
+  docs/superpowers/specs/2026-08-07-imagen-to-gemini-migration-design.md,
+  plan: docs/superpowers/plans/2026-08-07-imagen-to-gemini-migration-plan.md):
+  - VERTEX_IMAGE_MODEL: imagen-3.0-generate-001 -> gemini-3.1-flash-image
+    (calidad completa, no flash-lite -- decision explicita de Anuar).
+  - GOOGLE_CLOUD_LOCATION: us-central1 -> global (unico location donde
+    los modelos de imagen nuevos responden -- verificado con llamada
+    real, 404 en us-central1). Confirmado con llamadas reales que Veo y
+    TTS tambien funcionan en 'global' sin riesgo antes de unificar.
+  - image_generator.py y reel_generator.py migrados de generate_images
+    a generate_content con image_config.aspect_ratio (1:1 y 9:16
+    respectivamente). Negative prompt (sin equivalente estructurado en
+    Gemini) doblado en el texto del prompt en ambos sitios -- decision
+    explicita de Anuar en reel_generator.py pese al riesgo historico ahi
+    documentado (icono alucinado con Imagen), mitigado por el QC visual
+    ya existente (_validate_scene_still/_validate_background).
+  - Corregido de paso: la rama Gemini de image_generator.py llamaba
+    record_tokens(resp) (tarifa de texto, $0.30/1M tokens) para
+    facturar imagenes -- subestimaba el costo real ~200x (los tokens de
+    imagen se facturan a ~$59.8/1M equivalente). Ahora usa
+    record_gemini_image_generation('generate') (costo plano real,
+    $0.067/imagen, fuente: documentacion oficial de precios de Google).
+  - VERTEX_IMAGE_EDIT_MODEL (imagen-3.0-capability-001) eliminado --
+    config muerta, sin consumidor en el repo.
+  - RPM_LIMITS de rate_limiter.py limpiado (las 2 entradas de Imagen 3
+    ya no aplican; gemini-3.1-flash-image sin limite fijo conocido,
+    igual que gemini-2.5-flash hoy).
+
+Verificacion real end-to-end (Task 5, 2026-08-07, dentro de `backend` con
+  credenciales reales de Vertex AI):
+  - Imagen de post real (`ImageGenerator._generate_with_vertex`): 200 OK,
+    1024x1024, ratio 1.0 exacto. Inspeccion visual: foto de smoothie en
+    cocina, fotorealista, sin texto/logos/manos deformadas.
+  - Still de reel real (`ReelGenerator._generate_scene_still`, sin pasar
+    por el QC de `_validate_scene_still` a proposito, salida cruda del
+    modelo): 200 OK, 768x1376, ratio 0.558 (vs 0.5625 esperado -- redondeo
+    de resolucion nativa del modelo, sin impacto real). Inspeccion visual:
+    escena de taller/entrepreneur, sin texto/iconos/UI/logos alucinados.
+  - Rate limiter: RPM_LIMITS = {} confirmado, _base_model('gemini-3.1-flash-image')
+    no matchea ninguna entrada -- no-op, igual que gemini-2.5-flash.
+  - Suite completa: 678 passed, 0 failed (vs 608 conocidos el 2026-07-27,
+    conteo mayor por features nuevas desde entonces -- sin regresiones).
+
+Severidad: N/A -- migracion completada antes del deadline.
+Prioridad: Cerrado.
+
+=================================================================
+HALLAZGO 91 — El costo/conteo de reel_scene nunca aparece en el
+  dashboard de Prometheus (cosmic_imagen_generations_by_type_total)
+Categoria: Gap de observabilidad, preexistente (no es regresion de
+  HALLAZGO 90)
+Estado: 🟡 REPORTADO — SIN FIX — 2026-08-07
+=================================================================
+Contexto: al leer core/shared/metrics.py durante la migracion del
+  HALLAZGO 90, se confirmo que el collector de Prometheus itera sobre
+  tuplas hardcodeadas de tipos: ('generate', 'bgswap', 'qc_retry') para
+  el conteo (cosmic_imagen_generations_by_type_total) y
+  ('generate', 'bgswap') para el costo
+  (cosmic_imagen_cost_microdollars_total). El tipo 'reel_scene' (el que
+  pasa reel_generator.py en cada still de escena generado) no esta en
+  ninguna de las 2 tuplas -- los Redis keys cosmic:prom:I:reel_scene /
+  cosmic:prom:IC:reel_scene se siguen escribiendo pero el collector
+  nunca los lee, asi que nunca aparecen en el panel. Esto ya pasaba
+  identico con Imagen 3 antes de esta migracion -- no es una regresion,
+  es un gap preexistente que salio a la luz al revisar el archivo
+  completo. 'bgswap' en las tuplas es ademas resto del pipeline ya
+  eliminado (HALLAZGO 65).
+
+Propuesta de fix (no implementada, fuera de alcance de HALLAZGO 90):
+  agregar 'reel_scene' a ambas tuplas en metrics.py (y opcionalmente
+  quitar 'bgswap', muerto) para que el costo/conteo real de generacion
+  de stills de reel sea visible en el dashboard.
+
+Severidad: Baja -- no afecta produccion, solo visibilidad de costo real
+  en el panel de negocio.
+Prioridad: Baja -- agrupar con la proxima limpieza de metricas.
+
+=================================================================
+HALLAZGO 92 — .env de este servidor sigue fijando GOOGLE_CLOUD_LOCATION=
+  us-central1 (override explicito) pese a que el HALLAZGO 90 ya migro el
+  default de settings.py a 'global' -- imagen/reel estan rotos (404) en
+  este servidor con el .env actual, hasta que un humano lo actualice
+Categoria: Deriva de configuracion de despliegue (bloqueante para uso
+  real, no del codigo migrado)
+Estado: 🔴 CRITICO — SIN FIX — 2026-08-07 (requiere accion humana en .env)
+=================================================================
+Contexto: durante la verificacion real end-to-end del HALLAZGO 90 (Task 5),
+  el Step 1 (`ImageGenerator._generate_with_vertex` real, dentro de
+  `backend`) fallo con `404 NOT_FOUND` llamando a
+  `.../locations/us-central1/.../gemini-3.1-flash-image:generateContent`.
+  `saas_chatbot/settings.py:159` ya tiene el default correcto
+  (`GOOGLE_CLOUD_LOCATION = get_env('GOOGLE_CLOUD_LOCATION', default='global')`,
+  cambiado en el HALLAZGO 90), pero el archivo `.env` de este servidor
+  (no trackeado en git, ultima modificacion 2026-08-02 -- anterior a los
+  commits de esta migracion) fija explicitamente
+  `GOOGLE_CLOUD_LOCATION=us-central1`, que **sobreescribe** ese default.
+  Es decir: el codigo migrado (ya en `main`, commit d7369c4) esta roto en
+  este servidor ahora mismo para generacion real de imagen/reel, hasta
+  que alguien edite `.env` a mano (el archivo tiene un guardrail de
+  edicion activo -- "Edicion de archivo .env bloqueada. Usa .env.example
+  como referencia" -- que un agente no debe rodear via `sed`/Bash; requiere
+  que Anuar lo edite directamente).
+  Verificado el mismo problema en `.env.example:40`
+  (`GOOGLE_CLOUD_LOCATION=us-central1`) y ademas `.env.example:52` fija
+  `VERTEX_IMAGE_MODEL=publishers/google/models/gemini-2.5-flash-image`
+  (ni el modelo viejo ni el nuevo real -- un tercer valor obsoleto), asi
+  que la plantilla de referencia para nuevos entornos tambien quedaria
+  mal si se copia tal cual.
+  La verificacion real de este mismo hallazgo (Steps 1-2 de Task 5) se
+  completo overrideando la variable solo para esas 2 llamadas puntuales
+  (`docker compose exec -T -e GOOGLE_CLOUD_LOCATION=global backend ...`),
+  sin tocar `.env` -- por eso HALLAZGO 90 se pudo verificar con exito,
+  pero ese override no persiste: cualquier llamada real del pipeline
+  (via `rqworker`, Django admin, o UI) sigue usando el `.env` real del
+  servidor y seguira devolviendo 404 hasta el fix.
+
+Accion requerida (fuera de alcance de un agente por el guardrail de
+  edicion de `.env`):
+  1. Anuar edita `.env` en este servidor: cambiar
+     `GOOGLE_CLOUD_LOCATION=us-central1` -> `GOOGLE_CLOUD_LOCATION=global`
+     (o eliminar la linea para heredar el default de settings.py).
+  2. `docker compose up -d --force-recreate --no-deps backend rqworker`
+     (ver feedback_gunicorn_restart.md -- ni .py ni env bastan con
+     restart simple, hace falta recreate).
+  3. Revisar/corregir `.env.example:40,52` para que una copia nueva del
+     archivo no repita el mismo problema (fuera de alcance de este
+     hallazgo, se deja como nota).
+  4. Si existe un `.env.prod` separado en el servidor de produccion real
+     (no localizado en este repo), verificar el mismo valor ahi antes de
+     dar por cerrado el HALLAZGO 90 en produccion.
+
+Severidad: Alta -- bloquea en la practica toda generacion real de imagen
+  y reel en este servidor hasta que se corrija (aunque el codigo migrado
+  esta correcto y verificado).
+Prioridad: Alta -- resolver antes de considerar el HALLAZGO 90 cerrado
+  en este entorno especifico (el codigo esta listo; la configuracion de
+  despliegue no).
