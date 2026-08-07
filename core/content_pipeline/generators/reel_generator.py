@@ -691,26 +691,34 @@ class ReelGenerator:
     def _generate_scene_still(self, prompt: str) -> bytes | None:
         try:
             client = _vertex_client()
-            with track_external_api('imagen3', operation='image_generate'):
-                resp = client.models.generate_images(
+            # Gemini no tiene parametro estructurado de negative_prompt -- se dobla
+            # _VEO_SAFE_CONSTRAINTS en el texto afirmativo. Decision explicita de Anuar
+            # (2026-08-07, ver spec de migracion) pese al riesgo historico documentado
+            # arriba en la clase (icono de boton de play alucinado con Imagen pese a
+            # prohibirlo en el prompt) -- verificado con llamada real de control sin
+            # evidencia de que el problema se traslade a Gemini, y el QC posterior
+            # (_validate_scene_still, mas abajo) ya rechaza+reintenta si de todos modos
+            # aparecen iconos/UI/logos (has_screen_content).
+            full_prompt = f"{prompt}\n\n{self._VEO_SAFE_CONSTRAINTS.strip()}"
+            with track_external_api('gemini_image', operation='image_generate'):
+                resp = client.models.generate_content(
                     model=settings.VERTEX_IMAGE_MODEL,
-                    prompt=prompt,
-                    config=types.GenerateImagesConfig(
-                        number_of_images=1,
-                        aspect_ratio='9:16',
-                        negative_prompt=self._VEO_SAFE_CONSTRAINTS.strip(),
+                    contents=full_prompt,
+                    config=types.GenerateContentConfig(
+                        response_modalities=['IMAGE', 'TEXT'],
+                        image_config=types.ImageConfig(aspect_ratio='9:16'),
                         labels=vertex_labels(),
                     ),
                 )
-            if resp.generated_images:
-                record_gemini_image_generation('reel_scene')
-                return resp.generated_images[0].image.image_bytes
-            # Motivo tipico: filtro de seguridad de Imagen bloqueo la generacion
-            # (prompt rechazado) sin lanzar excepcion — solo devuelve la lista vacia.
-            filter_reason = getattr(resp, 'positive_prompt_safety_attributes', None)
+            for part in resp.candidates[0].content.parts:
+                if part.inline_data:
+                    record_gemini_image_generation('reel_scene')
+                    return part.inline_data.data
+            # Motivo tipico: filtro de seguridad de Gemini bloqueo la generacion
+            # (prompt rechazado) sin lanzar excepcion — solo devuelve partes sin imagen.
             logger.warning(
                 f"Imagen scene: 0 imagenes generadas (posible filtro de seguridad) | "
-                f"filter_reason={filter_reason} | prompt={prompt[:80]}"
+                f"prompt={prompt[:80]}"
             )
             return None
         except Exception as e:

@@ -452,59 +452,57 @@ class TestProbeVideoDuration:
 class TestGenerateSceneStill:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
-        GOOGLE_CLOUD_LOCATION='us-central1',
-        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        GOOGLE_CLOUD_LOCATION='global',
+        VERTEX_IMAGE_MODEL='gemini-3.1-flash-image',
     )
     def test_returns_image_bytes_on_success(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
         fake_image = b'fake-image-bytes'
-        mock_generated = MagicMock()
-        mock_generated.image.image_bytes = fake_image
-        mock_resp = MagicMock()
-        mock_resp.generated_images = [mock_generated]
+        mock_part = MagicMock()
+        mock_part.inline_data.data = fake_image
+        mock_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=[mock_part]))])
         with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc, \
              patch('core.content_pipeline.generators.reel_generator.record_gemini_image_generation') as mock_record:
-            mock_vc.return_value.models.generate_images.return_value = mock_resp
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
             result = gen._generate_scene_still('a workshop scene')
         assert result == fake_image
         mock_record.assert_called_once_with('reel_scene')
-        call_kwargs = mock_vc.return_value.models.generate_images.call_args.kwargs
-        assert call_kwargs['model'] == 'imagen-3.0-generate-001'
-        assert call_kwargs['config'].aspect_ratio == '9:16'
-        # negative_prompt via el parametro dedicado de la API, NO concatenado al
-        # prompt afirmativo (mencionar "icons"/"UI elements" en el prompt
-        # principal, aunque sea para negarlos, puede hacer que Imagen los genere
-        # de todos modos — alucinacion real: icono de boton de play incrustado).
-        assert call_kwargs['prompt'] == 'a workshop scene'
-        assert call_kwargs['config'].negative_prompt == gen._VEO_SAFE_CONSTRAINTS.strip()
-        assert 'NO icons' not in call_kwargs['prompt']
+        call_kwargs = mock_vc.return_value.models.generate_content.call_args.kwargs
+        assert call_kwargs['model'] == 'gemini-3.1-flash-image'
+        assert call_kwargs['config'].image_config.aspect_ratio == '9:16'
+        # Decision 2026-08-07 (ver spec de migracion): a diferencia de Imagen, Gemini
+        # no tiene negative_prompt estructurado -- aqui SI se dobla el texto de
+        # _VEO_SAFE_CONSTRAINTS en el prompt afirmativo (a proposito, pese al riesgo
+        # historico documentado arriba en la clase), mitigado por el QC posterior.
+        assert gen._VEO_SAFE_CONSTRAINTS.strip() in call_kwargs['contents']
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
-        GOOGLE_CLOUD_LOCATION='us-central1',
-        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        GOOGLE_CLOUD_LOCATION='global',
+        VERTEX_IMAGE_MODEL='gemini-3.1-flash-image',
     )
     def test_returns_none_on_api_error(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
         with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
-            mock_vc.return_value.models.generate_images.side_effect = Exception('rejected')
+            mock_vc.return_value.models.generate_content.side_effect = Exception('rejected')
             result = gen._generate_scene_still('a workshop scene')
         assert result is None
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
-        GOOGLE_CLOUD_LOCATION='us-central1',
-        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        GOOGLE_CLOUD_LOCATION='global',
+        VERTEX_IMAGE_MODEL='gemini-3.1-flash-image',
     )
-    def test_returns_none_when_no_images_generated(self):
+    def test_returns_none_when_no_image_part_in_response(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        mock_resp = MagicMock()
-        mock_resp.generated_images = []
+        mock_part = MagicMock()
+        mock_part.inline_data = None
+        mock_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=[mock_part]))])
         with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
-            mock_vc.return_value.models.generate_images.return_value = mock_resp
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
             result = gen._generate_scene_still('a workshop scene')
         assert result is None
 
