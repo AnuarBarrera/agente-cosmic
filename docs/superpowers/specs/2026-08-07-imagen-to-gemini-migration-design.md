@@ -38,10 +38,30 @@ real de cada uno) — ver sección "Decisiones confirmadas" para los datos exact
   1024×1024 estándar (fuente: documentación oficial de precios de Google, confirmada por
   WebFetch), frente a los $0.04 que costaba Imagen 3 — sube ~68%. El constante de costo en
   `metrics_utils.py` se actualiza a este valor real, no se deja el de Imagen 3.
-- **Métricas de Prometheus: renombrar**, no mantener `imagen3`/`record_imagen_generation`
-  como nombre histórico. Anuar aceptó explícitamente que esto corta la continuidad de
-  cualquier panel de Grafana que filtre por ese nombre — se avisa pero no se investiga cada
-  dashboard existente como parte de este trabajo.
+- **Métricas de Prometheus: renombrar solo el label genérico, no los nombres de métrica
+  dedicados.** Hay 2 familias distintas, descubiertas al leer el código completo (no
+  estaban diferenciadas en el brainstorm inicial):
+  1. `track_external_api('imagen3', ...)` — un label dentro de la familia genérica
+     `EXTERNAL_API_REQUESTS`/`EXTERNAL_API_DURATION`/`EXTERNAL_API_ERRORS` (compartida con
+     `'veo'`, `'gemini'`, `'lyria'`, etc.). Se renombra a `'gemini_image'` — Anuar aceptó
+     explícitamente que esto corta la continuidad de cualquier panel de Grafana que filtre
+     por ese label.
+  2. `cosmic_imagen_generations_by_type_total` y `cosmic_imagen_cost_microdollars_total`
+     (`core/shared/metrics.py`) — nombres de métrica de Prometheus hardcodeados, expuestos
+     directamente como paneles. **Estos NO se renombran** — Anuar decidió mantenerlos tal
+     cual tras ver que son el nombre real de panel (más disruptivo cortar que el label
+     genérico). Su función interna (`record_imagen_generation`) sí se renombra a
+     `record_gemini_image_generation`, pero sigue escribiendo a las mismas llaves de Redis
+     (`cosmic:prom:I:{tipo}` / `cosmic:prom:IC:{tipo}`) que ese archivo ya lee — cero
+     cambio funcional en el dashboard.
+- **Hallazgo nuevo, fuera de alcance de este plan**: el `img_type='reel_scene'` que pasa
+  `reel_generator.py` a `record_imagen_generation` nunca aparece en el dashboard — el
+  collector de `metrics.py` solo itera sobre los tipos hardcodeados
+  `('generate', 'bgswap', 'qc_retry')` para el conteo y `('generate', 'bgswap')` para el
+  costo; `'reel_scene'` no está en ninguna de las 2 tuplas (y `'bgswap'` es del pipeline ya
+  eliminado, HALLAZGO 65). Esto ya pasaba con Imagen 3 y seguirá pasando igual con Gemini
+  — no es una regresión de esta migración, se documenta como hallazgo nuevo en
+  `hallazgosImagen.txt` pero no se corrige aquí (scope creep, no bloquea el deadline).
 - **Simplificación de Lyria incluida**: el cliente dedicado de
   `_generate_music_attempt` (hardcodeado a `location='global'` porque Lyria nunca funcionó
   en `us-central1` — comentario ya existente en el código lo documenta) se vuelve idéntico a
@@ -150,6 +170,34 @@ bloqueo distinto (vía `finish_reason` del candidate, o ausencia de `inline_data
 partes) — el detalle exacto de qué inspeccionar se confirma durante la implementación con
 una llamada real que fuerce un bloqueo de seguridad, no se asume aquí.
 
+**Riesgo real evaluado y resuelto (Anuar, este brainstorm):** el comentario en
+`reel_generator.py:375-383` documenta una alucinación real ya observada — mencionar
+"icons"/"UI elements" dentro del prompt afirmativo, aunque sea para negarlos, hizo que
+Imagen los generara de todos modos (un ícono de botón de play apareció incrustado pese a
+que el prompt lo prohibía explícitamente). Por eso `_VEO_SAFE_CONSTRAINTS` se pasa hoy
+SOLO vía el parámetro dedicado `negative_prompt` de `GenerateImagesConfig`, nunca
+concatenado al texto — y existe un test explícito que lo blinda
+(`test_reel_generator.py:481`, `assert 'NO icons' not in call_kwargs['prompt']`). Gemini
+no tiene un parámetro estructurado equivalente, así que doblar el texto es la única forma
+de aplicar esa restricción con la nueva API.
+
+Antes de decidir, se hizo una prueba real de control (2 llamadas reales a
+`gemini-3.1-flash-image`, un mismo prompt afirmativo con y sin el texto negativo doblado
+encima) — ninguna de las 2 imágenes generadas mostró íconos, texto ni logos alucinados.
+Muestra de tamaño 1, no concluyente por sí sola, pero sin evidencia de que el problema se
+traslade de Imagen a Gemini. Con esa evidencia sobre la mesa, Anuar decidió doblar
+`_VEO_SAFE_CONSTRAINTS` en el texto de todas formas (mismo patrón que `image_generator.py`
+sección anterior), aceptando el riesgo residual. Como red de seguridad adicional (ya
+existente, no es parte nueva de este plan), `_validate_scene_still` sigue corriendo
+después de cada generación y ya rechaza+reintenta si `has_screen_content` detecta
+íconos/UI/logos — cualquier alucinación que sí ocurra no llega a producción silenciosa.
+
+El test `test_reel_generator.py:481` (`TestGenerateSceneStill.test_returns_image_bytes_on_success`)
+y sus 2 vecinos en la misma clase deben reescribirse para reflejar esta decisión: ya no se
+verifica `config.negative_prompt` (no existe en la API de Gemini) ni que `'NO icons' not in
+prompt` (ahora sí está, deliberadamente) — se verifica en cambio que el texto de
+`_VEO_SAFE_CONSTRAINTS` SÍ forma parte del `contents` enviado a `generate_content`.
+
 ### `core/shared/rate_limiter.py` (líneas 11-14)
 
 ```python
@@ -203,6 +251,10 @@ cliente aparte (ya no aplica).
 `saas_chatbot/settings.py`:
 - `GOOGLE_CLOUD_LOCATION` default: `'us-central1'` → `'global'` (línea 159).
 - `VERTEX_IMAGE_MODEL`: `'imagen-3.0-generate-001'` → `'gemini-3.1-flash-image'` (línea 166).
+- `VERTEX_IMAGE_EDIT_MODEL = 'imagen-3.0-capability-001'` (línea 167) — **se elimina**.
+  Verificado con grep en todo el repo: no tiene ningún consumidor (probable resto del
+  pipeline BGSWAP ya eliminado, HALLAZGO 65). Coincide con la entrada muerta
+  `'imagen-3.0-capability'` que también se elimina de `RPM_LIMITS` en `rate_limiter.py`.
 
 ## Fuera de alcance
 
