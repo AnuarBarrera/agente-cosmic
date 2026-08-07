@@ -5,13 +5,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Límites reales de Vertex AI para este proyecto (aiplatform.googleapis.com/
-# online_prediction_requests_per_base_model, region us-central1 — verificado con
-# `gcloud alpha services quota list`). gemini-2.5-flash no aparece aquí: usa
-# Dynamic Shared Quota (pool compartido de Google, sin límite fijo por proyecto).
-RPM_LIMITS = {
-    'imagen-3.0-generate': 20,      # subido de 1 -> 20 el 2026-07-06
-    'imagen-3.0-capability': 10,
-}
+# online_prediction_requests_per_base_model — verificado con
+# `gcloud alpha services quota list`). Vacío desde 2026-08-07 (migración
+# Imagen 3 -> Gemini 3.1 Flash Image, HALLAZGO 90): las 2 entradas de Imagen 3
+# ('imagen-3.0-generate'/'imagen-3.0-capability') quedaron sin uso al cambiar de
+# modelo. gemini-3.1-flash-image no tiene límite fijo conocido (probable Dynamic
+# Shared Quota, igual que gemini-2.5-flash) — agregar una entrada aquí solo si
+# aparecen 429s reales en producción.
+RPM_LIMITS = {}
 
 RETRY_DELAYS = [10, 20, 40]
 

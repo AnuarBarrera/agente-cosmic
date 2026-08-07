@@ -156,15 +156,14 @@ STRIPE_SECRET_KEY = get_env('STRIPE_SECRET_KEY', default='')
 # Google Cloud — Vertex AI ADC (Application Default Credentials)
 GOOGLE_CLOUD_PROJECT = get_env('GOOGLE_CLOUD_PROJECT', default='agente-cosmic')
 GOOGLE_CLOUD_STORAGE_BUCKET = get_env('GOOGLE_CLOUD_STORAGE_BUCKET', default='agente-cosmic-assets')
-GOOGLE_CLOUD_LOCATION = get_env('GOOGLE_CLOUD_LOCATION', default='us-central1')
+GOOGLE_CLOUD_LOCATION = get_env('GOOGLE_CLOUD_LOCATION', default='global')
 GOOGLE_CLOUD_LOCATION_TEXT = get_env('GOOGLE_CLOUD_LOCATION_TEXT', default='global')
 # Label adjunto a cada llamada a Vertex AI (labels= en Generate*Config) para poder
 # separar costo de produccion vs desarrollo en el billing export de BigQuery.
 # Produccion debe fijar GCP_REQUEST_ORIGIN=production en .env.prod.
 GCP_REQUEST_ORIGIN = get_env('GCP_REQUEST_ORIGIN', default='development')
 VERTEX_TEXT_MODEL = 'publishers/google/models/gemini-3.5-flash'
-VERTEX_IMAGE_MODEL = 'imagen-3.0-generate-001'
-VERTEX_IMAGE_EDIT_MODEL = 'imagen-3.0-capability-001'
+VERTEX_IMAGE_MODEL = 'gemini-3.1-flash-image'
 VERTEX_VERTEX_MODEL = 'publishers/google/models/gemini-2.5-flash'
 VERTEX_VIDEO_MODEL = 'veo-3.1-fast-generate-001'
 VERTEX_MUSIC_MODEL = 'lyria-3-clip-preview'

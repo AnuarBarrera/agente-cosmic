@@ -14,7 +14,7 @@ from google.genai import types
 from django.conf import settings
 from playwright.sync_api import sync_playwright
 from core.shared.metrics import GCS_OPERATIONS
-from core.shared.metrics_utils import track_external_api, record_tokens, record_imagen_generation, vertex_labels
+from core.shared.metrics_utils import track_external_api, record_tokens, record_gemini_image_generation, vertex_labels
 from core.shared.rate_limiter import call_with_429_retry
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -797,7 +797,7 @@ class ImageGenerator:
                     ),
                 )
             if resp.generated_images:
-                record_imagen_generation('generate')
+                record_gemini_image_generation('generate')
                 return resp.generated_images[0].image.image_bytes
             raise ValueError("No image returned by Imagen")
         with track_external_api('gemini'):

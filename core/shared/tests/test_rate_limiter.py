@@ -42,42 +42,46 @@ def test_throttle_noop_for_model_without_known_limit(fake_redis):
 
 
 def test_throttle_allows_calls_within_limit(fake_redis):
-    for _ in range(20):
-        rate_limiter.throttle('imagen-3.0-generate-001')
-    key = rate_limiter._minute_key('imagen-3.0-generate')
-    assert fake_redis.store[key] == 20
+    with patch.dict(rate_limiter.RPM_LIMITS, {'test-model-generate': 20}):
+        for _ in range(20):
+            rate_limiter.throttle('test-model-generate-001')
+        key = rate_limiter._minute_key('test-model-generate')
+        assert fake_redis.store[key] == 20
 
 
 @patch('core.shared.rate_limiter.time.sleep')
 def test_throttle_waits_when_over_limit(mock_sleep, fake_redis):
-    key = rate_limiter._minute_key('imagen-3.0-generate')
-    for _ in range(20):
-        rate_limiter.throttle('imagen-3.0-generate-001')
-    mock_sleep.assert_not_called()
+    with patch.dict(rate_limiter.RPM_LIMITS, {'test-model-generate': 20}):
+        key = rate_limiter._minute_key('test-model-generate')
+        for _ in range(20):
+            rate_limiter.throttle('test-model-generate-001')
+        mock_sleep.assert_not_called()
 
-    # Simula que la ventana del minuto expiró mientras "esperábamos" — evita
-    # un loop infinito en el test, ya que time.sleep está mockeado (no avanza el reloj real).
-    mock_sleep.side_effect = lambda *a, **k: fake_redis.store.pop(key, None)
+        # Simula que la ventana del minuto expiró mientras "esperábamos" — evita
+        # un loop infinito en el test, ya que time.sleep está mockeado (no avanza el reloj real).
+        mock_sleep.side_effect = lambda *a, **k: fake_redis.store.pop(key, None)
 
-    # La petición 21 excede el límite de 20/min — debe esperar antes de continuar
-    rate_limiter.throttle('imagen-3.0-generate-001')
-    mock_sleep.assert_called_once()
-    assert fake_redis.store[key] == 1  # la ventana se reinició, este es el primer conteo
+        # La petición 21 excede el límite de 20/min — debe esperar antes de continuar
+        rate_limiter.throttle('test-model-generate-001')
+        mock_sleep.assert_called_once()
+        assert fake_redis.store[key] == 1  # la ventana se reinició, este es el primer conteo
 
 
 def test_diagnose_429_confirms_when_over_limit(fake_redis):
-    key = rate_limiter._minute_key('imagen-3.0-generate')
-    fake_redis.store[key] = 20
-    msg = rate_limiter.diagnose_429('imagen-3.0-generate-001')
-    assert 'CONFIRMADO' in msg
+    with patch.dict(rate_limiter.RPM_LIMITS, {'test-model-generate': 20}):
+        key = rate_limiter._minute_key('test-model-generate')
+        fake_redis.store[key] = 20
+        msg = rate_limiter.diagnose_429('test-model-generate-001')
+        assert 'CONFIRMADO' in msg
 
 
 def test_diagnose_429_rules_out_when_under_limit(fake_redis):
-    key = rate_limiter._minute_key('imagen-3.0-generate')
-    fake_redis.store[key] = 3
-    msg = rate_limiter.diagnose_429('imagen-3.0-generate-001')
-    assert 'CONFIRMADO' not in msg
-    assert 'no se explica' in msg
+    with patch.dict(rate_limiter.RPM_LIMITS, {'test-model-generate': 20}):
+        key = rate_limiter._minute_key('test-model-generate')
+        fake_redis.store[key] = 3
+        msg = rate_limiter.diagnose_429('test-model-generate-001')
+        assert 'CONFIRMADO' not in msg
+        assert 'no se explica' in msg
 
 
 def test_diagnose_429_unknown_model_reports_dsq(fake_redis):

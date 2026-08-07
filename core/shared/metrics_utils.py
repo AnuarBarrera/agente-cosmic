@@ -22,7 +22,12 @@ def vertex_labels() -> dict:
 # ---------------------------------------------------------------------------
 # Precios (microdólares para evitar floats en contadores)
 # Gemini 2.5 Flash: $0.075/1M input tokens, $0.30/1M output tokens
-# Imagen 3 generate / bgswap: $0.04/imagen
+# Gemini 3.1 Flash Image (1024x1024 estándar): $0.067/imagen — fuente:
+#   documentación oficial de precios de Google (ai.google.dev/gemini-api/docs/pricing,
+#   confirmada 2026-08-07). NO usar la tarifa de tokens de texto de arriba para
+#   imágenes — los tokens de imagen de salida se facturan a una tarifa muy
+#   distinta (1120 tokens = $0.067 ⇒ ≈$59.8/1M equivalente), usar el precio
+#   plano por imagen de abajo.
 # Veo 3 Fast (video sin audio): estimado $0.10/segundo — verificar contra
 #   facturación real de GCP, este entorno no tiene acceso a la Cloud Billing
 #   Catalog API para confirmar la tarifa exacta vigente.
@@ -33,7 +38,7 @@ def vertex_labels() -> dict:
 # ---------------------------------------------------------------------------
 _GEMINI_INPUT_COST_PER_TOKEN = 0.075    # USD / 1M
 _GEMINI_OUTPUT_COST_PER_TOKEN = 0.300   # USD / 1M
-_IMAGEN_COST_PER_IMAGE = 40000          # $0.04 = 40,000 microdólares
+_GEMINI_IMAGE_COST_PER_IMAGE = 67000    # $0.067 = 67,000 microdólares
 _VEO_COST_PER_SECOND = 100000           # $0.10/s = 100,000 microdólares (estimado)
 _STT_COST_PER_15S_BLOCK = 6000          # $0.006/bloque de 15s = 6,000 microdólares
 
@@ -109,10 +114,15 @@ def record_tokens(resp, operation: str = 'unknown', user_email: str = '', job_id
         pass
 
 
-def record_imagen_generation(imagen_type: str = 'generate'):
-    """Registra una generación de Imagen 3 con su costo estimado."""
+def record_gemini_image_generation(imagen_type: str = 'generate'):
+    """Registra una generación de imagen (Gemini 3.1 Flash Image) con su costo estimado.
+    Mismas llaves de Redis que antes (cosmic:prom:I:*/IC:*) — core/shared/metrics.py
+    las sigue leyendo tal cual, el nombre de métrica de Prometheus expuesto
+    (cosmic_imagen_generations_by_type_total) no cambia (decisión de Anuar,
+    2026-08-07: es el nombre real de panel, más disruptivo de renombrar que este
+    label interno)."""
     _redis_inc(f'cosmic:prom:I:{imagen_type}')
-    _redis_inc(f'cosmic:prom:IC:{imagen_type}', _IMAGEN_COST_PER_IMAGE)
+    _redis_inc(f'cosmic:prom:IC:{imagen_type}', _GEMINI_IMAGE_COST_PER_IMAGE)
 
 
 def record_veo_generation(duration_seconds: float):

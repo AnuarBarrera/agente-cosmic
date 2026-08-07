@@ -464,7 +464,7 @@ class TestGenerateSceneStill:
         mock_resp = MagicMock()
         mock_resp.generated_images = [mock_generated]
         with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc, \
-             patch('core.content_pipeline.generators.reel_generator.record_imagen_generation') as mock_record:
+             patch('core.content_pipeline.generators.reel_generator.record_gemini_image_generation') as mock_record:
             mock_vc.return_value.models.generate_images.return_value = mock_resp
             result = gen._generate_scene_still('a workshop scene')
         assert result == fake_image

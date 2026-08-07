@@ -21,7 +21,7 @@ from core.shared.metrics import GCS_OPERATIONS
 from core.shared.metrics_utils import (
     track_external_api, record_tokens, record_veo_generation,
     record_lyria_generation, record_tts_generation,
-    record_playwright_overlay_fallback, record_imagen_generation,
+    record_playwright_overlay_fallback, record_gemini_image_generation,
     record_hyperframes_generation, record_hyperframes_fallback,
     vertex_labels,
 )
@@ -703,7 +703,7 @@ class ReelGenerator:
                     ),
                 )
             if resp.generated_images:
-                record_imagen_generation('reel_scene')
+                record_gemini_image_generation('reel_scene')
                 return resp.generated_images[0].image.image_bytes
             # Motivo tipico: filtro de seguridad de Imagen bloqueo la generacion
             # (prompt rechazado) sin lanzar excepcion — solo devuelve la lista vacia.
