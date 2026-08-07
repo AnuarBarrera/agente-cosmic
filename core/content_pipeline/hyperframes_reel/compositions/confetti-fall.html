@@ -62,7 +62,13 @@
     // Unica luz que proyecta sombra -- un solo mapa de sombra por frame, no uno
     // por luz, para acotar el costo (verificado en spike de rendimiento,
     // HALLAZGO 89). El frustum de la camara de sombra cubre el area real donde
-    // se mueven los objetos de este template (marco + gotas de confeti).
+    // se mueven las gotas de confeti (unico objeto de este template con
+    // castShadow). El marco (`frame`, una placa solida detras de la foto en
+    // z=0, mientras la foto esta en 0.05) no puede proyectar sombra sobre ella
+    // sin taparla por completo -- a diferencia de frame-assembly, donde el
+    // marco son 4 barras de borde que sí se pudieron mover delante. Si se
+    // quiere sombra del marco aqui, habria que reconstruirlo como barras de
+    // borde igual que frame-assembly (fuera de alcance de este cambio).
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.width = 1024;
     keyLight.shadow.mapSize.height = 1024;

@@ -53,6 +53,12 @@
     scene.add(ambientLight);
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
     keyLight.position.set(2, 3, 4);
+    // Unica luz que proyecta sombra -- un solo mapa de sombra por frame, no uno
+    // por luz, para acotar el costo (verificado en spike de rendimiento,
+    // HALLAZGO 89). El frustum de la camara de sombra cubre el area real donde
+    // se mueven las barras del marco (unico objeto de este template con
+    // castShadow -- ver comentario en makeBar() mas abajo sobre por que se
+    // movieron a z=0.06, delante de los cuadrantes de la foto).
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.width = 1024;
     keyLight.shadow.mapSize.height = 1024;
@@ -166,7 +172,11 @@
       // (la luz viaja hacia -z). Se mueven a z=0.06, delante de los
       // cuadrantes, para que el marco proyecte sombra real sobre la foto. Las
       // barras solo ocupan el borde exterior, nunca se superponen con el area
-      // de la foto en X/Y, asi que este cambio no tapa nada del centro.
+      // de la foto en X/Y, asi que este cambio no tapa nada del centro. Nota:
+      // este cambio de Z sí incrementa ligeramente (~10%) el recorte
+      // preexistente del borde decorativo contra el canvas en el punto mas
+      // cerrado del dolly (ya documentado arriba como trade-off aceptado,
+      // nunca afecta a la foto) -- verificado en la revision final de rama.
       mesh.position.z = 0.06;
       mesh.castShadow = true;
       mesh.userData.finalX = finalX;

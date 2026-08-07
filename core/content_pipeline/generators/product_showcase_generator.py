@@ -124,7 +124,7 @@ class ProductShowcaseGenerator:
         """Gemini elige el template Y el movimiento de camara que mejor calzan con
         el tono de marca, en una sola llamada -- extension del patron ya usado por
         _choose_reel_template en reel_generator.py, ahora con 2 dimensiones
-        independientes (efecto/personaje, movimiento de camara de fondo)."""
+        independientes (efecto, movimiento de camara de fondo)."""
         try:
             client = _vertex_text_client()
             prompt = (

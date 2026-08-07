@@ -385,10 +385,10 @@ class TestShowcaseCatalogIntegrity:
         # Las 3 composiciones definen sus propias 3 funciones applyCameraMotion_*
         # (sin modulo compartido, por diseño -- ver comentarios en cada archivo).
         # Este test detecta si alguien edita una copia sin replicar el cambio en
-        # las otras 5. Se normalizan comentarios de linea y espacios en blanco
-        # porque los 3 templates originales llevan comentarios inline que los 3
-        # templates de personaje no tienen -- la logica (lo que importa aqui) es
-        # identica en las 6.
+        # las otras 2. Se normalizan comentarios de linea y espacios en blanco
+        # porque los comentarios inline de cada archivo pueden diferir levemente
+        # (ver cada composicion) -- la logica (lo que importa aqui) es identica
+        # en los 3.
         import re
         from core.content_pipeline.generators.product_showcase_generator import _SHOWCASE_COMPOSITIONS, _HYPERFRAMES_PROJECT_DIR
 
@@ -409,4 +409,36 @@ class TestShowcaseCatalogIntegrity:
         distinct_versions = set(normalized_blocks.values())
         assert len(distinct_versions) == 1, (
             f"applyCameraMotion_* divergio entre templates: {normalized_blocks}"
+        )
+
+    def test_shadow_setup_has_no_drift_across_templates(self):
+        # Las 3 composiciones configuran su unica luz con sombra (keyLight) con
+        # el mismo bloque de codigo (mapSize + limites de frustum de la camara
+        # de sombra) -- sin modulo compartido, por diseño -- ver comentarios en
+        # cada archivo. Este test detecta si alguien edita una copia sin
+        # replicar el cambio en las otras 2. Se normalizan comentarios de linea
+        # y espacios en blanco porque los comentarios inline de cada archivo
+        # difieren a proposito (cada uno explica que objeto de ESE template es
+        # el que castea sombra) -- la logica (lo que importa aqui) es identica
+        # en los 3.
+        import re
+        from core.content_pipeline.generators.product_showcase_generator import _SHOWCASE_COMPOSITIONS, _HYPERFRAMES_PROJECT_DIR
+
+        def normalize(block: str) -> str:
+            no_comments = re.sub(r'//[^\n]*', '', block)
+            return re.sub(r'\s+', ' ', no_comments).strip()
+
+        normalized_blocks = {}
+        for template, path in _SHOWCASE_COMPOSITIONS.items():
+            full_path = os.path.join(_HYPERFRAMES_PROJECT_DIR, path)
+            with open(full_path) as f:
+                content = f.read()
+            start = content.index('renderer.shadowMap.enabled = true')
+            end = content.index('scene.add(keyLight);', start)
+            block = content[start:end]
+            normalized_blocks[template] = normalize(block)
+
+        distinct_versions = set(normalized_blocks.values())
+        assert len(distinct_versions) == 1, (
+            f"bloque de sombra divergio entre templates: {normalized_blocks}"
         )

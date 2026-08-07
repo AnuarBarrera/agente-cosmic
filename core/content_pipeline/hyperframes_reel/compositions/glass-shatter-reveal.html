@@ -48,6 +48,11 @@
     scene.add(ambientLight);
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
     keyLight.position.set(2, 3, 4);
+    // Unica luz que proyecta sombra -- un solo mapa de sombra por frame, no uno
+    // por luz, para acotar el costo (verificado en spike de rendimiento,
+    // HALLAZGO 89). El frustum de la camara de sombra cubre el area real donde
+    // se mueven los fragmentos de vidrio (unico objeto de este template con
+    // castShadow, ver mas abajo).
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.width = 1024;
     keyLight.shadow.mapSize.height = 1024;
@@ -273,13 +278,19 @@
         frag.rotation.z = eased * frag.userData.spinSpeed * Math.PI;
         frag.material.opacity = 1 - eased;
       });
-      // Todos los fragmentos comparten el mismo `eased` (no hay variacion
-      // por-fragmento en su opacidad), asi que la sombra combinada se puede
-      // atar 1:1 a esa misma curva: en t=0 el panel esta opaco y la sombra
-      // a su intensidad base; al terminar SHATTER_DURATION los fragmentos ya
-      // son invisibles (opacity=0) y la sombra tambien llega a 0 -- evita el
-      // artefacto de una sombra opaca "fantasma" sobre vidrio ya transparente.
-      shadowCatcherMaterial.opacity = SHADOW_CATCHER_BASE_OPACITY * (1 - eased);
+      // FIX revision final de rama: (1 - eased) daba una ventana casi nula de
+      // sombra visible (medido: 0.38% de pixeles con cambio real en t=1.0,
+      // casi nada despues). Motivo: en eased~0 el panel sigue opaco y tapa
+      // por completo al catcher (fragmentos en z=0.1, catcher en 0.055,
+      // delante de la camara) aunque la formula ya pida sombra a maxima
+      // intensidad; y para cuando los fragmentos se separan lo suficiente
+      // como para revelar el catcher, `eased` ya bajo mucho la opacidad de la
+      // sombra. `4 * eased * (1 - eased)` es una "joroba": vale 0 en
+      // eased=0 y en eased=1, y su pico (1.0) cae exactamente en eased=0.5 --
+      // justo cuando los fragmentos ya se separaron lo suficiente para
+      // revelar el catcher pero siguen bastante opacos, que es la unica
+      // ventana real donde la sombra es visible y tiene sentido mostrarla.
+      shadowCatcherMaterial.opacity = SHADOW_CATCHER_BASE_OPACITY * (4 * eased * (1 - eased));
 
       const burst = Math.max(0, 1 - t / BURST_DURATION_SECONDS) * BURST_PEAK_INTENSITY;
       keyLight.intensity = KEY_LIGHT_BASE_INTENSITY + burst;

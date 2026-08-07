@@ -4485,3 +4485,30 @@ Veredicto: GO. 29.8s (peor de las 2 corridas) está holgadamente por
 
 Severidad: N/A — spike de validación, no bug.
 Prioridad: Cerrado.
+
+Actualización 2026-08-07 (revisión final de rama): la revisión final midió
+  los 3 templates completos del catálogo (confetti-fall, frame-assembly,
+  glass-shatter-reveal), con TODOS sus objetos de identidad reales (no un
+  solo objeto simplificado como el spike de arriba), a través del mismo
+  pipeline real (`ProductShowcaseGenerator._generate_showcase` dentro de
+  `rqworker`). Resultado por template y movimiento de cámara:
+
+  | template              | base (sin sombras) | sway_dolly | slow_orbit | static_hold |
+  |-----------------------|---------------------|------------|------------|-------------|
+  | confetti-fall         | 36.6s               | 45.7s      | 41.2s      | 44.0s       |
+  | frame-assembly        | 27.3s               | 33.6s      | 31.1s      | 32.1s       |
+  | glass-shatter-reveal  | 26.4s               | 31.7s      | 30.4s      | 30.4s       |
+
+  El peor caso real medido (confetti-fall + sway_dolly, 45.7s) es ~55% más
+  lento que el peor caso del spike original (29.8s) — el spike, al usar un
+  solo objeto con castShadow en vez de la carga completa de cada template
+  (hasta 10 gotas de confeti con castShadow, por ejemplo), subestimó el
+  costo real. Aun así, 45.7s sigue muy por debajo del timeout de 120s (38%
+  del timeout en el peor caso real, vs el 25% de margen usado como criterio
+  en HALLAZGO 88), así que el veredicto GO se sostiene sin cambios de
+  alcance. Lección para calibrar futuros spikes de este tipo: cuando el
+  objeto real que se está validando es un catálogo de templates con
+  múltiples objetos con castShadow (no una sola primitiva), el spike debe
+  medir con la carga completa (o al menos documentar explícitamente el
+  factor de subestimación esperado) en vez de asumir que un solo objeto
+  representa el caso real.
