@@ -42,6 +42,8 @@
     const renderer = new THREE.WebGLRenderer({ canvas, alpha: false, antialias: true });
     renderer.setSize(1080, 1920, false);
     renderer.setPixelRatio(1);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b0f14);
@@ -57,6 +59,19 @@
     scene.add(ambientLight);
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
     keyLight.position.set(2, 3, 4);
+    // Unica luz que proyecta sombra -- un solo mapa de sombra por frame, no uno
+    // por luz, para acotar el costo (verificado en spike de rendimiento,
+    // HALLAZGO 89). El frustum de la camara de sombra cubre el area real donde
+    // se mueven los objetos de este template (marco + gotas de confeti).
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.width = 1024;
+    keyLight.shadow.mapSize.height = 1024;
+    keyLight.shadow.camera.left = -1.6;
+    keyLight.shadow.camera.right = 1.6;
+    keyLight.shadow.camera.top = 2.2;
+    keyLight.shadow.camera.bottom = -2.2;
+    keyLight.shadow.camera.near = 1;
+    keyLight.shadow.camera.far = 10;
     scene.add(keyLight);
     const fillLight = new THREE.DirectionalLight(0xaad4ff, 0.6);
     fillLight.position.set(-3, 1, 2);
@@ -130,6 +145,19 @@
     photoMesh.position.z = 0.05;
     cardGroup.add(photoMesh);
 
+    // Plano invisible salvo donde le cae sombra encima (THREE.ShadowMaterial) --
+    // NO se toca el material de la foto (MeshBasicMaterial, sin iluminar) para
+    // no alterar sus colores. Z ligeramente delante de la foto (0.05) para que
+    // la sombra se componga visualmente sobre ella sin z-fighting. Las gotas
+    // de confeti (z 0-0.2) quedan delante de este plano, en la trayectoria de
+    // la luz hacia -z, por eso reciben la sombra correctamente aqui.
+    const shadowCatcherGeometry = new THREE.PlaneGeometry(FRAME_WIDTH, FRAME_HEIGHT);
+    const shadowCatcherMaterial = new THREE.ShadowMaterial({ opacity: 0.4 });
+    const shadowCatcher = new THREE.Mesh(shadowCatcherGeometry, shadowCatcherMaterial);
+    shadowCatcher.position.z = 0.055;
+    shadowCatcher.receiveShadow = true;
+    cardGroup.add(shadowCatcher);
+
     function applyPhotoTexture() {
       const texture = new THREE.Texture(photoImg);
       texture.needsUpdate = true;
@@ -201,6 +229,7 @@
         emissive: pieceColor, emissiveIntensity: 0.15,
       });
       const mesh = new THREE.Mesh(dropGeometry, material);
+      mesh.castShadow = true;
       mesh.userData.startX = (pseudoRandom(i * 2.17) * 2 - 1) * CONFETTI_SPREAD_X;
       mesh.userData.startOffset = pseudoRandom(i * 5.31) * CONFETTI_FALL_RANGE;
       mesh.userData.spinSpeedX = 0.8 + i * 0.05;
