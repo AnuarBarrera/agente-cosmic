@@ -126,6 +126,14 @@ incorrecta):
   Para este archivo el valor correcto es `'1:1'`.
 - Gemini no tiene parámetro estructurado de negative prompt — se dobla el texto de
   `_IMAGE_NEGATIVE_PROMPT` dentro del prompt.
+- **Corrección de costo (hallazgo real, no es una decisión de producto)**: la rama Gemini
+  actual llama `record_tokens(resp)` tras generar — ese mecanismo factura a la tarifa de
+  texto (`_GEMINI_OUTPUT_COST_PER_TOKEN = $0.30/1M tokens`), pero los tokens de imagen de
+  salida se facturan a una tarifa muy distinta (1120 tokens = $0.067 ⇒ ≈$59.8/1M
+  equivalente) — dejar `record_tokens(resp)` subestimaría el costo real ~200x. Se
+  reemplaza por `record_gemini_image_generation('generate')` (el mismo mecanismo de costo
+  plano por imagen que ya usaba la rama Imagen), y se elimina la llamada a `record_tokens`
+  de esta ruta.
 
 ### `core/content_pipeline/generators/reel_generator.py:_generate_scene_still` (líneas ~691-718)
 
