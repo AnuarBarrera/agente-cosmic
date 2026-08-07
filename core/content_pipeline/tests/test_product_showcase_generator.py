@@ -322,44 +322,6 @@ class TestChooseShowcaseSelection:
         assert camera_motion == 'sway_dolly'
         mock_choice.assert_called_once()
 
-    @override_settings(
-        GOOGLE_CLOUD_PROJECT='agente-cosmic',
-        GOOGLE_CLOUD_LOCATION_TEXT='global',
-        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
-    )
-    def test_character_walk_reveal_always_forces_slow_orbit_from_gemini_choice(self):
-        # HALLAZGO critico revision final: character-walk-reveal deja al personaje
-        # cortado por el borde del canvas con sway_dolly/static_hold -- se fuerza
-        # slow_orbit siempre, sin importar que camera_motion haya elegido Gemini.
-        from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator
-        gen = ProductShowcaseGenerator(bucket_name='test-bucket')
-        for bad_motion in ('sway_dolly', 'static_hold'):
-            with patch('core.content_pipeline.generators.product_showcase_generator._vertex_text_client') as mock_vc:
-                mock_resp = MagicMock()
-                mock_resp.text = json.dumps({'template': 'character-walk-reveal', 'camera_motion': bad_motion})
-                mock_vc.return_value.models.generate_content.return_value = mock_resp
-                template, camera_motion = gen._choose_showcase_selection('tono cualquiera')
-            assert template == 'character-walk-reveal'
-            assert camera_motion == 'slow_orbit'
-
-    @override_settings(
-        GOOGLE_CLOUD_PROJECT='agente-cosmic',
-        GOOGLE_CLOUD_LOCATION_TEXT='global',
-        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
-    )
-    def test_character_walk_reveal_always_forces_slow_orbit_from_random_fallback(self):
-        # Mismo override, pero por el camino de fallback aleatorio (API error):
-        # si el template randomizado resulta ser character-walk-reveal, tambien
-        # debe forzarse slow_orbit, sin importar lo que haya dicho Gemini.
-        from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator
-        gen = ProductShowcaseGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.product_showcase_generator._vertex_text_client') as mock_vc, \
-             patch('core.content_pipeline.generators.product_showcase_generator.random.choice',
-                   return_value='character-walk-reveal'):
-            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
-            template, camera_motion = gen._choose_showcase_selection('tono cualquiera')
-        assert template == 'character-walk-reveal'
-        assert camera_motion == 'slow_orbit'
 
 
 class TestGenerateReelUsesChosenTemplate:
@@ -420,7 +382,7 @@ class TestShowcaseCatalogIntegrity:
         assert set(_SHOWCASE_POSTER_OFFSETS.keys()) == set(_SHOWCASE_TEMPLATES)
 
     def test_camera_motion_functions_have_no_drift_across_templates(self):
-        # Las 6 composiciones definen sus propias 3 funciones applyCameraMotion_*
+        # Las 3 composiciones definen sus propias 3 funciones applyCameraMotion_*
         # (sin modulo compartido, por diseño -- ver comentarios en cada archivo).
         # Este test detecta si alguien edita una copia sin replicar el cambio en
         # las otras 5. Se normalizan comentarios de linea y espacios en blanco
