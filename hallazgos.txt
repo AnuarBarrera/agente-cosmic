@@ -4446,3 +4446,42 @@ Veredicto: GO. 32.1s está holgadamente por debajo del margen de 90s
 
 Severidad: N/A — spike de validación, no bug.
 Prioridad: Cerrado.
+
+=================================================================
+HALLAZGO 89 — Spike de validación de rendimiento: sombras reales
+  (shadowMap + ShadowMaterial) para el catálogo de showcase
+  (confetti-fall, frame-assembly, glass-shatter-reveal)
+Categoría: Spike de performance (bloqueante, Plan de sombras de contacto
+  2026-08-07)
+Estado: ✅ RESUELTO — 2026-08-07 (spike ejecutado, veredicto GO)
+=================================================================
+Contexto: antes de agregar sombras de contacto reales (`DirectionalLight`
+  con `castShadow`, `PCFSoftShadowMap`, plano `ShadowMaterial` receptor)
+  al catálogo de templates de showcase, había que confirmar que el costo
+  de renderizar `shadowMap` no repite alguna regresión de rendimiento
+  como las ya vistas en este catálogo (HALLAZGO 86/87/88) — siempre
+  midiendo a través del pipeline real (`rqworker`, con su timeout real de
+  120s), nunca con `hyperframes render` suelto por CLI (sin timeout).
+  Este spike repite ese mismo método: composición mínima
+  (`_spike-shadow-perf-test.html`, temporal, ya borrada) con un
+  `BoxGeometry`/`MeshPhysicalMaterial` con `castShadow`, una luz
+  direccional con sombra de 1024x1024 y un plano `ShadowMaterial` con
+  `receiveShadow`, renderizada vía
+  `ProductShowcaseGenerator._generate_showcase` dentro del contenedor
+  que realmente ejecuta el pipeline en producción.
+
+Medido a través del pipeline real (`ProductShowcaseGenerator._generate_showcase`
+  dentro de `rqworker`, no CLI suelto), 2 corridas para descartar ruido:
+  29.2s y 29.8s para un objeto con castShadow + plano ShadowMaterial
+  receptor vs el timeout de 120s. Verificado sin jobs reales compitiendo
+  por CPU (`AnalysisJob.objects.filter(status='processing').count()` = 0
+  antes de medir).
+
+Veredicto: GO. 29.8s (peor de las 2 corridas) está holgadamente por
+  debajo del margen de 90s (25% bajo el timeout de 120s, mismo criterio
+  de margen real usado en Fase B y en HALLAZGO 88) — de hecho por debajo
+  del 25% del timeout total. Las Tareas 3-5 del plan de sombras de
+  contacto pueden continuar sin cambios de alcance.
+
+Severidad: N/A — spike de validación, no bug.
+Prioridad: Cerrado.
