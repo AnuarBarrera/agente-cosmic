@@ -4523,7 +4523,9 @@ Contexto: Google Cloud notifico (2 correos, 2026-08-07) que la fecha limite
   17 de agosto de 2026 (un correo de correccion reemplazo una fecha
   anterior de 2027 por error tipografico de Google). Esto ya estaba
   documentado como HALLAZGO IMG-12 en el archivo hallazgosImagen.txt
-  (2026-08-02, ya no existe en el repo -- este hallazgo continua esa
+  (2026-08-02, borrado en el working tree sin commitear -- sigue presente
+  en el HEAD de git al momento de escribir esto, un `git checkout` lo
+  recuperaria con su texto original -- este hallazgo continua esa
   numeracion aqui en hallazgos.txt), con severidad Baja ("no urgente,
   deadline 2027") -- quedo obsoleto por el nuevo deadline.
 
@@ -4570,6 +4572,12 @@ Verificacion real end-to-end (Task 5, 2026-08-07, dentro de `backend` con
   - Suite completa: 678 passed, 0 failed (vs 608 conocidos el 2026-07-27,
     conteo mayor por features nuevas desde entonces -- sin regresiones).
 
+Nota: la verificacion de imagen/reel de arriba se hizo con un override
+  puntual de GOOGLE_CLOUD_LOCATION=global (ver HALLAZGO 92) -- el `.env`
+  real de este servidor todavia no tiene el default correcto, asi que el
+  pipeline real (rqworker/UI) sigue roto en este servidor hasta que se
+  resuelva HALLAZGO 92.
+
 Severidad: N/A -- migracion completada antes del deadline.
 Prioridad: Cerrado.
 
@@ -4597,8 +4605,10 @@ Contexto: al leer core/shared/metrics.py durante la migracion del
 
 Propuesta de fix (no implementada, fuera de alcance de HALLAZGO 90):
   agregar 'reel_scene' a ambas tuplas en metrics.py (y opcionalmente
-  quitar 'bgswap', muerto) para que el costo/conteo real de generacion
-  de stills de reel sea visible en el dashboard.
+  quitar 'bgswap' y 'qc_retry', ambos muertos -- 'qc_retry' se lee en el
+  collector pero ningun call site real del repo lo escribe) para que el
+  costo/conteo real de generacion de stills de reel sea visible en el
+  dashboard.
 
 Severidad: Baja -- no afecta produccion, solo visibilidad de costo real
   en el panel de negocio.
@@ -4611,7 +4621,7 @@ HALLAZGO 92 — .env de este servidor sigue fijando GOOGLE_CLOUD_LOCATION=
   este servidor con el .env actual, hasta que un humano lo actualice
 Categoria: Deriva de configuracion de despliegue (bloqueante para uso
   real, no del codigo migrado)
-Estado: 🔴 CRITICO — SIN FIX — 2026-08-07 (requiere accion humana en .env)
+Estado: 🟡 REPORTADO — SIN FIX — 2026-08-07 (requiere accion humana en .env)
 =================================================================
 Contexto: durante la verificacion real end-to-end del HALLAZGO 90 (Task 5),
   el Step 1 (`ImageGenerator._generate_with_vertex` real, dentro de
@@ -4630,11 +4640,14 @@ Contexto: durante la verificacion real end-to-end del HALLAZGO 90 (Task 5),
   como referencia" -- que un agente no debe rodear via `sed`/Bash; requiere
   que Anuar lo edite directamente).
   Verificado el mismo problema en `.env.example:40`
-  (`GOOGLE_CLOUD_LOCATION=us-central1`) y ademas `.env.example:52` fija
-  `VERTEX_IMAGE_MODEL=publishers/google/models/gemini-2.5-flash-image`
-  (ni el modelo viejo ni el nuevo real -- un tercer valor obsoleto), asi
-  que la plantilla de referencia para nuevos entornos tambien quedaria
-  mal si se copia tal cual.
+  (`GOOGLE_CLOUD_LOCATION=us-central1`) -- una copia nueva de este archivo
+  repetiria el mismo bug. `.env.example:52` tambien fija un valor
+  obsoleto para VERTEX_IMAGE_MODEL
+  (`publishers/google/models/gemini-2.5-flash-image`, ni el modelo viejo
+  ni el nuevo real), pero esa variable de entorno especifica es inerte:
+  `settings.py:166` hardcodea `VERTEX_IMAGE_MODEL = 'gemini-3.1-flash-image'`
+  sin `get_env`, asi que ese valor de `.env`/`.env.example` no se lee en
+  absoluto -- solo GOOGLE_CLOUD_LOCATION es el problema real de plantilla.
   La verificacion real de este mismo hallazgo (Steps 1-2 de Task 5) se
   completo overrideando la variable solo para esas 2 llamadas puntuales
   (`docker compose exec -T -e GOOGLE_CLOUD_LOCATION=global backend ...`),
@@ -4651,9 +4664,11 @@ Accion requerida (fuera de alcance de un agente por el guardrail de
   2. `docker compose up -d --force-recreate --no-deps backend rqworker`
      (ver feedback_gunicorn_restart.md -- ni .py ni env bastan con
      restart simple, hace falta recreate).
-  3. Revisar/corregir `.env.example:40,52` para que una copia nueva del
-     archivo no repita el mismo problema (fuera de alcance de este
-     hallazgo, se deja como nota).
+  3. Revisar/corregir `.env.example:40` (GOOGLE_CLOUD_LOCATION) para que
+     una copia nueva del archivo no repita el mismo problema (fuera de
+     alcance de este hallazgo, se deja como nota). `.env.example:52`
+     (VERTEX_IMAGE_MODEL) es cosmetico -- esa variable no se lee en
+     codigo, no es urgente.
   4. Si existe un `.env.prod` separado en el servidor de produccion real
      (no localizado en este repo), verificar el mismo valor ahi antes de
      dar por cerrado el HALLAZGO 90 en produccion.
