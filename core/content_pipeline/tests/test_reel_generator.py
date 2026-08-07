@@ -895,7 +895,7 @@ class TestProbeClipDimensions:
 class TestGenerateMusic:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
-        GOOGLE_CLOUD_LOCATION='us-central1',
+        GOOGLE_CLOUD_LOCATION='global',
         VERTEX_MUSIC_MODEL='lyria-3-clip-preview',
     )
     def test_returns_audio_bytes_on_success(self):
@@ -906,20 +906,17 @@ class TestGenerateMusic:
         mock_audio.data = base64.b64encode(b'fake-music-bytes').decode()
         mock_interaction = MagicMock()
         mock_interaction.output_audio = mock_audio
-        with patch('core.content_pipeline.generators.reel_generator.genai.Client') as mock_client_cls:
-            mock_client_cls.return_value.interactions.create.return_value = mock_interaction
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.interactions.create.return_value = mock_interaction
             result = gen._generate_music('upbeat corporate, optimistic')
         assert result == b'fake-music-bytes'
-        mock_client_cls.assert_called_once_with(
-            vertexai=True, project='agente-cosmic', location='global',
-        )
-        call_kwargs = mock_client_cls.return_value.interactions.create.call_args.kwargs
+        call_kwargs = mock_vc.return_value.interactions.create.call_args.kwargs
         assert 'response_modalities' not in call_kwargs
         assert 'response_format' not in call_kwargs
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
-        GOOGLE_CLOUD_LOCATION='us-central1',
+        GOOGLE_CLOUD_LOCATION='global',
         VERTEX_MUSIC_MODEL='lyria-3-clip-preview',
     )
     def test_retries_once_and_succeeds_on_second_attempt(self):
@@ -932,31 +929,31 @@ class TestGenerateMusic:
         mock_audio.data = base64.b64encode(b'fake-music-bytes').decode()
         mock_interaction = MagicMock()
         mock_interaction.output_audio = mock_audio
-        with patch('core.content_pipeline.generators.reel_generator.genai.Client') as mock_client_cls:
-            mock_client_cls.return_value.interactions.create.side_effect = [
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.interactions.create.side_effect = [
                 Exception('content_blocked'), mock_interaction,
             ]
             result = gen._generate_music('upbeat corporate, optimistic')
         assert result == b'fake-music-bytes'
-        assert mock_client_cls.return_value.interactions.create.call_count == 2
+        assert mock_vc.return_value.interactions.create.call_count == 2
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
-        GOOGLE_CLOUD_LOCATION='us-central1',
+        GOOGLE_CLOUD_LOCATION='global',
         VERTEX_MUSIC_MODEL='lyria-3-clip-preview',
     )
     def test_returns_none_on_api_error(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.reel_generator.genai.Client') as mock_client_cls:
-            mock_client_cls.return_value.interactions.create.side_effect = Exception('error')
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.interactions.create.side_effect = Exception('error')
             result = gen._generate_music('upbeat')
         assert result is None
-        assert mock_client_cls.return_value.interactions.create.call_count == 3
+        assert mock_vc.return_value.interactions.create.call_count == 3
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
-        GOOGLE_CLOUD_LOCATION='us-central1',
+        GOOGLE_CLOUD_LOCATION='global',
         VERTEX_MUSIC_MODEL='lyria-3-clip-preview',
     )
     def test_falls_back_to_generic_prompt_on_third_attempt(self):
@@ -972,14 +969,14 @@ class TestGenerateMusic:
         mock_audio.data = base64.b64encode(b'fallback-music-bytes').decode()
         mock_interaction = MagicMock()
         mock_interaction.output_audio = mock_audio
-        with patch('core.content_pipeline.generators.reel_generator.genai.Client') as mock_client_cls:
-            mock_client_cls.return_value.interactions.create.side_effect = [
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.interactions.create.side_effect = [
                 Exception('content_blocked'), Exception('content_blocked'), mock_interaction,
             ]
             result = gen._generate_music('upbeat corporate, optimistic')
         assert result == b'fallback-music-bytes'
-        assert mock_client_cls.return_value.interactions.create.call_count == 3
-        third_call_kwargs = mock_client_cls.return_value.interactions.create.call_args_list[2].kwargs
+        assert mock_vc.return_value.interactions.create.call_count == 3
+        third_call_kwargs = mock_vc.return_value.interactions.create.call_args_list[2].kwargs
         assert third_call_kwargs['input'] == _MUSIC_FALLBACK_PROMPT
 
 

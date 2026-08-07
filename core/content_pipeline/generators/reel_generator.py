@@ -819,15 +819,13 @@ class ReelGenerator:
 
     def _generate_music_attempt(self, prompt: str) -> bytes | None:
         try:
-            # Lyria 3 solo esta disponible en la ubicacion 'global' de Vertex AI (no
-            # en una region como us-central1) y rechaza la peticion si se especifica
-            # response_modalities/response_format explicito — el modelo devuelve
-            # audio implicitamente, sin necesidad de pedirlo.
-            client = genai.Client(
-                vertexai=True,
-                project=settings.GOOGLE_CLOUD_PROJECT,
-                location='global',
-            )
+            # Lyria 3 solo esta disponible en la ubicacion 'global' de Vertex AI y
+            # rechaza la peticion si se especifica response_modalities/response_format
+            # explicito — el modelo devuelve audio implicitamente, sin necesidad de
+            # pedirlo. GOOGLE_CLOUD_LOCATION ya apunta a 'global' desde la migracion
+            # Imagen -> Gemini 3.1 Flash Image (2026-08-07), asi que _vertex_client()
+            # sirve igual sin necesidad de un cliente dedicado.
+            client = _vertex_client()
             with track_external_api('lyria', operation='music_generate'):
                 interaction = client.interactions.create(
                     model=settings.VERTEX_MUSIC_MODEL,
