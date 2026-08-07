@@ -784,34 +784,25 @@ class ImageGenerator:
     def _generate_with_vertex(self, prompt: str) -> bytes:
         client = _vertex_client()
         model = settings.VERTEX_IMAGE_MODEL
-        if 'imagen' in model:
-            with track_external_api('imagen3', operation='image_generate'):
-                resp = client.models.generate_images(
-                    model=model,
-                    prompt=prompt,
-                    config=types.GenerateImagesConfig(
-                        number_of_images=1,
-                        aspect_ratio='1:1',
-                        negative_prompt=_IMAGE_NEGATIVE_PROMPT,
-                        labels=vertex_labels(),
-                    ),
-                )
-            if resp.generated_images:
-                record_gemini_image_generation('generate')
-                return resp.generated_images[0].image.image_bytes
-            raise ValueError("No image returned by Imagen")
-        with track_external_api('gemini'):
+        # Gemini no tiene parametro estructurado de negative_prompt (a diferencia de
+        # Imagen 3.0) -- se dobla el texto dentro del prompt afirmativo. Verificado con
+        # llamada real (2026-08-07): 2 generaciones del mismo prompt, con y sin este
+        # texto doblado, ninguna mostro iconos/texto/logos alucinados. El QC posterior
+        # (_validate_background) sigue como red de seguridad independiente de esto.
+        full_prompt = f"{prompt}\n\nAvoid: {_IMAGE_NEGATIVE_PROMPT}"
+        with track_external_api('gemini_image', operation='image_generate'):
             resp = client.models.generate_content(
                 model=model,
-                contents=prompt,
+                contents=full_prompt,
                 config=types.GenerateContentConfig(
                     response_modalities=['IMAGE', 'TEXT'],
+                    image_config=types.ImageConfig(aspect_ratio='1:1'),
                     labels=vertex_labels(),
                 ),
             )
-        record_tokens(resp)
         for part in resp.candidates[0].content.parts:
             if part.inline_data:
+                record_gemini_image_generation('generate')
                 return part.inline_data.data
         raise ValueError("No image returned by Vertex AI")
 

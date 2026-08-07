@@ -35,21 +35,50 @@ def test_generate_returns_url():
 
 @override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+    GOOGLE_CLOUD_LOCATION='global',
+    VERTEX_IMAGE_MODEL='gemini-3.1-flash-image',
 )
-def test_generate_with_vertex_passes_negative_prompt_for_imagen():
+def test_generate_with_vertex_includes_negative_prompt_text_and_forces_square():
     from core.content_pipeline.generators.image_generator import ImageGenerator, _IMAGE_NEGATIVE_PROMPT
     gen = ImageGenerator(bucket_name='test-bucket')
     mock_client = MagicMock()
-    mock_client.models.generate_images.return_value = MagicMock(
-        generated_images=[MagicMock(image=MagicMock(image_bytes=b'fake-png'))]
+    mock_part = MagicMock()
+    mock_part.inline_data.data = b'fake-png'
+    mock_client.models.generate_content.return_value = MagicMock(
+        candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
     )
     with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_client):
+        result = gen._generate_with_vertex('a test prompt')
+
+    assert result == b'fake-png'
+    call_kwargs = mock_client.models.generate_content.call_args.kwargs
+    # Gemini no tiene negative_prompt estructurado -- se dobla en el texto (decision
+    # 2026-08-07, ver spec de migracion).
+    assert _IMAGE_NEGATIVE_PROMPT in call_kwargs['contents']
+    assert call_kwargs['config'].image_config.aspect_ratio == '1:1'
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='global',
+    VERTEX_IMAGE_MODEL='gemini-3.1-flash-image',
+)
+def test_generate_with_vertex_records_image_cost_not_token_cost():
+    from core.content_pipeline.generators.image_generator import ImageGenerator
+    gen = ImageGenerator(bucket_name='test-bucket')
+    mock_client = MagicMock()
+    mock_part = MagicMock()
+    mock_part.inline_data.data = b'fake-png'
+    mock_client.models.generate_content.return_value = MagicMock(
+        candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+    )
+    with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_client), \
+         patch('core.content_pipeline.generators.image_generator.record_gemini_image_generation') as mock_record, \
+         patch('core.content_pipeline.generators.image_generator.record_tokens') as mock_tokens:
         gen._generate_with_vertex('a test prompt')
 
-    call_kwargs = mock_client.models.generate_images.call_args.kwargs
-    assert call_kwargs['config'].negative_prompt == _IMAGE_NEGATIVE_PROMPT
+    mock_record.assert_called_once_with('generate')
+    mock_tokens.assert_not_called()
 
 
 
