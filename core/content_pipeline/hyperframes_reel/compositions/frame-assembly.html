@@ -41,6 +41,8 @@
     const renderer = new THREE.WebGLRenderer({ canvas, alpha: false, antialias: true });
     renderer.setSize(1080, 1920, false);
     renderer.setPixelRatio(1);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b0f14);
@@ -51,6 +53,15 @@
     scene.add(ambientLight);
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
     keyLight.position.set(2, 3, 4);
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.width = 1024;
+    keyLight.shadow.mapSize.height = 1024;
+    keyLight.shadow.camera.left = -1.6;
+    keyLight.shadow.camera.right = 1.6;
+    keyLight.shadow.camera.top = 2.2;
+    keyLight.shadow.camera.bottom = -2.2;
+    keyLight.shadow.camera.near = 1;
+    keyLight.shadow.camera.far = 10;
     scene.add(keyLight);
     const fillLight = new THREE.DirectionalLight(0xaad4ff, 0.6);
     fillLight.position.set(-3, 1, 2);
@@ -150,6 +161,14 @@
     function makeBar(width, height, finalX, finalY, startX, startY, startRotZ) {
       const geometry = new THREE.BoxGeometry(width, height, 0.08);
       const mesh = new THREE.Mesh(geometry, barMaterial);
+      // Antes quedaban en z=0 (implicito), DETRAS de los cuadrantes de la foto
+      // (z=0.05) -- una barra detras no puede proyectar sombra hacia adelante
+      // (la luz viaja hacia -z). Se mueven a z=0.06, delante de los
+      // cuadrantes, para que el marco proyecte sombra real sobre la foto. Las
+      // barras solo ocupan el borde exterior, nunca se superponen con el area
+      // de la foto en X/Y, asi que este cambio no tapa nada del centro.
+      mesh.position.z = 0.06;
+      mesh.castShadow = true;
       mesh.userData.finalX = finalX;
       mesh.userData.finalY = finalY;
       mesh.userData.startX = startX;
@@ -170,6 +189,18 @@
       makeBar(BORDER_THICKNESS, PHOTO_HEIGHT, -sideBarX, 0, -sideBarX - OFFSET_DISTANCE, 0, -Math.PI / 4),
       makeBar(BORDER_THICKNESS, PHOTO_HEIGHT, sideBarX, 0, sideBarX + OFFSET_DISTANCE, 0, Math.PI / 4),
     ];
+
+    // Plano invisible salvo donde le cae sombra encima. Z=0.055: detras de
+    // las barras (0.06, para recibir su sombra) pero delante de los
+    // cuadrantes de la foto (0.05, para que la sombra se componga visualmente
+    // sobre ella). No se toca el material de los cuadrantes (MeshBasicMaterial
+    // con la textura de la foto) para no alterar sus colores.
+    const shadowCatcherGeometry = new THREE.PlaneGeometry(barWidth, PHOTO_HEIGHT + 2 * BORDER_THICKNESS);
+    const shadowCatcherMaterial = new THREE.ShadowMaterial({ opacity: 0.4 });
+    const shadowCatcher = new THREE.Mesh(shadowCatcherGeometry, shadowCatcherMaterial);
+    shadowCatcher.position.z = 0.055;
+    shadowCatcher.receiveShadow = true;
+    cardGroup.add(shadowCatcher);
 
     // Destello ("pattern interrupt") centrado en el momento en que el marco
     // termina de ensamblarse (t=ASSEMBLY_DURATION), no al inicio -- se siente
