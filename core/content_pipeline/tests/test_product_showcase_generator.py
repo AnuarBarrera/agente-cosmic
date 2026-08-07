@@ -268,6 +268,28 @@ class TestChooseShowcaseSelection:
         GOOGLE_CLOUD_LOCATION_TEXT='global',
         VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
     )
+    def test_invalid_template_only_randomizes_template_keeps_valid_camera_motion(self):
+        # Cada dimension se valida/randomiza de forma independiente: si solo el
+        # template es invalido, el camera_motion valido elegido por Gemini se
+        # conserva en vez de randomizarse tambien (antes: 1 invalida tiraba las 2).
+        from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator
+        gen = ProductShowcaseGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.product_showcase_generator._vertex_text_client') as mock_vc, \
+             patch('core.content_pipeline.generators.product_showcase_generator.random.choice',
+                   return_value='confetti-fall') as mock_choice:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"template": "not-a-real-template", "camera_motion": "sway_dolly"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            template, camera_motion = gen._choose_showcase_selection('tono cualquiera')
+        assert template == 'confetti-fall'
+        assert camera_motion == 'sway_dolly'
+        mock_choice.assert_called_once()
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
+    )
     def test_falls_back_to_random_on_invalid_camera_motion(self):
         from core.content_pipeline.generators.product_showcase_generator import (
             ProductShowcaseGenerator, _SHOWCASE_TEMPLATES, _CAMERA_MOTIONS,
@@ -280,6 +302,64 @@ class TestChooseShowcaseSelection:
             template, camera_motion = gen._choose_showcase_selection('tono cualquiera')
         assert template in _SHOWCASE_TEMPLATES
         assert camera_motion in _CAMERA_MOTIONS
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
+    )
+    def test_invalid_camera_motion_only_randomizes_camera_motion_keeps_valid_template(self):
+        from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator
+        gen = ProductShowcaseGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.product_showcase_generator._vertex_text_client') as mock_vc, \
+             patch('core.content_pipeline.generators.product_showcase_generator.random.choice',
+                   return_value='sway_dolly') as mock_choice:
+            mock_resp = MagicMock()
+            mock_resp.text = '{"template": "frame-assembly", "camera_motion": "not-a-real-motion"}'
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            template, camera_motion = gen._choose_showcase_selection('tono cualquiera')
+        assert template == 'frame-assembly'
+        assert camera_motion == 'sway_dolly'
+        mock_choice.assert_called_once()
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
+    )
+    def test_character_walk_reveal_always_forces_slow_orbit_from_gemini_choice(self):
+        # HALLAZGO critico revision final: character-walk-reveal deja al personaje
+        # cortado por el borde del canvas con sway_dolly/static_hold -- se fuerza
+        # slow_orbit siempre, sin importar que camera_motion haya elegido Gemini.
+        from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator
+        gen = ProductShowcaseGenerator(bucket_name='test-bucket')
+        for bad_motion in ('sway_dolly', 'static_hold'):
+            with patch('core.content_pipeline.generators.product_showcase_generator._vertex_text_client') as mock_vc:
+                mock_resp = MagicMock()
+                mock_resp.text = json.dumps({'template': 'character-walk-reveal', 'camera_motion': bad_motion})
+                mock_vc.return_value.models.generate_content.return_value = mock_resp
+                template, camera_motion = gen._choose_showcase_selection('tono cualquiera')
+            assert template == 'character-walk-reveal'
+            assert camera_motion == 'slow_orbit'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-3.5-flash',
+    )
+    def test_character_walk_reveal_always_forces_slow_orbit_from_random_fallback(self):
+        # Mismo override, pero por el camino de fallback aleatorio (API error):
+        # si el template randomizado resulta ser character-walk-reveal, tambien
+        # debe forzarse slow_orbit, sin importar lo que haya dicho Gemini.
+        from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator
+        gen = ProductShowcaseGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.product_showcase_generator._vertex_text_client') as mock_vc, \
+             patch('core.content_pipeline.generators.product_showcase_generator.random.choice',
+                   return_value='character-walk-reveal'):
+            mock_vc.return_value.models.generate_content.side_effect = Exception('API error')
+            template, camera_motion = gen._choose_showcase_selection('tono cualquiera')
+        assert template == 'character-walk-reveal'
+        assert camera_motion == 'slow_orbit'
 
 
 class TestGenerateReelUsesChosenTemplate:
@@ -334,3 +414,37 @@ class TestShowcaseCatalogIntegrity:
             with open(full_path) as f:
                 content = f.read()
             assert '"id":"camera_motion"' in content, f"{template} no declara camera_motion"
+
+    def test_poster_offset_keys_match_templates_list(self):
+        from core.content_pipeline.generators.product_showcase_generator import _SHOWCASE_TEMPLATES, _SHOWCASE_POSTER_OFFSETS
+        assert set(_SHOWCASE_POSTER_OFFSETS.keys()) == set(_SHOWCASE_TEMPLATES)
+
+    def test_camera_motion_functions_have_no_drift_across_templates(self):
+        # Las 6 composiciones definen sus propias 3 funciones applyCameraMotion_*
+        # (sin modulo compartido, por diseño -- ver comentarios en cada archivo).
+        # Este test detecta si alguien edita una copia sin replicar el cambio en
+        # las otras 5. Se normalizan comentarios de linea y espacios en blanco
+        # porque los 3 templates originales llevan comentarios inline que los 3
+        # templates de personaje no tienen -- la logica (lo que importa aqui) es
+        # identica en las 6.
+        import re
+        from core.content_pipeline.generators.product_showcase_generator import _SHOWCASE_COMPOSITIONS, _HYPERFRAMES_PROJECT_DIR
+
+        def normalize(block: str) -> str:
+            no_comments = re.sub(r'//[^\n]*', '', block)
+            return re.sub(r'\s+', ' ', no_comments).strip()
+
+        normalized_blocks = {}
+        for template, path in _SHOWCASE_COMPOSITIONS.items():
+            full_path = os.path.join(_HYPERFRAMES_PROJECT_DIR, path)
+            with open(full_path) as f:
+                content = f.read()
+            start = content.index('function applyCameraMotion_swayDolly')
+            end = content.index('applyCameraMotion(t, camera, cardGroup)', start)
+            block = content[start:end]
+            normalized_blocks[template] = normalize(block)
+
+        distinct_versions = set(normalized_blocks.values())
+        assert len(distinct_versions) == 1, (
+            f"applyCameraMotion_* divergio entre templates: {normalized_blocks}"
+        )
