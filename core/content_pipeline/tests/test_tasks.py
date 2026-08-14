@@ -763,7 +763,7 @@ def test_enqueue_week_images_uses_longer_timeout_for_reel(job_with_dna):
     reel_post = calendar.posts.get(day_number=8)
     single_post = calendar.posts.get(day_number=9)
     assert timeouts_by_post_id[str(reel_post.id)] == 2700
-    assert timeouts_by_post_id[str(single_post.id)] == 300
+    assert timeouts_by_post_id[str(single_post.id)] == 900
 
 
 def test_enqueue_week_images_selects_correct_day_range_for_week_index(job_with_dna):

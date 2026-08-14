@@ -273,7 +273,15 @@ def _enqueue_post_images_then(post_ids: list, closing_fn, *closing_args) -> None
         # en project_rq_orphaned_job_2026_07_14. 2700s cubre 1800+480 con
         # margen para TTS/musica/ffmpeg/uploads sin tocar ninguna logica de
         # generacion.
-        timeout = 2700 if post.format == ContentPost.FORMAT_REEL else 300
+        #
+        # 300s para imagen suelta murio en la prueba real del 2026-08-11 tras
+        # agregar throttle real de 1/min para gemini-3.1-flash-image
+        # (RPM_LIMITS, ver rate_limiter.py): ese 1/min se comparte entre los 3
+        # rqworkers, asi que una imagen puede esperar varios minutos solo su
+        # turno antes de intentar siquiera la primera llamada, sin contar los
+        # reintentos propios de call_with_429_retry. 900s da margen para esa
+        # espera + reintentos sin acercarse al caso del reel.
+        timeout = 2700 if post.format == ContentPost.FORMAT_REEL else 900
         jobs.append(django_rq.enqueue(
             backfill_image_task, post_id,
             job_timeout=timeout,

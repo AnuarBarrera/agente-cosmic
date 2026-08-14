@@ -463,7 +463,8 @@ class TestGenerateSceneStill:
         mock_part.inline_data.data = fake_image
         mock_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=[mock_part]))])
         with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc, \
-             patch('core.content_pipeline.generators.reel_generator.record_gemini_image_generation') as mock_record:
+             patch('core.content_pipeline.generators.reel_generator.record_gemini_image_generation') as mock_record, \
+             patch('core.shared.rate_limiter.throttle'):
             mock_vc.return_value.models.generate_content.return_value = mock_resp
             result = gen._generate_scene_still('a workshop scene')
         assert result == fake_image
@@ -485,10 +486,39 @@ class TestGenerateSceneStill:
     def test_returns_none_on_api_error(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc, \
+             patch('core.shared.rate_limiter.throttle'):
             mock_vc.return_value.models.generate_content.side_effect = Exception('rejected')
             result = gen._generate_scene_still('a workshop scene')
         assert result is None
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='global',
+        VERTEX_IMAGE_MODEL='gemini-3.1-flash-image',
+    )
+    def test_retries_on_429_and_succeeds(self):
+        # HALLAZGO: a diferencia de image_generator._generate_with_retry, esta funcion
+        # nunca paso sus llamadas por call_with_429_retry -- un 429 transitorio se daba
+        # por perdido de inmediato (reintento instantaneo sin backoff, ver caller
+        # _generate_still_scene_clip). Logs reales 2026-08-07/2026-08-10 muestran rafagas
+        # de "Gemini scene generation failed: 429" separadas por <1s.
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_image = b'fake-image-bytes'
+        mock_part = MagicMock()
+        mock_part.inline_data.data = fake_image
+        mock_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=[mock_part]))])
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc, \
+             patch('core.content_pipeline.generators.reel_generator.record_gemini_image_generation'), \
+             patch('core.shared.rate_limiter.throttle'), \
+             patch('core.shared.rate_limiter.time.sleep'):
+            mock_vc.return_value.models.generate_content.side_effect = [
+                Exception('429 RESOURCE_EXHAUSTED'), mock_resp,
+            ]
+            result = gen._generate_scene_still('a workshop scene')
+        assert result == fake_image
+        assert mock_vc.return_value.models.generate_content.call_count == 2
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
@@ -501,7 +531,8 @@ class TestGenerateSceneStill:
         mock_part = MagicMock()
         mock_part.inline_data = None
         mock_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=[mock_part]))])
-        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc, \
+             patch('core.shared.rate_limiter.throttle'):
             mock_vc.return_value.models.generate_content.return_value = mock_resp
             result = gen._generate_scene_still('a workshop scene')
         assert result is None

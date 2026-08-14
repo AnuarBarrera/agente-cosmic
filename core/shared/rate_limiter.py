@@ -6,13 +6,22 @@ logger = logging.getLogger(__name__)
 
 # Límites reales de Vertex AI para este proyecto (aiplatform.googleapis.com/
 # online_prediction_requests_per_base_model — verificado con
-# `gcloud alpha services quota list`). Vacío desde 2026-08-07 (migración
-# Imagen 3 -> Gemini 3.1 Flash Image, HALLAZGO 90): las 2 entradas de Imagen 3
-# ('imagen-3.0-generate'/'imagen-3.0-capability') quedaron sin uso al cambiar de
-# modelo. gemini-3.1-flash-image no tiene límite fijo conocido (probable Dynamic
-# Shared Quota, igual que gemini-2.5-flash) — agregar una entrada aquí solo si
-# aparecen 429s reales en producción.
-RPM_LIMITS = {}
+# `gcloud alpha services quota list`). Vacío desde 2026-08-07 hasta 2026-08-11
+# (migración Imagen 3 -> Gemini 3.1 Flash Image, HALLAZGO 90): las 2 entradas de
+# Imagen 3 ('imagen-3.0-generate'/'imagen-3.0-capability') quedaron sin uso al
+# cambiar de modelo, y se asumió que gemini-3.1-flash-image usaba Dynamic Shared
+# Quota sin límite fijo, igual que gemini-2.5-flash.
+#
+# Esa suposición resultó falsa: aparecieron 429s reales en producción
+# (logs/django.log, 2026-08-07 y 2026-08-10, calendario real con imágenes/reel
+# perdidos). 1/min es el techo sostenido que Anuar confirmó con soporte de
+# Google el 2026-08-11 (una prueba manual llegó a 4 rpm pero cayó a 1 rpm en la
+# 3a iteración — cuota real más baja de lo que sugiere el tier). No subir este
+# número sin volver a probar en un pipeline real: el propio pipeline dispara
+# ráfagas de 3 rqworkers en paralelo sin ningún otro control de concurrencia.
+RPM_LIMITS = {
+    'gemini-3.1-flash-image': 1,
+}
 
 RETRY_DELAYS = [10, 20, 40]
 
