@@ -241,22 +241,6 @@ def job_with_dna_sample_reel():
     return job
 
 
-@pytest.fixture
-def job_with_dna_sample_product_reel():
-    job = AnalysisJob.objects.create(
-        email='t@t.com', business_url='https://tuwebmx.com',
-        status=AnalysisJob.STATUS_PROCESSING, stage=AnalysisJob.STAGE_CONTENT, progress=78,
-        generation_mode=AnalysisJob.MODE_SAMPLE_PRODUCT_REEL,
-        product_reference_image_path='uploads/product_ref_test.jpg',
-    )
-    BrandDNA.objects.create(
-        job=job, business_name='Gelatinas Marba', business_url='https://tuwebmx.com',
-        description='Gelatinas artesanales', keywords=['gelatinas'], audience='Familias',
-        tone='alegre', primary_colors=['#e94560'],
-    )
-    return job
-
-
 
 @override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
@@ -339,70 +323,6 @@ def test_generate_sample_task_marks_failed_on_error(job_with_dna_sample_image):
     job_with_dna_sample_image.refresh_from_db()
     assert job_with_dna_sample_image.status == AnalysisJob.STATUS_FAILED
     assert 'Gemini error' in job_with_dna_sample_image.error_message
-
-
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-)
-def test_generate_sample_task_product_reel_mode_creates_post(job_with_dna_sample_product_reel):
-    with patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes'), \
-         patch('core.content_pipeline.tasks.ProductShowcaseGenerator') as MockGen:
-        MockGen.return_value.generate_reel.return_value = ('https://storage.test/video.mp4', 'https://storage.test/poster.png', '')
-
-        from core.content_pipeline.tasks import generate_sample_task
-        generate_sample_task(str(job_with_dna_sample_product_reel.id))
-
-    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna_sample_product_reel)
-    assert posts.count() == 1
-    post = posts.first()
-    assert post.format == ContentPost.FORMAT_REEL
-    assert post.video_url == 'https://storage.test/video.mp4'
-    assert post.image_url == 'https://storage.test/poster.png'
-
-
-@override_settings(
-    GOOGLE_CLOUD_PROJECT='agente-cosmic',
-    GOOGLE_CLOUD_LOCATION='us-central1',
-    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
-    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
-)
-def test_generate_sample_task_product_reel_mode_fails_when_qc_rejects(job_with_dna_sample_product_reel):
-    with patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes'), \
-         patch('core.content_pipeline.tasks.ProductShowcaseGenerator') as MockGen:
-        MockGen.return_value.generate_reel.return_value = ('', '', '')
-
-        from core.content_pipeline.tasks import generate_sample_task
-        generate_sample_task(str(job_with_dna_sample_product_reel.id))
-
-    posts = ContentPost.objects.filter(calendar__brand_dna__job=job_with_dna_sample_product_reel)
-    assert posts.count() == 0
-    job_with_dna_sample_product_reel.refresh_from_db()
-    assert job_with_dna_sample_product_reel.status == AnalysisJob.STATUS_FAILED
-    assert 'problema generando el resultado' in job_with_dna_sample_product_reel.error_message.lower()
-
-
-def test_generate_sample_task_product_reel_mode_fails_without_photo():
-    job = AnalysisJob.objects.create(
-        email='t@t.com', business_url='https://tuwebmx.com',
-        generation_mode=AnalysisJob.MODE_SAMPLE_PRODUCT_REEL,
-        product_reference_image_path='',
-    )
-    BrandDNA.objects.create(
-        job=job, business_name='Gelatinas Marba', business_url='https://tuwebmx.com',
-        description='Gelatinas artesanales', keywords=[], audience='Familias',
-        tone='alegre', primary_colors=[],
-    )
-
-    from core.content_pipeline.tasks import generate_sample_task
-    generate_sample_task(str(job.id))
-
-    job.refresh_from_db()
-    assert job.status == AnalysisJob.STATUS_FAILED
-    assert 'foto' in job.error_message.lower()
-
 
 
 @pytest.fixture

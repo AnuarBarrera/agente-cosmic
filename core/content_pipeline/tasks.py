@@ -16,7 +16,6 @@ from core.content_pipeline.generators.text_generator import TextGenerator
 from core.content_pipeline.generators.image_generator import ImageGenerator
 from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
 from core.content_pipeline.generators.reel_generator import ReelGenerator
-from core.content_pipeline.generators.product_showcase_generator import ProductShowcaseGenerator
 from core.shared.gcs_uploads import read_upload
 from core.content_pipeline.email_sender import EmailSender
 from core.content_pipeline.scheduler import schedule_daily_emails
@@ -46,45 +45,6 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
         return (urls[0] if urls else ''), urls, ''
     url = image_gen.generate(filename=filename, max_qc_retries=max_qc_retries, **kwargs)
     return url, [], ''
-
-
-def _generate_product_reference_sample(job, brand_dna) -> None:
-    if not job.product_reference_image_path:
-        job.mark_failed('Modo de producto real seleccionado pero no se subió ninguna foto.')
-        return
-
-    photo_bytes = read_upload(job.product_reference_image_path)
-    calendar = ContentCalendar.objects.create(brand_dna=brand_dna)
-    product_gen = ProductShowcaseGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
-
-    video_url, poster_url, reason = product_gen.generate_reel(
-        photo_bytes, filename_prefix=f"{job.id}-product-sample", colors=brand_dna.primary_colors,
-        tone=brand_dna.tone,
-    )
-
-    if not video_url:
-        calendar.delete()
-        job.mark_failed(reason or 'Ocurrió un problema generando el resultado. Vuelve a intentar.')
-        return
-
-    ContentPost.objects.create(
-        calendar=calendar,
-        day_number=1,
-        caption='Prueba: producto real como referencia (solo admin)',
-        image_url=poster_url,
-        image_urls=[],
-        video_url=video_url,
-        format=ContentPost.FORMAT_REEL,
-        suggested_time='09:00',
-        hashtags=[],
-        scheduled_at=timezone.now(),
-    )
-
-    job.stage = AnalysisJob.STAGE_COMPLETE
-    job.progress = 100
-    job.status = AnalysisJob.STATUS_DONE
-    job.save(update_fields=['stage', 'progress', 'status'])
-    logger.info(f"Muestra de producto real generada para job {job.id}")
 
 
 def content_generation_task(job_id: str) -> None:
@@ -147,10 +107,6 @@ def generate_sample_task(job_id: str) -> None:
 
     try:
         job.update_progress(AnalysisJob.STAGE_CONTENT, 80)
-
-        if job.generation_mode == AnalysisJob.MODE_SAMPLE_PRODUCT_REEL:
-            _generate_product_reference_sample(job, brand_dna)
-            return
 
         text_gen = TextGenerator()
         posts_data = text_gen.generate(brand_dna)

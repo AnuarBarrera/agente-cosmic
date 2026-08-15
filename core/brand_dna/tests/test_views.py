@@ -170,11 +170,11 @@ def test_analyze_submit_saves_product_reference_photo_when_permitted(user, free_
         c.post('/analizar/', {
             'business_name': 'Gelatinas Marba',
             'business_description': 'Gelatinas artesanales.',
-            'generation_mode': 'sample_product_reel',
+            'generation_mode': 'sample_image',
             'product_reference_photo': _fake_product_photo(),
         })
     job = AnalysisJob.objects.filter(user=user).latest('created_at')
-    assert job.generation_mode == AnalysisJob.MODE_SAMPLE_PRODUCT_REEL
+    assert job.generation_mode == AnalysisJob.MODE_SAMPLE_IMAGE
     assert job.product_reference_image_path != ''
     mock_save.assert_called_once()
 
@@ -191,7 +191,7 @@ def test_analyze_submit_rejects_invalid_product_reference_photo(user, free_plan)
         response = c.post('/analizar/', {
             'business_name': 'Gelatinas Marba',
             'business_description': 'Gelatinas artesanales.',
-            'generation_mode': 'sample_product_reel',
+            'generation_mode': 'sample_image',
             'product_reference_photo': bad_file,
         })
     assert response.status_code == 200
@@ -232,7 +232,7 @@ def test_analyze_submit_product_photo_upload_failure_shows_error_and_does_not_or
         response = c.post('/analizar/', {
             'business_name': 'Gelatinas Marba',
             'business_description': 'Gelatinas artesanales.',
-            'generation_mode': 'sample_product_reel',
+            'generation_mode': 'sample_image',
             'product_reference_photo': _fake_product_photo(),
         })
     assert response.status_code == 200
@@ -249,7 +249,7 @@ def test_analyze_submit_ignores_product_mode_without_permission(user):
         c.post('/analizar/', {
             'business_name': 'Gelatinas Marba',
             'business_description': 'Gelatinas artesanales.',
-            'generation_mode': 'sample_product_reel',
+            'generation_mode': 'sample_image',
         })
     job = AnalysisJob.objects.filter(user=user).latest('created_at')
     assert job.generation_mode == AnalysisJob.MODE_FULL

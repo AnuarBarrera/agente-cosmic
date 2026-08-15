@@ -29,12 +29,10 @@ class AnalysisJob(models.Model):
     MODE_FULL = 'full'
     MODE_SAMPLE_IMAGE = 'sample_image'
     MODE_SAMPLE_REEL = 'sample_reel'
-    MODE_SAMPLE_PRODUCT_REEL = 'sample_product_reel'
     MODE_CHOICES = [
         (MODE_FULL, 'Calendario completo'),
         (MODE_SAMPLE_IMAGE, 'Muestra: imagen'),
         (MODE_SAMPLE_REEL, 'Muestra: reel'),
-        (MODE_SAMPLE_PRODUCT_REEL, 'Muestra: reel con producto real (solo admin)'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
