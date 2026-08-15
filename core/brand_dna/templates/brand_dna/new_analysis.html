@@ -118,8 +118,8 @@
           </label>
         </div>
       </div>
-      <div class="form-group" id="productPhotoGroup" style="display:none;">
-        <label>Foto real del producto</label>
+      <div class="form-group" id="productPhotoGroup">
+        <label>Foto real del producto <span class="optional-badge">opcional</span></label>
         <input type="file" name="product_reference_photo" accept="image/*" id="productPhotoInput">
       </div>
       {% endif %}
@@ -138,18 +138,6 @@
   <script>
     var MAX_SIDE = 1200;
     var JPEG_QUALITY = 0.82;
-
-    var productModeRadios = document.querySelectorAll('.mode-product');
-    var allModeRadios = document.querySelectorAll('[name=\'generation_mode\']');
-    var productPhotoGroup = document.getElementById('productPhotoGroup');
-    if (productPhotoGroup) {
-      allModeRadios.forEach(function(radio) {
-        radio.addEventListener('change', function() {
-          var isProductMode = Array.prototype.some.call(productModeRadios, function(r) { return r.checked; });
-          productPhotoGroup.style.display = isProductMode ? 'block' : 'none';
-        });
-      });
-    }
 
     function compressImage(file) {
       return new Promise(function(resolve) {
