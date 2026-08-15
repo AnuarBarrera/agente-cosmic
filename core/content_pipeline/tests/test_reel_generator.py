@@ -537,6 +537,36 @@ class TestGenerateSceneStill:
             result = gen._generate_scene_still('a workshop scene')
         assert result is None
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='global',
+        VERTEX_IMAGE_MODEL='gemini-3.1-flash-image',
+        GEMINI_API_KEY='fake-api-key',
+    )
+    def test_uses_gemini_api_client_when_paid_and_omits_labels(self):
+        """Plan pagado (use_gemini_api=True) -- decision de Anuar 2026-08-14.
+        labels= es billing export de Vertex/BigQuery, sin equivalente en
+        Gemini API -- no debe mandarse ahi."""
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket', use_gemini_api=True)
+        fake_image = b'fake-image-bytes'
+        mock_part = MagicMock()
+        mock_part.inline_data.data = fake_image
+        mock_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=[mock_part]))])
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc, \
+             patch('core.content_pipeline.generators.reel_generator._gemini_api_client') as mock_gemini_api, \
+             patch('core.content_pipeline.generators.reel_generator.record_gemini_image_generation'), \
+             patch('core.shared.rate_limiter.throttle') as mock_throttle:
+            mock_gemini_api.return_value.models.generate_content.return_value = mock_resp
+            result = gen._generate_scene_still('a workshop scene')
+        assert result == fake_image
+        mock_gemini_api.assert_called_once()
+        mock_vc.assert_not_called()
+        call_kwargs = mock_gemini_api.return_value.models.generate_content.call_args.kwargs
+        assert call_kwargs['config'].labels is None
+        # Throttle debe pedir cupo en la superficie 'gemini_api', no 'vertex'.
+        assert mock_throttle.call_args.args[1] == 'gemini_api'
+
 
 class TestValidateSceneStill:
     @override_settings(

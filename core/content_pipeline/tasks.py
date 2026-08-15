@@ -207,14 +207,37 @@ def generate_sample_task(job_id: str) -> None:
         job.mark_failed(str(e))
 
 
+def _is_paid_content(post: ContentPost) -> bool:
+    """True SOLO si el tenant tiene plan='User' Y Stripe ya confirmo el pago
+    (status='active', ver stripe_views.py) -- False para el trial gratis
+    ('trialing'), para Tester/Admin (sin importar su status), y por defecto
+    ante cualquier dato faltante, para nunca facturar por error contra Gemini
+    API. Decision de Anuar 2026-08-14: la generacion de imagen del plan
+    pagado usa Gemini API (dinero real de usuarios), todo lo demas
+    (trial gratis, Tester, Admin) se queda en Vertex (creditos de GCP).
+
+    HALLAZGO (2026-08-15): status='active' por si solo NO alcanza -- Tester y
+    Admin tambien terminan con status='active' (provision_tenant() en
+    auth_views.py no fija status explicito, cae al default del modelo;
+    InvitationCode.redeem() en tenant_management/models.py solo cambia
+    `plan`, nunca `status`). Sin el filtro de plan.name=='User' aqui, Tester/
+    Admin habrian caido en Gemini API igual que un pago real."""
+    try:
+        subscription = post.calendar.brand_dna.job.user.tenant.subscription
+        return subscription.plan.name == 'User' and subscription.status == 'active'
+    except Exception:
+        return False
+
+
 def _generate_missing_image(post: ContentPost) -> None:
     """Genera y guarda la imagen de un post que quedo sin image_url. No lanza — loggea y sigue."""
     brand_dna = post.calendar.brand_dna
     job_id = str(brand_dna.job.id)
     try:
-        image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+        use_gemini_api = _is_paid_content(post)
+        image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET, use_gemini_api=use_gemini_api)
         post.image_url, post.image_urls, post.video_url = _generate_post_media(
-            image_gen, ReelScriptGenerator(), ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET),
+            image_gen, ReelScriptGenerator(), ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET, use_gemini_api=use_gemini_api),
             fmt=post.format,
             filename=f"{job_id}-day{post.day_number}",
             caption=post.caption,
@@ -308,6 +331,47 @@ def _enqueue_week_images(calendar_id: str, week_index: int) -> None:
     _enqueue_post_images_then(post_ids, _week_closing_task, calendar_id, week_index)
 
 
+def _audit_month_closing_task(calendar_id: str) -> None:
+    """Cierre del backfill de auditoria -- solo loggea el resultado final, no
+    reintenta de nuevo. Si sigue habiendo huecos aqui es una falla
+    persistente (no transitoria) y necesita revisión manual, no otra
+    ronda automática."""
+    calendar = ContentCalendar.objects.get(id=calendar_id)
+    still_missing = calendar.posts.filter(image_url='').count()
+    if still_missing:
+        logger.error(
+            f"Auditor de mes: calendar {calendar_id} sigue con {still_missing} "
+            f"post(s) sin imagen tras el backfill de auditoría -- revisar manualmente"
+        )
+    else:
+        logger.info(f"Auditor de mes: calendar {calendar_id} completo, todos los posts tienen imagen")
+
+
+def _audit_and_backfill_missing_images(calendar_id: str) -> None:
+    """Auditor final del mes completo (HALLAZGO 2026-08-15, prueba real de pago
+    simulado): ImageGenerator.generate() atrapa sus propias excepciones y
+    devuelve '' en vez de propagar el error (ver image_generator.py) -- el
+    reintento normal de RQ (Retry(max=3,...) en _enqueue_post_images_then)
+    NUNCA se dispara para este tipo de falla silenciosa, solo para
+    excepciones que sí llegan a RQ. Un 503 transitorio de Google dejó un
+    post sin imagen y sin ningún mecanismo que lo detectara. Este auditor
+    corre una sola vez al cerrar el mes: revisa qué posts quedaron sin
+    imagen y reencola backfill_image_task para esos -- mismo mecanismo que
+    ya usa el resto del pipeline (_enqueue_post_images_then), no uno nuevo."""
+    calendar = ContentCalendar.objects.get(id=calendar_id)
+    missing_post_ids = [
+        str(pid) for pid in calendar.posts.filter(image_url='').values_list('id', flat=True)
+    ]
+    if not missing_post_ids:
+        logger.info(f"Auditor de mes: calendar {calendar_id} sin huecos, todos los posts ya tienen imagen")
+        return
+    logger.warning(
+        f"Auditor de mes: calendar {calendar_id} tiene {len(missing_post_ids)} "
+        f"post(s) sin imagen ({missing_post_ids}), encolando backfill de auditoría"
+    )
+    _enqueue_post_images_then(missing_post_ids, _audit_month_closing_task, calendar_id)
+
+
 def _week_closing_task(calendar_id: str, week_index: int) -> None:
     calendar = ContentCalendar.objects.get(id=calendar_id)
     brand_dna = calendar.brand_dna
@@ -324,6 +388,7 @@ def _week_closing_task(calendar_id: str, week_index: int) -> None:
                 EmailSender().send_month_ready(job=brand_dna.job, brand_dna=brand_dna)
             except Exception as email_err:
                 logger.error(f"Email de mes listo falló para calendar {calendar_id} (no fatal): {email_err}")
+            _audit_and_backfill_missing_images(calendar_id)
             calendar.next_week_generating = False
             calendar.save(update_fields=['next_week_generating'])
     except Exception as e:

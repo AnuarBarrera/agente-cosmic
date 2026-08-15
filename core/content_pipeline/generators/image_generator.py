@@ -184,6 +184,15 @@ def _vertex_client():
     )
 
 
+def _gemini_api_client():
+    """Gemini API directa (api_key, no Vertex) — solo para generación de imagen
+    del plan pagado. Decisión de Anuar 2026-08-14: separar el gasto real de
+    usuarios pagos (esta superficie) de los créditos de GCP del trial gratis
+    (Vertex). 20 rpm confirmado empíricamente en Tier 1, ver
+    project_gemini_image_rate_limit_2026_08_07.md."""
+    return genai.Client(api_key=settings.GEMINI_API_KEY)
+
+
 def _vertex_text_client():
     return genai.Client(
         vertexai=True,
@@ -217,8 +226,11 @@ def _sanitize_web_visit_mention(text: str, business_url: str, fallback: str) -> 
 
 
 class ImageGenerator:
-    def __init__(self, bucket_name: str):
+    def __init__(self, bucket_name: str, use_gemini_api: bool = False):
         self._bucket = bucket_name
+        # True = plan pagado (Gemini API, api_key). False = trial gratis
+        # (Vertex, créditos de GCP). Ver _gemini_api_client().
+        self._use_gemini_api = use_gemini_api
 
     def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, business_url: str = '') -> str:
         try:
@@ -779,10 +791,13 @@ class ImageGenerator:
         return png_bytes
 
     def _generate_with_retry(self, prompt: str) -> bytes:
-        return call_with_429_retry(lambda: self._generate_with_vertex(prompt), settings.VERTEX_IMAGE_MODEL)
+        provider = 'gemini_api' if self._use_gemini_api else 'vertex'
+        return call_with_429_retry(lambda: self._generate_with_vertex(prompt), settings.VERTEX_IMAGE_MODEL, provider=provider)
 
     def _generate_with_vertex(self, prompt: str) -> bytes:
-        client = _vertex_client()
+        # Nombre historico del metodo (pre-routing); el cliente real depende de
+        # self._use_gemini_api, ver __init__.
+        client = _gemini_api_client() if self._use_gemini_api else _vertex_client()
         model = settings.VERTEX_IMAGE_MODEL
         # Gemini no tiene parametro estructurado de negative_prompt (a diferencia de
         # Imagen 3.0) -- se dobla el texto dentro del prompt afirmativo. Verificado con
@@ -790,15 +805,21 @@ class ImageGenerator:
         # texto doblado, ninguna mostro iconos/texto/logos alucinados. El QC posterior
         # (_validate_background) sigue como red de seguridad independiente de esto.
         full_prompt = f"{prompt}\n\nAvoid: {_IMAGE_NEGATIVE_PROMPT}"
+        # labels= es un mecanismo de billing export de Vertex/BigQuery (ver
+        # vertex_labels()) sin equivalente en Gemini API directa -- solo se manda
+        # cuando el cliente es Vertex, para no arriesgar un error de validacion
+        # en la ruta de pago.
+        config_kwargs = dict(
+            response_modalities=['IMAGE', 'TEXT'],
+            image_config=types.ImageConfig(aspect_ratio='1:1'),
+        )
+        if not self._use_gemini_api:
+            config_kwargs['labels'] = vertex_labels()
         with track_external_api('gemini_image', operation='image_generate'):
             resp = client.models.generate_content(
                 model=model,
                 contents=full_prompt,
-                config=types.GenerateContentConfig(
-                    response_modalities=['IMAGE', 'TEXT'],
-                    image_config=types.ImageConfig(aspect_ratio='1:1'),
-                    labels=vertex_labels(),
-                ),
+                config=types.GenerateContentConfig(**config_kwargs),
             )
         for part in resp.candidates[0].content.parts:
             if part.inline_data:

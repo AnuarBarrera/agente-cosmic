@@ -447,6 +447,139 @@ def _make_post(calendar, day_number, **kwargs):
 
 
 
+@pytest.fixture
+def calendar_with_dna_trialing():
+    # Construido desde cero (no derivado de calendar_with_dna + .update()):
+    # Subscription.objects.create(tenant=tenant, ...) cachea reciprocamente
+    # tenant.subscription en el objeto Python tenant al crearlo -- un .update()
+    # posterior via queryset cambia la fila en la BD pero no ese cache en
+    # memoria, y la cadena de FKs cacheadas (job.user.tenant) sigue devolviendo
+    # el mismo objeto tenant con el status viejo. En produccion cada task carga
+    # objetos frescos de la BD, asi que esto no aplica ahi -- es puramente un
+    # artefacto de como pytest construye fixtures reutilizando objetos Python.
+    from django.contrib.auth import get_user_model
+    from core.tenant_management.models import TenantModel, Subscription, Plan
+    UserModel = get_user_model()
+    plan, _ = Plan.objects.get_or_create(name='User', defaults={
+        'max_calendars_per_week': 2, 'max_post_regenerations': 2,
+        'max_post_edits': 2, 'price': 0,
+    })
+    user = UserModel.objects.create_user(
+        username='trialing@test.com', email='trialing@test.com', password='pass1234'
+    )
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    Subscription.objects.create(tenant=tenant, plan=plan, status='trialing')
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+
+    job = AnalysisJob.objects.create(email='t@t.com', business_url='https://tuwebmx.com', user=user)
+    dna = BrandDNA.objects.create(
+        job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
+        description='Agencia digital', keywords=['diseno'], audience='PYMEs',
+        tone='profesional', primary_colors=['#1a1a2e'],
+    )
+    return ContentCalendar.objects.create(brand_dna=dna)
+
+
+def _build_calendar_with_dna(email, plan_name, status, plan_defaults=None):
+    """Construye un tenant/subscription/job/dna/calendar desde cero con un
+    Plan y status especificos -- usado para probar los 3 modelos de plan
+    reales (User/Tester/Admin) de forma aislada, sin depender de objetos
+    Python compartidos entre fixtures (ver nota de cache en
+    calendar_with_dna_trialing)."""
+    from django.contrib.auth import get_user_model
+    from core.tenant_management.models import TenantModel, Subscription, Plan
+    UserModel = get_user_model()
+    plan, _ = Plan.objects.get_or_create(name=plan_name, defaults=plan_defaults or {
+        'max_calendars_per_week': 2, 'max_post_regenerations': 2,
+        'max_post_edits': 2, 'price': 0,
+    })
+    user = UserModel.objects.create_user(username=email, email=email, password='pass1234')
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    Subscription.objects.create(tenant=tenant, plan=plan, status=status)
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+
+    job = AnalysisJob.objects.create(email='t@t.com', business_url='https://tuwebmx.com', user=user)
+    dna = BrandDNA.objects.create(
+        job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
+        description='Agencia digital', keywords=['diseno'], audience='PYMEs',
+        tone='profesional', primary_colors=['#1a1a2e'],
+    )
+    return ContentCalendar.objects.create(brand_dna=dna)
+
+
+class TestIsPaidContent:
+    """Decision de Anuar 2026-08-14: la generacion de imagen del plan pagado usa
+    Gemini API (dinero real de usuarios), el trial gratis se queda en Vertex
+    (creditos de GCP). La senal es plan.name=='User' Y Subscription.status ==
+    'active', que Stripe pone en el momento exacto del pago confirmado (ver
+    stripe_views.py) -- status='active' por si solo NO alcanza, ver HALLAZGO
+    2026-08-15 en _is_paid_content: Tester y Admin tambien quedan con
+    status='active' via provision_tenant()/InvitationCode.redeem(), sin pasar
+    nunca por Stripe."""
+
+    def test_true_for_active_user_subscription(self, calendar_with_dna):
+        from core.content_pipeline.tasks import _is_paid_content
+        post = _make_post(calendar_with_dna, 3)
+        assert _is_paid_content(post) is True
+
+    def test_false_for_trialing_subscription(self, calendar_with_dna_trialing):
+        from core.content_pipeline.tasks import _is_paid_content
+        post = _make_post(calendar_with_dna_trialing, 3)
+        assert _is_paid_content(post) is False
+
+    def test_false_for_tester_plan_even_with_active_status(self):
+        # Tester nunca paga -- InvitationCode.redeem() solo cambia `plan`,
+        # nunca `status`, asi que Tester queda con status='active' igual que
+        # un pago real. Sin el filtro de plan.name, esto se habria colado a
+        # Gemini API.
+        calendar = _build_calendar_with_dna('tester1@test.com', 'Tester', 'active')
+        post = _make_post(calendar, 1)
+        from core.content_pipeline.tasks import _is_paid_content
+        assert _is_paid_content(post) is False
+
+    def test_false_for_admin_plan_even_with_active_status(self):
+        calendar = _build_calendar_with_dna('admin1@test.com', 'Admin', 'active')
+        post = _make_post(calendar, 1)
+        from core.content_pipeline.tasks import _is_paid_content
+        assert _is_paid_content(post) is False
+
+    def test_defaults_false_without_user_or_subscription(self):
+        # Nunca facturar por error contra Gemini API ante datos faltantes.
+        job = AnalysisJob.objects.create(email='sin-user@t.com', business_url='https://tuwebmx.com')
+        dna = BrandDNA.objects.create(
+            job=job, business_name='Sin Tenant', business_url='https://tuwebmx.com',
+            description='x', keywords=[], audience='x', tone='x', primary_colors=['#000'],
+        )
+        calendar = ContentCalendar.objects.create(brand_dna=dna)
+        post = _make_post(calendar, 1)
+        from core.content_pipeline.tasks import _is_paid_content
+        assert _is_paid_content(post) is False
+
+
+def test_generate_missing_image_routes_paid_content_to_gemini_api(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 3, image_url='')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel:
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.png'
+        from core.content_pipeline.tasks import _generate_missing_image
+        _generate_missing_image(post)
+    assert MockImage.call_args.kwargs['use_gemini_api'] is True
+    assert MockReel.call_args.kwargs['use_gemini_api'] is True
+
+
+def test_generate_missing_image_routes_trial_content_to_vertex(calendar_with_dna_trialing):
+    post = _make_post(calendar_with_dna_trialing, 3, image_url='')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel:
+        MockImage.return_value.generate.return_value = 'https://storage.googleapis.com/test/img.png'
+        from core.content_pipeline.tasks import _generate_missing_image
+        _generate_missing_image(post)
+    assert MockImage.call_args.kwargs['use_gemini_api'] is False
+    assert MockReel.call_args.kwargs['use_gemini_api'] is False
+
+
 def test_backfill_image_task_generates_missing_image(calendar_with_dna):
     post = _make_post(calendar_with_dna, 3, image_url='')
     with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
@@ -813,13 +946,85 @@ def test_week_closing_task_week_3_sends_month_ready_and_resets_flag(job_with_dna
     calendar.next_week_generating = True
     calendar.save(update_fields=['next_week_generating'])
     with patch('core.content_pipeline.tasks.EmailSender') as MockEmail, \
-         patch('core.content_pipeline.tasks._enqueue_week_images') as mock_enqueue:
+         patch('core.content_pipeline.tasks._enqueue_week_images') as mock_enqueue, \
+         patch('core.content_pipeline.tasks._audit_and_backfill_missing_images') as mock_audit:
         _week_closing_task(str(calendar.id), week_index=3)
     MockEmail.return_value.send_month_ready.assert_called_once()
     MockEmail.return_value.send_week_ready.assert_not_called()
     mock_enqueue.assert_not_called()
+    mock_audit.assert_called_once_with(str(calendar.id))
     calendar.refresh_from_db()
     assert calendar.next_week_generating is False
+
+
+def test_week_closing_task_middle_week_does_not_audit(job_with_dna):
+    # El auditor de fin de mes solo debe correr al cerrar la semana 3 (mes
+    # completo), no en semanas intermedias.
+    from core.content_pipeline.tasks import _week_closing_task
+    calendar = _make_calendar_with_month(job_with_dna)
+    with patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks._enqueue_week_images'), \
+         patch('core.content_pipeline.tasks._audit_and_backfill_missing_images') as mock_audit:
+        _week_closing_task(str(calendar.id), week_index=1)
+    mock_audit.assert_not_called()
+
+
+class TestAuditAndBackfillMissingImages:
+    """HALLAZGO 2026-08-15 (prueba real de pago simulado): ImageGenerator.generate()
+    atrapa sus propias excepciones y devuelve '' -- el reintento normal de RQ
+    nunca se dispara para esa falla silenciosa. Este auditor corre al cerrar
+    el mes y reencola backfill_image_task (via _enqueue_post_images_then, el
+    mismo mecanismo ya existente) para lo que haya quedado sin imagen."""
+
+    def test_enqueues_backfill_for_missing_posts_only(self, job_with_dna):
+        from core.content_pipeline.tasks import _audit_and_backfill_missing_images
+        calendar = _make_calendar_with_month(job_with_dna)
+        complete_post = calendar.posts.get(day_number=1)
+        complete_post.image_url = 'https://storage.googleapis.com/test/img.png'
+        complete_post.save(update_fields=['image_url'])
+        missing_post = calendar.posts.get(day_number=2)
+
+        with patch('core.content_pipeline.tasks._enqueue_post_images_then') as mock_enqueue_then:
+            _audit_and_backfill_missing_images(str(calendar.id))
+
+        mock_enqueue_then.assert_called_once()
+        call_args = mock_enqueue_then.call_args
+        enqueued_ids = call_args[0][0]
+        assert str(complete_post.id) not in enqueued_ids
+        assert str(missing_post.id) in enqueued_ids
+        assert len(enqueued_ids) == 34  # 35 posts - 1 con imagen
+        from core.content_pipeline.tasks import _audit_month_closing_task
+        assert call_args[0][1] is _audit_month_closing_task
+        assert call_args[0][2] == str(calendar.id)
+
+    def test_noop_when_nothing_missing(self, job_with_dna):
+        from core.content_pipeline.tasks import _audit_and_backfill_missing_images
+        calendar = _make_calendar_with_month(job_with_dna)
+        calendar.posts.update(image_url='https://storage.googleapis.com/test/img.png')
+
+        with patch('core.content_pipeline.tasks._enqueue_post_images_then') as mock_enqueue_then:
+            _audit_and_backfill_missing_images(str(calendar.id))
+
+        mock_enqueue_then.assert_not_called()
+
+
+class TestAuditMonthClosingTask:
+    def test_logs_error_when_posts_still_missing_after_backfill(self, job_with_dna):
+        from core.content_pipeline.tasks import _audit_month_closing_task
+        calendar = _make_calendar_with_month(job_with_dna)
+        with patch('core.content_pipeline.tasks.logger') as mock_logger:
+            _audit_month_closing_task(str(calendar.id))
+        mock_logger.error.assert_called_once()
+        assert 'revisar manualmente' in mock_logger.error.call_args[0][0]
+
+    def test_logs_info_when_all_posts_complete(self, job_with_dna):
+        from core.content_pipeline.tasks import _audit_month_closing_task
+        calendar = _make_calendar_with_month(job_with_dna)
+        calendar.posts.update(image_url='https://storage.googleapis.com/test/img.png')
+        with patch('core.content_pipeline.tasks.logger') as mock_logger:
+            _audit_month_closing_task(str(calendar.id))
+        mock_logger.info.assert_called_once()
+        assert 'completo' in mock_logger.info.call_args[0][0]
 
 
 def test_week_closing_task_advances_despite_partial_failure_is_implicit_in_dependency(job_with_dna):

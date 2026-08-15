@@ -42,17 +42,17 @@ def test_throttle_noop_for_model_without_known_limit(fake_redis):
 
 
 def test_throttle_allows_calls_within_limit(fake_redis):
-    with patch.dict(rate_limiter.RPM_LIMITS, {'test-model-generate': 20}):
+    with patch.dict(rate_limiter.RPM_LIMITS['vertex'], {'test-model-generate': 20}):
         for _ in range(20):
             rate_limiter.throttle('test-model-generate-001')
-        key = rate_limiter._minute_key('test-model-generate')
+        key = rate_limiter._minute_key('test-model-generate', 'vertex')
         assert fake_redis.store[key] == 20
 
 
 @patch('core.shared.rate_limiter.time.sleep')
 def test_throttle_waits_when_over_limit(mock_sleep, fake_redis):
-    with patch.dict(rate_limiter.RPM_LIMITS, {'test-model-generate': 20}):
-        key = rate_limiter._minute_key('test-model-generate')
+    with patch.dict(rate_limiter.RPM_LIMITS['vertex'], {'test-model-generate': 20}):
+        key = rate_limiter._minute_key('test-model-generate', 'vertex')
         for _ in range(20):
             rate_limiter.throttle('test-model-generate-001')
         mock_sleep.assert_not_called()
@@ -67,17 +67,29 @@ def test_throttle_waits_when_over_limit(mock_sleep, fake_redis):
         assert fake_redis.store[key] == 1  # la ventana se reinició, este es el primer conteo
 
 
+def test_throttle_keys_are_isolated_per_provider(fake_redis):
+    # Mismo modelo, dos superficies -- no deben compartir contador de Redis.
+    with patch.dict(rate_limiter.RPM_LIMITS['vertex'], {'shared-model': 1}), \
+         patch.dict(rate_limiter.RPM_LIMITS['gemini_api'], {'shared-model': 20}):
+        rate_limiter.throttle('shared-model-001', provider='vertex')
+        rate_limiter.throttle('shared-model-001', provider='gemini_api')
+        vertex_key = rate_limiter._minute_key('shared-model', 'vertex')
+        gemini_key = rate_limiter._minute_key('shared-model', 'gemini_api')
+        assert fake_redis.store[vertex_key] == 1
+        assert fake_redis.store[gemini_key] == 1
+
+
 def test_diagnose_429_confirms_when_over_limit(fake_redis):
-    with patch.dict(rate_limiter.RPM_LIMITS, {'test-model-generate': 20}):
-        key = rate_limiter._minute_key('test-model-generate')
+    with patch.dict(rate_limiter.RPM_LIMITS['vertex'], {'test-model-generate': 20}):
+        key = rate_limiter._minute_key('test-model-generate', 'vertex')
         fake_redis.store[key] = 20
         msg = rate_limiter.diagnose_429('test-model-generate-001')
         assert 'CONFIRMADO' in msg
 
 
 def test_diagnose_429_rules_out_when_under_limit(fake_redis):
-    with patch.dict(rate_limiter.RPM_LIMITS, {'test-model-generate': 20}):
-        key = rate_limiter._minute_key('test-model-generate')
+    with patch.dict(rate_limiter.RPM_LIMITS['vertex'], {'test-model-generate': 20}):
+        key = rate_limiter._minute_key('test-model-generate', 'vertex')
         fake_redis.store[key] = 3
         msg = rate_limiter.diagnose_429('test-model-generate-001')
         assert 'CONFIRMADO' not in msg

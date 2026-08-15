@@ -360,6 +360,13 @@ def _vertex_client():
     )
 
 
+def _gemini_api_client():
+    """Gemini API directa (api_key, no Vertex) — solo para _generate_scene_still
+    (tomas fijas del reel) del plan pagado. Veo/Lyria/TTS se quedan en Vertex sin
+    importar el plan. Ver misma decision en image_generator.py."""
+    return genai.Client(api_key=settings.GEMINI_API_KEY)
+
+
 def _vertex_text_client():
     return genai.Client(
         vertexai=True,
@@ -369,8 +376,11 @@ def _vertex_text_client():
 
 
 class ReelGenerator:
-    def __init__(self, bucket_name: str):
+    def __init__(self, bucket_name: str, use_gemini_api: bool = False):
         self._bucket = bucket_name
+        # True = plan pagado (Gemini API, api_key) SOLO para _generate_scene_still.
+        # Veo/Lyria/TTS ignoran este flag, se quedan en Vertex siempre.
+        self._use_gemini_api = use_gemini_api
 
     # Compartido por Veo (_generate_single_clip) e imagen de escena
     # (_generate_scene_still). Para Veo se pasa via el parametro negative_prompt
@@ -705,16 +715,20 @@ class ReelGenerator:
         full_prompt = f"{prompt}\n\n{self._VEO_SAFE_CONSTRAINTS.strip()}"
 
         def _call():
-            client = _vertex_client()
+            client = _gemini_api_client() if self._use_gemini_api else _vertex_client()
+            # labels= es billing export de Vertex/BigQuery, sin equivalente en
+            # Gemini API directa -- solo se manda con el cliente de Vertex.
+            config_kwargs = dict(
+                response_modalities=['IMAGE', 'TEXT'],
+                image_config=types.ImageConfig(aspect_ratio='9:16'),
+            )
+            if not self._use_gemini_api:
+                config_kwargs['labels'] = vertex_labels()
             with track_external_api('gemini_image', operation='image_generate'):
                 return client.models.generate_content(
                     model=settings.VERTEX_IMAGE_MODEL,
                     contents=full_prompt,
-                    config=types.GenerateContentConfig(
-                        response_modalities=['IMAGE', 'TEXT'],
-                        image_config=types.ImageConfig(aspect_ratio='9:16'),
-                        labels=vertex_labels(),
-                    ),
+                    config=types.GenerateContentConfig(**config_kwargs),
                 )
 
         # HALLAZGO (2026-08-11): a diferencia de image_generator (que ya pasaba por
@@ -722,8 +736,9 @@ class ReelGenerator:
         # backoff -- un 429 se daba por perdido de inmediato y el caller
         # (_generate_still_scene_clip) reintentaba al instante, sin espera. Logs
         # reales muestran rafagas de "429" separadas por <1s desde un solo worker.
+        provider = 'gemini_api' if self._use_gemini_api else 'vertex'
         try:
-            resp = call_with_429_retry(_call, settings.VERTEX_IMAGE_MODEL)
+            resp = call_with_429_retry(_call, settings.VERTEX_IMAGE_MODEL, provider=provider)
         except Exception as e:
             logger.warning(f"Gemini scene generation failed: {e}")
             return None

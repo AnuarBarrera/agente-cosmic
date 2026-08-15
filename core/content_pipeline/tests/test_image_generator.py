@@ -81,6 +81,35 @@ def test_generate_with_vertex_records_image_cost_not_token_cost():
     mock_tokens.assert_not_called()
 
 
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='global',
+    VERTEX_IMAGE_MODEL='gemini-3.1-flash-image',
+    GEMINI_API_KEY='fake-api-key',
+)
+def test_generate_with_vertex_uses_gemini_api_client_when_paid_and_omits_labels():
+    """Plan pagado (use_gemini_api=True) -- decision de Anuar 2026-08-14 de
+    separar el gasto real de usuarios pagos (Gemini API) de los creditos de
+    GCP del trial gratis (Vertex). labels= es billing export de Vertex/
+    BigQuery, sin equivalente en Gemini API -- no debe mandarse ahi."""
+    from core.content_pipeline.generators.image_generator import ImageGenerator
+    gen = ImageGenerator(bucket_name='test-bucket', use_gemini_api=True)
+    mock_client = MagicMock()
+    mock_part = MagicMock()
+    mock_part.inline_data.data = b'fake-png'
+    mock_client.models.generate_content.return_value = MagicMock(
+        candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+    )
+    with patch('core.content_pipeline.generators.image_generator._vertex_client') as mock_vertex, \
+         patch('core.content_pipeline.generators.image_generator._gemini_api_client', return_value=mock_client) as mock_gemini_api:
+        result = gen._generate_with_vertex('a test prompt')
+
+    assert result == b'fake-png'
+    mock_gemini_api.assert_called_once()
+    mock_vertex.assert_not_called()
+    call_kwargs = mock_client.models.generate_content.call_args.kwargs
+    assert call_kwargs['config'].labels is None
+
 
 @override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
