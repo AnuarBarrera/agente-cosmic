@@ -32,6 +32,11 @@ logger = logging.getLogger(__name__)
 RPM_LIMITS = {
     'vertex': {
         'gemini-3.1-flash-image': 1,
+        # gemini-3.1-flash-lite-image: valor conservador de partida (mismo que
+        # el modelo normal) -- sin prueba empirica propia en Vertex todavia.
+        # Uso admin/prueba unicamente (bajo volumen), el impacto de un limite
+        # conservador es minimo. Ver docs/superpowers/specs/2026-08-15-product-photo-image-module-design.md.
+        'gemini-3.1-flash-lite-image': 1,
     },
     'gemini_api': {
         'gemini-3.1-flash-image': 20,

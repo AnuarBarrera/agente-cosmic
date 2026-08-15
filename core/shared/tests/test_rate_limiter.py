@@ -137,3 +137,8 @@ def test_call_with_429_retry_does_not_retry_other_errors(fake_redis):
     with pytest.raises(ValueError):
         rate_limiter.call_with_429_retry(broken, 'imagen-3.0-generate-001', max_retries=3)
     assert calls['n'] == 1
+
+
+def test_rpm_limits_has_conservative_entry_for_lite_image_model():
+    from core.shared import rate_limiter
+    assert rate_limiter.RPM_LIMITS['vertex']['gemini-3.1-flash-lite-image'] == 1

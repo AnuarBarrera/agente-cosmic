@@ -164,6 +164,7 @@ GOOGLE_CLOUD_LOCATION_TEXT = get_env('GOOGLE_CLOUD_LOCATION_TEXT', default='glob
 GCP_REQUEST_ORIGIN = get_env('GCP_REQUEST_ORIGIN', default='development')
 VERTEX_TEXT_MODEL = 'publishers/google/models/gemini-3.5-flash'
 VERTEX_IMAGE_MODEL = 'gemini-3.1-flash-image'
+VERTEX_IMAGE_MODEL_LITE = 'gemini-3.1-flash-lite-image'
 VERTEX_VERTEX_MODEL = 'publishers/google/models/gemini-2.5-flash'
 VERTEX_VIDEO_MODEL = 'veo-3.1-fast-generate-001'
 VERTEX_MUSIC_MODEL = 'lyria-3-clip-preview'
