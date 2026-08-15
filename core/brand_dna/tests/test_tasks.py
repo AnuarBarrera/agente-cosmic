@@ -21,6 +21,25 @@ def pending_job():
     )
 
 
+@pytest.fixture
+def job_with_product_photo():
+    return AnalysisJob.objects.create(
+        email='test@example.com',
+        business_url='https://tuwebmx.com',
+        business_description='Joyeria Luna\nJoyeria artesanal.',
+        product_reference_image_path='uploads/product_ref_test.jpg',
+    )
+
+
+@pytest.fixture
+def job_without_product_photo():
+    return AnalysisJob.objects.create(
+        email='test@example.com',
+        business_url='https://tuwebmx.com',
+        business_description='Joyeria Luna\nJoyeria artesanal.',
+    )
+
+
 @override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
     GOOGLE_CLOUD_LOCATION='us-central1',
@@ -179,3 +198,51 @@ def test_task_continues_when_scraping_fails(pending_job):
         scraped_context='',
         scraped_colors=[],
     )
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1',
+    GOOGLE_CLOUD_LOCATION_TEXT='global',
+)
+def test_analyze_brand_task_analyzes_product_photo_when_present(job_with_product_photo):
+    with patch('core.brand_dna.tasks.WebScraper'), \
+         patch('core.brand_dna.tasks.ManualBrandExtractor') as MockExtractor, \
+         patch('core.brand_dna.tasks.upload_exists', return_value=True), \
+         patch('core.brand_dna.tasks.read_upload', return_value=b'fake-photo-bytes'), \
+         patch('core.brand_dna.tasks.normalize_image', return_value=b'fake-photo-bytes'), \
+         patch('core.brand_dna.tasks.LogoAnalyzer'), \
+         patch('core.brand_dna.tasks.ProductPhotoAnalyzer') as MockAnalyzer, \
+         patch('core.brand_dna.tasks.django_rq'):
+        MockExtractor.return_value.extract.return_value = {
+            'description': 'x', 'keywords': [], 'audience': 'x', 'tone': 'profesional',
+        }
+        MockAnalyzer.return_value.analyze.return_value = {
+            'description': 'Aretes de plata', 'category': 'joyeria',
+        }
+        from core.brand_dna.tasks import analyze_brand_task
+        analyze_brand_task(str(job_with_product_photo.id))
+
+    brand_dna = job_with_product_photo.brand_dna
+    assert brand_dna.product_photo_analysis == 'Aretes de plata'
+    assert brand_dna.product_category == 'joyeria'
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1',
+    GOOGLE_CLOUD_LOCATION_TEXT='global',
+)
+def test_analyze_brand_task_skips_photo_analysis_without_photo(job_without_product_photo):
+    with patch('core.brand_dna.tasks.WebScraper'), \
+         patch('core.brand_dna.tasks.ManualBrandExtractor') as MockExtractor, \
+         patch('core.brand_dna.tasks.LogoAnalyzer'), \
+         patch('core.brand_dna.tasks.ProductPhotoAnalyzer') as MockAnalyzer, \
+         patch('core.brand_dna.tasks.django_rq'):
+        MockExtractor.return_value.extract.return_value = {
+            'description': 'x', 'keywords': [], 'audience': 'x', 'tone': 'profesional',
+        }
+        from core.brand_dna.tasks import analyze_brand_task
+        analyze_brand_task(str(job_without_product_photo.id))
+
+    MockAnalyzer.return_value.analyze.assert_not_called()
+    brand_dna = job_without_product_photo.brand_dna
+    assert brand_dna.product_photo_analysis == ''

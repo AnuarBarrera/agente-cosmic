@@ -7,6 +7,7 @@ from core.brand_dna.models import AnalysisJob, BrandDNA
 from core.brand_dna.extractors.web_scraper import WebScraper
 from core.brand_dna.extractors.manual_extractor import ManualBrandExtractor
 from core.brand_dna.extractors.logo_analyzer import LogoAnalyzer
+from core.brand_dna.extractors.product_photo_analyzer import ProductPhotoAnalyzer
 from core.content_pipeline.image_utils import normalize_image
 from core.shared.metrics import ANALYSIS_JOBS_TOTAL, ANALYSIS_DURATION
 from core.shared.gcs_uploads import read_upload, upload_exists
@@ -46,6 +47,12 @@ def analyze_brand_task(job_id: str) -> None:
                 logo_data = analyzer.analyze(logo_bytes, 'image/webp')
         job.update_progress(AnalysisJob.STAGE_LOGO, 55)
 
+        product_photo_data = {'description': '', 'category': ''}
+        if job.product_reference_image_path:
+            if upload_exists(job.product_reference_image_path):
+                product_photo_bytes = normalize_image(read_upload(job.product_reference_image_path))
+                product_photo_data = ProductPhotoAnalyzer().analyze(product_photo_bytes, 'image/webp')
+
         job.update_progress(AnalysisJob.STAGE_POSTS, 75)
 
         BrandDNA.objects.create(
@@ -58,6 +65,8 @@ def analyze_brand_task(job_id: str) -> None:
             tone=web_data.get('tone', 'profesional'),
             primary_colors=logo_data.get('primary_colors') or web_data.get('brand_colors', []),
             logo_elements=logo_data.get('logo_elements', ''),
+            product_photo_analysis=product_photo_data.get('description', ''),
+            product_category=product_photo_data.get('category', ''),
         )
         job.update_progress(AnalysisJob.STAGE_CONTENT, 78)
 

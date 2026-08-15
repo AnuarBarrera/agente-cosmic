@@ -91,6 +91,8 @@ class BrandDNA(models.Model):
     posting_style = models.TextField(blank=True, default='')
     avg_caption_length = models.IntegerField(default=150)
     common_hashtags = models.JSONField(default=list)
+    product_photo_analysis = models.TextField(blank=True, default='')
+    product_category = models.CharField(max_length=100, blank=True, default='')
     # Nombres de campo (de _BRAND_DNA_EDITABLE_FIELDS en views.py) que el usuario ya
     # revisó y aprobó explícitamente. Editar o reanalizar un campo lo quita de esta
     # lista automáticamente — el resto de los campos conserva su estado. Se usa para
