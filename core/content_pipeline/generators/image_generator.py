@@ -383,13 +383,18 @@ class ImageGenerator:
             logger.error(f"ImageGenerator.generate_from_product_photo error: {e}")
             return '', ''
 
-    def regenerate_with_reference(self, current_image_bytes: bytes, feedback: str,
-                                    vision_context: str, filename: str, max_qc_retries: int = 2) -> str:
-        """Regeneracion: nano banana ve la imagen ACTUAL (lo que el usuario
-        esta viendo, no la foto original) + el feedback del usuario + el
-        analisis de vision guardado (para no perder fidelidad al producto
-        real en regeneraciones sucesivas). Distinto de generate_from_product_photo
-        -- no manda la foto cruda, manda el resultado anterior."""
+    def regenerate_with_reference(self, current_background_bytes: bytes, feedback: str,
+                                    vision_context: str, caption: str, colors: list[str], tone: str,
+                                    filename: str, description: str = '', keywords: list[str] = None,
+                                    business_url: str = '', max_qc_retries: int = 2) -> tuple[str, str]:
+        """Regeneracion: nano banana ve el FONDO LIMPIO actual (la foto real
+        ya editada por nano banana, SIN overlay -- no la imagen final
+        compuesta, que llevaria texto horneado que nano banana no sabe que es
+        nuestro) + el feedback del usuario + el analisis de vision guardado
+        (para no perder fidelidad al producto real en regeneraciones
+        sucesivas). Compone overlay de nuevo con _upload_photo_post, igual
+        que generate_from_product_photo -- el caption ya viene regenerado por
+        el caller (2026-08-16, decision de Anuar)."""
         try:
             context_line = f" Recuerda el producto real: {vision_context}." if vision_context else ''
             prompt = (
@@ -405,7 +410,7 @@ class ImageGenerator:
                 f"Do not add new text, headline, or CTA. "
                 f"DSLR camera quality, photorealistic, square 1:1 format."
             )
-            image_part = types.Part.from_bytes(data=current_image_bytes, mime_type=_detect_mime(current_image_bytes))
+            image_part = types.Part.from_bytes(data=current_background_bytes, mime_type=_detect_mime(current_background_bytes))
             last_bytes = None
             total_attempts = max_qc_retries + 1
             for attempt in range(total_attempts):
@@ -417,16 +422,16 @@ class ImageGenerator:
                     logger.warning(f"Regen generation sin imagen (attempt {attempt + 1}/{total_attempts}): {gen_err}")
                     continue
                 if self._validate_product_photo_generation(last_bytes):
-                    return self._upload_to_storage(last_bytes, filename)
+                    return self._upload_photo_post(last_bytes, caption, colors, tone, description, keywords, business_url, filename)
                 if attempt < max_qc_retries:
                     logger.warning(f"Regen QC failed (attempt {attempt + 1}/{total_attempts}), reintentando...")
             if last_bytes is None:
                 raise ValueError("Ningun intento devolvio una imagen usable")
             logger.warning("Regen QC: reintentos agotados, usando ultima imagen generada")
-            return self._upload_to_storage(last_bytes, filename)
+            return self._upload_photo_post(last_bytes, caption, colors, tone, description, keywords, business_url, filename)
         except Exception as e:
             logger.error(f"ImageGenerator.regenerate_with_reference error: {e}")
-            return ''
+            return '', ''
 
     def _generate_from_photo_with_retry(self, prompt: str, photo_part) -> bytes:
         provider = 'gemini_api' if self._use_gemini_api else 'vertex'

@@ -1697,7 +1697,7 @@ class TestRegenerateWithReference:
         GOOGLE_CLOUD_LOCATION_TEXT='global',
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
-    def test_sends_current_image_not_original_photo(self):
+    def test_sends_current_background_not_original_photo(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         mock_part = MagicMock()
@@ -1709,42 +1709,43 @@ class TestRegenerateWithReference:
         with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_client), \
              patch('core.shared.rate_limiter.throttle'), \
              patch.object(gen, '_validate_product_photo_generation', return_value=True), \
-             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/regen.png'):
-            url = gen.regenerate_with_reference(
-                current_image_bytes=b'current-image-bytes',
+             patch.object(gen, '_upload_photo_post', return_value=('https://storage.test/bg.png', 'https://storage.test/final.png')):
+            result = gen.regenerate_with_reference(
+                current_background_bytes=b'current-background-bytes',
                 feedback='hazlo mas colorido',
                 vision_context='Aretes de plata con turquesa',
+                caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
                 filename='test-product-regen',
             )
 
-        assert url == 'https://storage.test/regen.png'
+        assert result == ('https://storage.test/bg.png', 'https://storage.test/final.png')
         call_kwargs = mock_client.models.generate_content.call_args.kwargs
         prompt_text = ' '.join(str(c) for c in call_kwargs['contents'] if isinstance(c, str))
         assert 'hazlo mas colorido' in prompt_text
         assert 'Aretes de plata con turquesa' in prompt_text
-        # feedback y vision_context son entrada del usuario -- delimitados.
         assert '=== INICIO DATOS DEL CLIENTE' in prompt_text
         assert '=== FIN DATOS DEL CLIENTE' in prompt_text
         assert 'Do not add new text' in prompt_text
-        # La imagen enviada es la ACTUAL, no la foto original del producto.
+        # La imagen enviada es el FONDO LIMPIO actual, no la foto original del producto.
         contents = call_kwargs['contents']
-        assert contents[1].inline_data.data == b'current-image-bytes'
+        assert contents[1].inline_data.data == b'current-background-bytes'
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
         GOOGLE_CLOUD_LOCATION_TEXT='global',
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
-    def test_returns_empty_string_on_error(self):
+    def test_returns_empty_tuple_on_error(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         with patch('core.content_pipeline.generators.image_generator._vertex_client', side_effect=Exception('boom')), \
              patch('core.shared.rate_limiter.throttle'):
-            url = gen.regenerate_with_reference(
-                current_image_bytes=b'current-image-bytes', feedback='mas colorido',
-                vision_context='', filename='test-product-regen',
+            result = gen.regenerate_with_reference(
+                current_background_bytes=b'current-background-bytes', feedback='mas colorido',
+                vision_context='', caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
+                filename='test-product-regen',
             )
-        assert url == ''
+        assert result == ('', '')
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
@@ -1752,10 +1753,6 @@ class TestRegenerateWithReference:
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
     def test_retries_when_gemini_returns_no_image_parts(self):
-        """Mismo bug real que TestGenerateFromProductPhoto -- ver ese test para
-        el caso reproducido en produccion. Aqui se cubre el segundo caller de
-        _generate_from_photo_with_retry para no dejar la regeneracion con el
-        mismo hueco."""
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         blocked_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=None), finish_reason='SAFETY')])
@@ -1767,12 +1764,13 @@ class TestRegenerateWithReference:
         with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_client), \
              patch('core.shared.rate_limiter.throttle'), \
              patch.object(gen, '_validate_product_photo_generation', return_value=True), \
-             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/regen.png'):
-            url = gen.regenerate_with_reference(
-                current_image_bytes=b'current-image-bytes', feedback='mas colorido',
-                vision_context='', filename='test-product-regen', max_qc_retries=2,
+             patch.object(gen, '_upload_photo_post', return_value=('https://storage.test/bg.png', 'https://storage.test/final.png')):
+            result = gen.regenerate_with_reference(
+                current_background_bytes=b'current-background-bytes', feedback='mas colorido',
+                vision_context='', caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
+                filename='test-product-regen', max_qc_retries=2,
             )
-        assert url == 'https://storage.test/regen.png'
+        assert result == ('https://storage.test/bg.png', 'https://storage.test/final.png')
         assert mock_client.models.generate_content.call_count == 2
 
     @override_settings(
@@ -1780,7 +1778,7 @@ class TestRegenerateWithReference:
         GOOGLE_CLOUD_LOCATION_TEXT='global',
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
-    def test_detects_real_mime_type_of_current_image(self):
+    def test_detects_real_mime_type_of_current_background(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         mock_part = MagicMock()
@@ -1793,11 +1791,45 @@ class TestRegenerateWithReference:
         with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_client), \
              patch('core.shared.rate_limiter.throttle'), \
              patch.object(gen, '_validate_product_photo_generation', return_value=True), \
-             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/regen.png'):
+             patch.object(gen, '_upload_photo_post', return_value=('https://storage.test/bg.png', 'https://storage.test/final.png')):
             gen.regenerate_with_reference(
-                current_image_bytes=jpeg_bytes, feedback='mas colorido',
-                vision_context='', filename='test-product-regen',
+                current_background_bytes=jpeg_bytes, feedback='mas colorido',
+                vision_context='', caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
+                filename='test-product-regen',
             )
         call_kwargs = mock_client.models.generate_content.call_args.kwargs
         assert call_kwargs['contents'][1].inline_data.mime_type == 'image/jpeg'
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_composes_overlay_with_new_caption_via_upload_photo_post(self):
+        """El caption ya viene regenerado (por _regenerate_caption en
+        views.py, antes de encolar la tarea) -- regenerate_with_reference debe
+        pasarlo tal cual a _upload_photo_post para que el overlay use el
+        contenido correcto, no el viejo."""
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-regenerated-png'
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = MagicMock(
+            candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+        )
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_client), \
+             patch('core.shared.rate_limiter.throttle'), \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True), \
+             patch.object(gen, '_upload_photo_post', return_value=('https://storage.test/bg.png', 'https://storage.test/final.png')) as mock_upload:
+            gen.regenerate_with_reference(
+                current_background_bytes=b'current-background-bytes', feedback='mas colorido',
+                vision_context='Aretes de plata', caption='Nuevo caption regenerado',
+                colors=['#e94560'], tone='alegre', filename='test-product-regen',
+                description='Joyeria artesanal', keywords=['aretes'], business_url='https://ejemplo.com',
+            )
+
+        mock_upload.assert_called_once_with(
+            b'fake-regenerated-png', 'Nuevo caption regenerado', ['#e94560'], 'alegre',
+            'Joyeria artesanal', ['aretes'], 'https://ejemplo.com', 'test-product-regen',
+        )
