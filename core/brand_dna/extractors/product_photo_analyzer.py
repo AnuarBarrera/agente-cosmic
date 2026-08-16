@@ -54,7 +54,13 @@ class ProductPhotoAnalyzer:
             data = json.loads(resp.text)
             return {
                 'description': (data.get('description') or '').strip(),
-                'category': (data.get('category') or '').strip(),
+                # [:100] espeja BrandDNA.product_category (CharField max_length=100):
+                # el prompt pide "1-3 palabras" pero eso no es contrato -- el
+                # response_schema solo garantiza str. Una frase larga reventaba
+                # BrandDNA.objects.create() con DataError y tumbaba
+                # analyze_brand_task completo, pese a que este analizador es
+                # fail-open. Mismo truncado que literal_business_name en tasks.py.
+                'category': (data.get('category') or '').strip()[:100],
             }
         except Exception as e:
             logger.error(f"ProductPhotoAnalyzer error: {e}")

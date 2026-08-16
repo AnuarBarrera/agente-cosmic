@@ -43,3 +43,21 @@ def test_analyze_handles_malformed_json_fail_open():
         result = analyzer.analyze(b'fake-image-bytes', 'image/jpeg')
 
     assert result == {'description': '', 'category': ''}
+
+
+@override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global')
+def test_analyze_truncates_long_category_to_model_max_length():
+    """BrandDNA.product_category es CharField(max_length=100) — una categoria
+    larga (el modelo puede ignorar el "1-3 palabras" del prompt) reventaba
+    BrandDNA.objects.create() con DataError y tumbaba analyze_brand_task entero."""
+    from core.brand_dna.extractors.product_photo_analyzer import ProductPhotoAnalyzer
+    long_category = 'joyeria artesanal ' * 20  # 360 chars
+    analyzer = ProductPhotoAnalyzer()
+    with patch('core.brand_dna.extractors.product_photo_analyzer._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(
+            '{"description": "Aretes de plata", "category": "%s"}' % long_category
+        )
+        result = analyzer.analyze(b'fake-image-bytes', 'image/jpeg')
+
+    assert len(result['category']) == 100
+    assert result['category'] == long_category.strip()[:100]
