@@ -1392,3 +1392,55 @@ class TestGenerateFromProductPhoto:
             )
         assert url == ''
 
+
+class TestRegenerateWithReference:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_sends_current_image_not_original_photo(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-regenerated-png'
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = MagicMock(
+            candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+        )
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_client), \
+             patch('core.shared.rate_limiter.throttle'), \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True), \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/regen.png'):
+            url = gen.regenerate_with_reference(
+                current_image_bytes=b'current-image-bytes',
+                feedback='hazlo mas colorido',
+                vision_context='Aretes de plata con turquesa',
+                filename='test-product-regen',
+            )
+
+        assert url == 'https://storage.test/regen.png'
+        call_kwargs = mock_client.models.generate_content.call_args.kwargs
+        prompt_text = ' '.join(str(c) for c in call_kwargs['contents'] if isinstance(c, str))
+        assert 'hazlo mas colorido' in prompt_text
+        assert 'Aretes de plata con turquesa' in prompt_text
+        # La imagen enviada es la ACTUAL, no la foto original del producto.
+        contents = call_kwargs['contents']
+        assert contents[1].inline_data.data == b'current-image-bytes'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_returns_empty_string_on_error(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', side_effect=Exception('boom')), \
+             patch('core.shared.rate_limiter.throttle'):
+            url = gen.regenerate_with_reference(
+                current_image_bytes=b'current-image-bytes', feedback='mas colorido',
+                vision_context='', filename='test-product-regen',
+            )
+        assert url == ''
+
