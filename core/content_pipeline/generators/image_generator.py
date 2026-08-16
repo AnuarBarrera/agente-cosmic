@@ -52,6 +52,17 @@ class ImageQCSchema(BaseModel):
     ok: bool
 
 
+class ProductPhotoQCSchema(BaseModel):
+    has_text: bool
+    text_is_correct_spanish: bool
+    is_abstract_3d: bool
+    has_screen_content: bool
+    has_malformed_object: bool
+    has_unrealistic_grounding: bool
+    has_suggestive_or_exposed_content: bool
+    ok: bool
+
+
 class FinalImageQCSchema(BaseModel):
     has_background_text: bool
     has_shadow_artifacts: bool
@@ -242,6 +253,69 @@ class ImageGenerator:
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")
             return ''
+
+    def generate_from_product_photo(self, photo_bytes: bytes, mime_type: str, caption: str,
+                                    colors: list[str], tone: str, filename: str,
+                                    vision_context: str = '', max_qc_retries: int = 2) -> str:
+        """Primera generacion usando la foto real de producto -- nano banana
+        ve la foto directamente en la misma llamada que la direccion
+        creativa (Enfoque A, ya validado). Usa el modelo economico
+        (VERTEX_IMAGE_MODEL_LITE) por decision de Anuar, para probar costo
+        antes de escalar al modelo normal."""
+        try:
+            color_str = ', '.join(colors[:3]) if colors else 'warm neutrals'
+            context_line = f" Contexto del producto: {vision_context}." if vision_context else ''
+            prompt = (
+                f"Edit this real product photo into a professional social media post background.\n"
+                f"Extract only the real product from the photo. Remove/eliminate any text, "
+                f"watermark, or logo present in the original photo — do not carry them into "
+                f"the new composition. Do not add text of any kind either — no new "
+                f"headline, no CTA, no captions, no labels.\n"
+                f"Creative direction: {caption}.{context_line} Mood: {tone}. "
+                f"Brand colors ({color_str}) should be visually present in props/backdrop/accents. "
+                f"DSLR camera quality, shallow depth of field, photorealistic. Square 1:1 format."
+            )
+            photo_part = types.Part.from_bytes(data=photo_bytes, mime_type=mime_type)
+            last_bytes = None
+            total_attempts = max_qc_retries + 1
+            for attempt in range(total_attempts):
+                last_bytes = self._generate_from_photo_with_retry(prompt, photo_part)
+                if self._validate_product_photo_generation(last_bytes):
+                    return self._upload_to_storage(last_bytes, filename)
+                if attempt < max_qc_retries:
+                    logger.warning(f"Product photo QC failed (attempt {attempt + 1}/{total_attempts}), regenerando...")
+            logger.warning("Product photo QC: reintentos agotados, usando ultima imagen generada")
+            return self._upload_to_storage(last_bytes, filename)
+        except Exception as e:
+            logger.error(f"ImageGenerator.generate_from_product_photo error: {e}")
+            return ''
+
+    def _generate_from_photo_with_retry(self, prompt: str, photo_part) -> bytes:
+        provider = 'gemini_api' if self._use_gemini_api else 'vertex'
+        return call_with_429_retry(
+            lambda: self._generate_from_photo(prompt, photo_part),
+            settings.VERTEX_IMAGE_MODEL_LITE, provider=provider,
+        )
+
+    def _generate_from_photo(self, prompt: str, photo_part) -> bytes:
+        client = _gemini_api_client() if self._use_gemini_api else _vertex_client()
+        config_kwargs = dict(
+            response_modalities=['IMAGE', 'TEXT'],
+            image_config=types.ImageConfig(aspect_ratio='1:1'),
+        )
+        if not self._use_gemini_api:
+            config_kwargs['labels'] = vertex_labels()
+        with track_external_api('gemini_image', operation='image_generate_from_photo'):
+            resp = client.models.generate_content(
+                model=settings.VERTEX_IMAGE_MODEL_LITE,
+                contents=[prompt, photo_part],
+                config=types.GenerateContentConfig(**config_kwargs),
+            )
+        for part in resp.candidates[0].content.parts:
+            if part.inline_data:
+                record_gemini_image_generation('generate_from_photo')
+                return part.inline_data.data
+        raise ValueError("No image returned")
 
     def generate_carousel(self, caption: str, colors: list[str], tone: str, filename_prefix: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, num_slides: int = 4, business_url: str = '') -> list[str]:
         """Genera un carrusel de `num_slides` (H20 + roadmap #5). Reutiliza UN solo
@@ -474,6 +548,61 @@ class ImageGenerator:
             return ok
         except Exception as e:
             logger.warning(f"Background QC error (assuming ok): {e}")
+        return True
+
+    def _validate_product_photo_generation(self, image_bytes: bytes) -> bool:
+        """QC para el camino de foto real de producto. A diferencia de
+        _validate_background, el texto NO se rechaza por su sola presencia
+        (nano banana puede dejar texto residual de la foto original, o
+        generar algo pese a la instruccion de no hacerlo) -- solo se rechaza
+        si esta mal escrito. Decision de Anuar 2026-08-15."""
+        try:
+            client = _vertex_text_client()
+            image_part = types.Part.from_bytes(data=image_bytes, mime_type='image/png')
+            prompt = (
+                "Analyze this image strictly.\n\n"
+                "has_text: true if ANY readable letters, words, or numbers appear anywhere "
+                "in the image. Be very strict.\n"
+                "text_is_correct_spanish: if has_text is true, is that text grammatically "
+                "correct, properly spelled Spanish (no typos, no gibberish, no broken words)? "
+                "If has_text is false, respond true (not applicable).\n"
+                "is_abstract_3d: true if the image has floating 3D geometric shapes, abstract CGI objects, or surreal renders.\n"
+                "has_screen_content: true if any computer monitor, laptop screen, phone screen, TV, or digital display "
+                "shows visible content — including websites, text, images, graphics, UI elements, or any non-blank content. "
+                "A screen must be completely BLACK or clearly turned off to not count. Be very strict.\n"
+                "has_malformed_object: true if any object, tool, instrument, hand, or mechanical item is anatomically or "
+                "physically impossible or distorted. Only flag clear, obvious cases.\n"
+                "has_unrealistic_grounding: true if the main subject appears to float, hover, or is otherwise "
+                "disconnected from the surface/floor/background it should be resting on. Only flag clear, obvious cases.\n"
+                "has_suggestive_or_exposed_content: true if the image shows exposed intimate body parts, implied "
+                "nudity, or sexually suggestive content. Be conservative and strict.\n"
+                "ok: true ONLY if (has_text=false OR text_is_correct_spanish=true) AND is_abstract_3d=false "
+                "AND has_screen_content=false AND has_malformed_object=false AND has_unrealistic_grounding=false "
+                "AND has_suggestive_or_exposed_content=false."
+            )
+            with track_external_api('gemini', operation='product_photo_qc'):
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL,
+                    contents=[image_part, prompt],
+                    config=types.GenerateContentConfig(
+                        labels=vertex_labels(),
+                        response_mime_type="application/json",
+                        response_schema=ProductPhotoQCSchema,
+                        thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    ),
+                )
+            record_tokens(resp, operation='product_photo_qc',
+                          prompt_preview=prompt[:500],
+                          response_preview=resp.text[:500] if resp.text else '')
+            data = json.loads(resp.text)
+            ok = bool(data.get('ok', True))
+            if ok:
+                logger.info(f"Product photo QC OK: {data}")
+            else:
+                logger.warning(f"Product photo QC REJECTED: {data}")
+            return ok
+        except Exception as e:
+            logger.warning(f"Product photo QC error (assuming ok): {e}")
         return True
 
     def _validate_final_image(self, image_bytes: bytes) -> bool:

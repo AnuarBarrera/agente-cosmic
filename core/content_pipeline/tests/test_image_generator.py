@@ -1209,3 +1209,153 @@ class TestChooseTemplateForImageThinking:
             call_kwargs = mock_vc.return_value.models.generate_content.call_args.kwargs
         assert call_kwargs['config'].thinking_config.thinking_budget == 0
 
+
+class TestValidateProductPhotoGeneration:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_passes_when_no_text(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = (
+            '{"has_text": false, "text_is_correct_spanish": true, "is_abstract_3d": false, '
+            '"has_screen_content": false, "has_malformed_object": false, '
+            '"has_unrealistic_grounding": false, "has_suggestive_or_exposed_content": false, "ok": true}'
+        )
+        mock_client.models.generate_content.return_value = mock_resp
+        with patch('core.content_pipeline.generators.image_generator._vertex_text_client', return_value=mock_client):
+            assert gen._validate_product_photo_generation(b'fake-png') is True
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_passes_when_text_is_correct_spanish(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = (
+            '{"has_text": true, "text_is_correct_spanish": true, "is_abstract_3d": false, '
+            '"has_screen_content": false, "has_malformed_object": false, '
+            '"has_unrealistic_grounding": false, "has_suggestive_or_exposed_content": false, "ok": true}'
+        )
+        mock_client.models.generate_content.return_value = mock_resp
+        with patch('core.content_pipeline.generators.image_generator._vertex_text_client', return_value=mock_client):
+            assert gen._validate_product_photo_generation(b'fake-png') is True
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_rejects_when_text_is_incorrect_spanish(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = (
+            '{"has_text": true, "text_is_correct_spanish": false, "is_abstract_3d": false, '
+            '"has_screen_content": false, "has_malformed_object": false, '
+            '"has_unrealistic_grounding": false, "has_suggestive_or_exposed_content": false, "ok": false}'
+        )
+        mock_client.models.generate_content.return_value = mock_resp
+        with patch('core.content_pipeline.generators.image_generator._vertex_text_client', return_value=mock_client):
+            assert gen._validate_product_photo_generation(b'fake-png') is False
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_fail_open_on_error(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_text_client', side_effect=Exception('boom')):
+            assert gen._validate_product_photo_generation(b'fake-png') is True
+
+
+class TestGenerateFromProductPhoto:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_sends_photo_and_creative_direction_uses_lite_model(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-generated-png'
+        mock_gen_client = MagicMock()
+        mock_gen_client.models.generate_content.return_value = MagicMock(
+            candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+        )
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
+             patch('core.shared.rate_limiter.throttle') as mock_throttle, \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True), \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.googleapis.com/test/img.png'):
+            url = gen.generate_from_product_photo(
+                photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
+                caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
+                filename='test-product',
+            )
+
+        assert url == 'https://storage.googleapis.com/test/img.png'
+        call_kwargs = mock_gen_client.models.generate_content.call_args.kwargs
+        assert call_kwargs['model'] == 'gemini-3.1-flash-lite-image'
+        contents = call_kwargs['contents']
+        assert len(contents) == 2
+        assert isinstance(contents[0], str)  # el prompt de direccion creativa
+        assert contents[1].inline_data.data == b'fake-photo-bytes'  # types.Part.from_bytes real, no mockeado
+        assert contents[1].inline_data.mime_type == 'image/jpeg'
+        # El rate limit se pide sobre el modelo economico y la superficie Vertex
+        # (RPM_LIMITS['vertex']['gemini-3.1-flash-lite-image']), no sobre el modelo normal.
+        mock_throttle.assert_called_with('gemini-3.1-flash-lite-image', 'vertex')
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_prompt_instructs_remove_original_text_and_no_new_text(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-generated-png'
+        mock_gen_client = MagicMock()
+        mock_gen_client.models.generate_content.return_value = MagicMock(
+            candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+        )
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
+             patch('core.shared.rate_limiter.throttle'), \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True), \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/img.png'):
+            gen.generate_from_product_photo(
+                photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
+                caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
+                filename='test-product',
+            )
+
+        call_kwargs = mock_gen_client.models.generate_content.call_args.kwargs
+        prompt_text = ' '.join(str(c) for c in call_kwargs['contents'] if isinstance(c, str))
+        assert 'elimina' in prompt_text.lower() or 'remove' in prompt_text.lower() or 'quita' in prompt_text.lower()
+        assert 'no agregues texto' in prompt_text.lower() or 'do not add text' in prompt_text.lower() or 'no text' in prompt_text.lower()
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_returns_empty_string_on_error(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', side_effect=Exception('boom')), \
+             patch('core.shared.rate_limiter.throttle'):
+            url = gen.generate_from_product_photo(
+                photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
+                caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
+                filename='test-product',
+            )
+        assert url == ''
+
