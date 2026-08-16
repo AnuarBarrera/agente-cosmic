@@ -462,6 +462,201 @@ class TestGenerateVideoClips:
         mock_sleep.assert_called_once_with(10)
 
 
+class TestGenerateVideoClipsFromPhoto:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
+    )
+    def test_all_six_images_from_nano_banana_hero_animated_by_veo(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        image_gen = ImageGenerator(bucket_name='test-bucket')
+        with patch.object(image_gen, '_generate_validated_photo_edit',
+                           side_effect=[b'hero-img', b'shot1', b'shot2', b'shot3', b'shot4', b'shot5']) as mock_edit, \
+             patch.object(gen, '_generate_single_clip', return_value=b'veo-clip') as mock_veo, \
+             patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
+             patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
+            clips = gen._generate_video_clips_from_photo(
+                image_gen, b'photo-bytes', 'image/jpeg',
+                ['scene 0', 'scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5'],
+                ['#1a1a2e'], max_qc_retries=1,
+            )
+
+        assert clips == [b'veo-clip'] + [b'animated-clip'] * 5
+        assert mock_edit.call_count == 6
+        # las 6 llamadas usan aspect_ratio 9:16 (vertical, no 1:1 de posts) y max_qc_retries=1
+        for call_args in mock_edit.call_args_list:
+            assert call_args.kwargs['aspect_ratio'] == '9:16'
+            assert call_args.kwargs['max_qc_retries'] == 1
+        mock_veo.assert_called_once_with('scene 0', image_bytes=b'hero-img')
+        assert mock_animate.call_args_list == [
+            call(b'shot1', 720, 1280, 24.0, duration=2.0),
+            call(b'shot2', 720, 1280, 24.0, duration=2.0),
+            call(b'shot3', 720, 1280, 24.0, duration=2.0),
+            call(b'shot4', 720, 1280, 24.0, duration=2.0),
+            call(b'shot5', 720, 1280, 24.0, duration=2.0),
+        ]
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
+    )
+    def test_falls_back_to_scratch_scene_when_hero_photo_edit_fails(self):
+        """Nano banana nunca entrega una imagen valida para la escena 0 -- se
+        genera desde cero, mismo fallback que ya existe hoy cuando Veo falla."""
+        from core.content_pipeline.generators.reel_generator import (
+            ReelGenerator, _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS, _VEO_CLIP_DURATION_SECONDS,
+        )
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        image_gen = ImageGenerator(bucket_name='test-bucket')
+        with patch.object(image_gen, '_generate_validated_photo_edit',
+                           side_effect=[None, b'shot1', b'shot2', b'shot3', b'shot4', b'shot5']), \
+             patch.object(gen, '_generate_single_clip') as mock_veo, \
+             patch.object(gen, '_generate_still_scene_clip', return_value=b'scratch-clip') as mock_scratch, \
+             patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip'):
+            clips = gen._generate_video_clips_from_photo(
+                image_gen, b'photo-bytes', 'image/jpeg',
+                ['scene 0', 'scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5'],
+                ['#1a1a2e'], max_qc_retries=1,
+            )
+
+        assert clips[0] == b'scratch-clip'
+        assert len(clips) == 6
+        mock_veo.assert_not_called()
+        mock_scratch.assert_called_once_with(
+            'scene 0', _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS, duration=_VEO_CLIP_DURATION_SECONDS,
+        )
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
+    )
+    def test_zoompans_validated_hero_image_when_veo_call_fails(self):
+        """Foto valida de nano banana, pero la llamada a Veo falla -- se anima
+        con zoompan la imagen real ya validada en vez de generar desde cero
+        (mejora sobre el fallback de escena 0 que ya existe hoy)."""
+        from core.content_pipeline.generators.reel_generator import (
+            ReelGenerator, _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS, _VEO_CLIP_DURATION_SECONDS,
+        )
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        image_gen = ImageGenerator(bucket_name='test-bucket')
+        with patch.object(image_gen, '_generate_validated_photo_edit',
+                           side_effect=[b'hero-img', b'shot1', b'shot2', b'shot3', b'shot4', b'shot5']), \
+             patch.object(gen, '_generate_single_clip', return_value=None) as mock_veo, \
+             patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
+            clips = gen._generate_video_clips_from_photo(
+                image_gen, b'photo-bytes', 'image/jpeg',
+                ['scene 0', 'scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5'],
+                ['#1a1a2e'], max_qc_retries=1,
+            )
+
+        assert mock_veo.call_count == 2  # 1 intento + 1 reintento
+        assert mock_animate.call_args_list[0] == call(
+            b'hero-img', _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS, duration=_VEO_CLIP_DURATION_SECONDS,
+        )
+        assert len(clips) == 6
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
+    )
+    def test_skips_shot_when_photo_edit_fails_completely(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        image_gen = ImageGenerator(bucket_name='test-bucket')
+        with patch.object(image_gen, '_generate_validated_photo_edit',
+                           side_effect=[b'hero-img', b'shot1', None, b'shot3', b'shot4', b'shot5']), \
+             patch.object(gen, '_generate_single_clip', return_value=b'veo-clip'), \
+             patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
+             patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
+            clips = gen._generate_video_clips_from_photo(
+                image_gen, b'photo-bytes', 'image/jpeg',
+                ['scene 0', 'scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5'],
+                ['#1a1a2e'], max_qc_retries=1,
+            )
+
+        assert len(clips) == 5  # veo-clip + 4 shots (uno se omitio)
+        assert mock_animate.call_count == 4
+
+
+class TestGenerateFromProductPhotoReel:
+    def test_returns_video_and_poster_urls_on_success(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        image_gen = ImageGenerator(bucket_name='test-bucket')
+        script = {
+            'hook_text': 'Descubre algo nuevo', 'highlight_word': 'nuevo',
+            'tag_cta': 'Compra ahora', 'narration_script': 'Bienvenido a nuestra tienda.',
+            'scene_prompts': ['s0', 's1', 's2', 's3', 's4', 's5'],
+            'music_mood': 'upbeat, optimistic',
+        }
+        with patch.object(gen, '_generate_video_clips_from_photo', return_value=[b'c0', b'c1', b'c2', b'c3', b'c4', b'c5']) as mock_clips, \
+             patch.object(gen, '_wrap_with_branding', return_value=([b'p', b'c0', b'c1', b'c2', b'c3', b'c4', b'c5', b'c'], True)) as mock_wrap, \
+             patch.object(gen, '_generate_music', return_value=b'music'), \
+             patch.object(gen, '_generate_narration', return_value=None), \
+             patch.object(gen, '_assemble_reel', return_value=b'final-mp4') as mock_assemble, \
+             patch.object(gen, '_extract_poster_frame', return_value=b'poster-png'), \
+             patch.object(gen, '_upload_video_to_storage', return_value='https://storage.test/reel.mp4') as mock_up_video, \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/poster.png') as mock_up_poster:
+            video_url, poster_url = gen.generate_from_product_photo(
+                image_gen, b'photo-bytes', 'image/jpeg', script, ['#1a1a2e'], 'job1-sample', max_qc_retries=1,
+            )
+
+        assert video_url == 'https://storage.test/reel.mp4'
+        assert poster_url == 'https://storage.test/poster.png'
+        mock_clips.assert_called_once_with(
+            image_gen, b'photo-bytes', 'image/jpeg', script['scene_prompts'], ['#1a1a2e'], 1,
+        )
+        mock_wrap.assert_called_once_with(
+            [b'c0', b'c1', b'c2', b'c3', b'c4', b'c5'], 'Descubre algo nuevo', 'nuevo', 'Compra ahora',
+            '#1a1a2e', 'job1-sample',
+        )
+        mock_up_video.assert_called_once_with(b'final-mp4', 'job1-sample')
+        mock_assemble.assert_called_once_with(
+            [b'p', b'c0', b'c1', b'c2', b'c3', b'c4', b'c5', b'c'], b'music', None, script, ['#1a1a2e'], [],
+            skip_hook_cta_overlay=True,
+        )
+
+    def test_returns_empty_strings_when_fewer_than_3_clips(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        image_gen = ImageGenerator(bucket_name='test-bucket')
+        script = {
+            'hook_text': 'H', 'highlight_word': 'h', 'tag_cta': 'CTA',
+            'narration_script': 'N', 'scene_prompts': ['s0', 's1'], 'music_mood': 'M',
+        }
+        with patch.object(gen, '_generate_video_clips_from_photo', return_value=[b'c0']):
+            video_url, poster_url = gen.generate_from_product_photo(
+                image_gen, b'photo-bytes', 'image/jpeg', script, ['#1a1a2e'], 'job1-sample',
+            )
+        assert (video_url, poster_url) == ('', '')
+
+    def test_returns_empty_strings_on_exception(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        image_gen = ImageGenerator(bucket_name='test-bucket')
+        script = {
+            'hook_text': 'H', 'highlight_word': 'h', 'tag_cta': 'CTA',
+            'narration_script': 'N', 'scene_prompts': ['s0', 's1', 's2'], 'music_mood': 'M',
+        }
+        with patch.object(gen, '_generate_video_clips_from_photo', side_effect=Exception('boom')):
+            video_url, poster_url = gen.generate_from_product_photo(
+                image_gen, b'photo-bytes', 'image/jpeg', script, ['#1a1a2e'], 'job1-sample',
+            )
+        assert (video_url, poster_url) == ('', '')
+
+
 class TestProbeVideoDimensions:
     def test_returns_width_height_fps(self):
         from core.content_pipeline.generators.reel_generator import _probe_video_dimensions
