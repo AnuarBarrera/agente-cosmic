@@ -80,6 +80,41 @@ def test_generate_post_has_required_keys(brand_dna):
     GOOGLE_CLOUD_LOCATION='us-central1',
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
 )
+def test_generate_normalizes_hashtags_missing_hash_prefix(brand_dna):
+    """Bug real detectado en prueba manual de Anuar (2026-08-16): Gemini a
+    veces devuelve los hashtags como palabras sueltas sin '#' (ej.
+    'hechoamano' en vez de '#hechoamano') -- nada en el pipeline lo
+    agregaba, asi que se guardaban y renderizaban tal cual, sin '#'."""
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    mock_response_without_hash = MOCK_VERTEX_RESPONSE.replace('"#disenoweb"', '"disenoweb"')
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(mock_response_without_hash)
+        gen = TextGenerator()
+        result = gen.generate(brand_dna)
+
+    assert result[0]['hashtags'] == ['#disenoweb']
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
+def test_generate_does_not_double_prefix_hashtags_that_already_have_hash(brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
+        gen = TextGenerator()
+        result = gen.generate(brand_dna)
+
+    assert result[0]['hashtags'] == ['#disenoweb']
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+)
 def test_generate_tags_each_post_with_its_pillar(brand_dna):
     from core.content_pipeline.generators.text_generator import TextGenerator, CONTENT_PILLARS
     with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:

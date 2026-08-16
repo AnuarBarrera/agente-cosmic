@@ -73,6 +73,14 @@ class GeneratedPostSchema(BaseModel):
     suggested_time: str = Field(description="Horario sugerido en formato HH:MM")
 
 
+def _normalize_hashtags(hashtags: list[str]) -> list[str]:
+    """Gemini a veces devuelve los hashtags como palabras sueltas sin '#'
+    (bug real detectado en prueba manual de Anuar, 2026-08-16) -- nada en el
+    pipeline lo agregaba despues, asi que se guardaban y renderizaban tal
+    cual. Idempotente: no duplica el '#' si ya viene incluido."""
+    return [tag if tag.startswith('#') else f'#{tag}' for tag in hashtags if tag]
+
+
 def _pillars_block() -> str:
     return '\n'.join(
         f"Dia {p['day']} — {p['name']}: {p['angle']}" for p in CONTENT_PILLARS
@@ -183,6 +191,7 @@ class TextGenerator:
         # CONTENT_PILLARS (se lo pedimos explicitamente en el prompt). Si Gemini
         # devuelve menos de 7 posts, los ultimos pilares simplemente no se usan.
         for i, post in enumerate(posts):
+            post['hashtags'] = _normalize_hashtags(post.get('hashtags') or [])
             pillar = CONTENT_PILLARS[i] if i < len(CONTENT_PILLARS) else None
             post['pillar'] = pillar['name'] if pillar else ''
             if pillar and pillar['day'] == REEL_DAY:
