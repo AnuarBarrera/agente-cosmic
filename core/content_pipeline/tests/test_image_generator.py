@@ -1429,11 +1429,6 @@ class TestGenerateFromProductPhoto:
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
     def test_sends_photo_and_creative_direction_uses_lite_model(self):
-        """De vuelta a VERTEX_IMAGE_MODEL_LITE el 2026-08-16 -- el swap
-        temporal al modelo normal (commit anterior) confirmo que el rechazo
-        no era exclusivo del lite; la causa real era thinking_config ausente
-        (ver test_enables_automatic_thinking), asi que se revierte al modelo
-        economico con thinking ya activo."""
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         mock_part = MagicMock()
@@ -1445,14 +1440,17 @@ class TestGenerateFromProductPhoto:
         with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
              patch('core.shared.rate_limiter.throttle') as mock_throttle, \
              patch.object(gen, '_validate_product_photo_generation', return_value=True), \
-             patch.object(gen, '_upload_to_storage', return_value='https://storage.googleapis.com/test/img.png'):
-            url = gen.generate_from_product_photo(
+             patch.object(gen, '_upload_photo_post', return_value=('https://storage.test/bg.png', 'https://storage.test/final.png')) as mock_upload:
+            result = gen.generate_from_product_photo(
                 photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
                 caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
                 filename='test-product',
             )
 
-        assert url == 'https://storage.googleapis.com/test/img.png'
+        assert result == ('https://storage.test/bg.png', 'https://storage.test/final.png')
+        mock_upload.assert_called_once_with(
+            b'fake-generated-png', 'Aretes artesanales', ['#e94560'], 'alegre', '', None, '', 'test-product',
+        )
         call_kwargs = mock_gen_client.models.generate_content.call_args.kwargs
         assert call_kwargs['model'] == 'gemini-3.1-flash-lite-image'
         contents = call_kwargs['contents']
@@ -1470,13 +1468,6 @@ class TestGenerateFromProductPhoto:
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
     def test_enables_automatic_thinking(self):
-        """Root cause real del rechazo (finish_reason=OTHER) confirmado por
-        Anuar probando 'Nano Banana Lite' en Vertex AI Studio (2026-08-16):
-        el modelo necesita thinking activo para poder editar el contenido
-        real que le mandamos -- sin thinking_config, el default es
-        insuficiente. thinking_budget=-1 = AUTOMATIC (deja que el modelo
-        decida cuanto pensar), no 0 (deshabilitado, que es lo que se usa a
-        proposito en las llamadas de QC de texto)."""
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         mock_part = MagicMock()
@@ -1488,7 +1479,7 @@ class TestGenerateFromProductPhoto:
         with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
              patch('core.shared.rate_limiter.throttle'), \
              patch.object(gen, '_validate_product_photo_generation', return_value=True), \
-             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/img.png'):
+             patch.object(gen, '_upload_photo_post', return_value=('https://storage.test/bg.png', 'https://storage.test/final.png')):
             gen.generate_from_product_photo(
                 photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
                 caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
@@ -1515,7 +1506,7 @@ class TestGenerateFromProductPhoto:
         with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
              patch('core.shared.rate_limiter.throttle'), \
              patch.object(gen, '_validate_product_photo_generation', return_value=True), \
-             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/img.png'):
+             patch.object(gen, '_upload_photo_post', return_value=('https://storage.test/bg.png', 'https://storage.test/final.png')):
             gen.generate_from_product_photo(
                 photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
                 caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
@@ -1526,8 +1517,6 @@ class TestGenerateFromProductPhoto:
         prompt_text = ' '.join(str(c) for c in call_kwargs['contents'] if isinstance(c, str))
         assert 'elimina' in prompt_text.lower() or 'remove' in prompt_text.lower() or 'quita' in prompt_text.lower()
         assert 'no agregues texto' in prompt_text.lower() or 'do not add text' in prompt_text.lower() or 'no text' in prompt_text.lower()
-        # caption y vision_context son entrada del usuario -- van delimitados
-        # con el mismo marcador que _regenerate_caption (core/brand_dna/views.py).
         assert '=== INICIO DATOS DEL CLIENTE' in prompt_text
         assert '=== FIN DATOS DEL CLIENTE' in prompt_text
 
@@ -1536,18 +1525,17 @@ class TestGenerateFromProductPhoto:
         GOOGLE_CLOUD_LOCATION_TEXT='global',
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
-    def test_returns_empty_string_on_error(self):
+    def test_returns_empty_tuple_on_error(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         with patch('core.content_pipeline.generators.image_generator._vertex_client', side_effect=Exception('boom')), \
              patch('core.shared.rate_limiter.throttle'):
-            url = gen.generate_from_product_photo(
+            result = gen.generate_from_product_photo(
                 photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
                 caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
                 filename='test-product',
             )
-        assert url == ''
-
+        assert result == ('', '')
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
@@ -1555,10 +1543,6 @@ class TestGenerateFromProductPhoto:
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
     def test_records_cost_at_the_lite_model_rate(self):
-        """De vuelta al modelo lite (2026-08-16) -- contabilizarlo a la
-        tarifa del modelo normal (_GEMINI_IMAGE_COST_PER_IMAGE) inflaba el
-        panel de costo de Prometheus, justo la medicion para la que se eligio
-        el lite."""
         from core.content_pipeline.generators.image_generator import ImageGenerator
         from core.shared.metrics_utils import (
             _GEMINI_LITE_IMAGE_COST_PER_IMAGE, _GEMINI_IMAGE_COST_PER_IMAGE,
@@ -1574,7 +1558,7 @@ class TestGenerateFromProductPhoto:
              patch('core.shared.rate_limiter.throttle'), \
              patch('core.content_pipeline.generators.image_generator.record_gemini_image_generation') as mock_record, \
              patch.object(gen, '_validate_product_photo_generation', return_value=True), \
-             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/img.png'):
+             patch.object(gen, '_upload_photo_post', return_value=('https://storage.test/bg.png', 'https://storage.test/final.png')):
             gen.generate_from_product_photo(
                 photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
                 caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
@@ -1592,12 +1576,6 @@ class TestGenerateFromProductPhoto:
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
     def test_retries_when_gemini_returns_no_image_parts(self):
-        """Reproduce bug real de prueba manual (2026-08-16, job
-        94a75f45-0365-4953-97f6-f29c99f1a89d): Gemini respondio 200 OK pero
-        sin imagen (bloqueo de seguridad sobre la foto real) -- el intento 1
-        crasheaba y abortaba TODO el presupuesto de reintentos de QC (2 mas
-        disponibles) en vez de intentar de nuevo, dejando el post con
-        image_url='' aunque el intento 2 hubiera funcionado."""
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         blocked_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=None), finish_reason='SAFETY')])
@@ -1609,14 +1587,14 @@ class TestGenerateFromProductPhoto:
         with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
              patch('core.shared.rate_limiter.throttle'), \
              patch.object(gen, '_validate_product_photo_generation', return_value=True), \
-             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/img.png'):
-            url = gen.generate_from_product_photo(
+             patch.object(gen, '_upload_photo_post', return_value=('https://storage.test/bg.png', 'https://storage.test/final.png')):
+            result = gen.generate_from_product_photo(
                 photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
                 caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
                 filename='test-product', max_qc_retries=2,
             )
 
-        assert url == 'https://storage.test/img.png'
+        assert result == ('https://storage.test/bg.png', 'https://storage.test/final.png')
         assert mock_gen_client.models.generate_content.call_count == 2
 
     @override_settings(
@@ -1624,7 +1602,7 @@ class TestGenerateFromProductPhoto:
         GOOGLE_CLOUD_LOCATION_TEXT='global',
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
-    def test_returns_empty_string_when_every_attempt_returns_no_image(self):
+    def test_returns_empty_tuple_when_every_attempt_returns_no_image(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         mock_gen_client = MagicMock()
@@ -1633,13 +1611,84 @@ class TestGenerateFromProductPhoto:
         )
         with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
              patch('core.shared.rate_limiter.throttle'):
-            url = gen.generate_from_product_photo(
+            result = gen.generate_from_product_photo(
                 photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
                 caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
                 filename='test-product', max_qc_retries=2,
             )
-        assert url == ''
+        assert result == ('', '')
         assert mock_gen_client.models.generate_content.call_count == 3  # 1 + max_qc_retries
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_uploads_background_and_final_via_layered_pipeline(self):
+        """Overlay exitoso: sube el fondo limpio Y el resultado final
+        compuesto con _layered_pipeline, con URLs distintas."""
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-generated-png'
+        mock_gen_client = MagicMock()
+        mock_gen_client.models.generate_content.return_value = MagicMock(
+            candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+        )
+        upload_calls = []
+        def fake_upload(image_bytes, filename):
+            upload_calls.append(filename)
+            return f'https://storage.test/{filename}.png'
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
+             patch('core.shared.rate_limiter.throttle'), \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True), \
+             patch.object(gen, '_layered_pipeline', return_value=b'fake-final-bytes') as mock_layered, \
+             patch.object(gen, '_upload_to_storage', side_effect=fake_upload):
+            background_url, final_url = gen.generate_from_product_photo(
+                photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
+                caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
+                filename='test-product', description='Joyeria artesanal',
+                keywords=['aretes', 'plata'], business_url='https://ejemplo.com',
+            )
+
+        assert background_url == 'https://storage.test/test-product-bg.png'
+        assert final_url == 'https://storage.test/test-product.png'
+        assert upload_calls == ['test-product-bg', 'test-product']
+        mock_layered.assert_called_once_with(
+            'Aretes artesanales', ['#e94560'], 'alegre', ['aretes', 'plata'], 'Joyeria artesanal',
+            business_url='https://ejemplo.com', font_seed='test-product', background_bytes=b'fake-generated-png',
+        )
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_degrades_to_clean_background_when_overlay_fails(self):
+        """Si _layered_pipeline falla (Playwright, plantilla) despues de un
+        fondo valido, ambas URLs apuntan al fondo limpio -- no se pierde el
+        trabajo de nano banana."""
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-generated-png'
+        mock_gen_client = MagicMock()
+        mock_gen_client.models.generate_content.return_value = MagicMock(
+            candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+        )
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
+             patch('core.shared.rate_limiter.throttle'), \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True), \
+             patch.object(gen, '_layered_pipeline', side_effect=Exception('Playwright error')), \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/test-product-bg.png'):
+            background_url, final_url = gen.generate_from_product_photo(
+                photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
+                caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
+                filename='test-product',
+            )
+
+        assert background_url == 'https://storage.test/test-product-bg.png'
+        assert final_url == background_url
 
 
 class TestRegenerateWithReference:

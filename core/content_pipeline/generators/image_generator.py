@@ -293,9 +293,34 @@ class ImageGenerator:
             logger.error(f"ImageGenerator error: {e}")
             return ''
 
+    def _upload_photo_post(self, background_bytes: bytes, caption: str, colors: list[str], tone: str,
+                            description: str, keywords: list[str], business_url: str, filename: str) -> tuple[str, str]:
+        """Sube el fondo (foto real ya editada/validada por nano banana) y,
+        si el overlay de texto se puede componer con exito via
+        _layered_pipeline, tambien la version final compuesta. Si el overlay
+        falla, ambas URLs apuntan al fondo limpio -- se degrada al
+        comportamiento sin overlay en vez de perder el trabajo de nano banana
+        (decision de Anuar, 2026-08-16). Usado por generate_from_product_photo
+        y regenerate_with_reference."""
+        background_url = self._upload_to_storage(background_bytes, f"{filename}-bg")
+        font_seed = filename.rsplit('-day', 1)[0] if '-day' in filename else filename
+        try:
+            final_bytes = self._layered_pipeline(
+                caption, colors, tone, keywords or [], description,
+                business_url=business_url, font_seed=font_seed,
+                background_bytes=background_bytes,
+            )
+            final_url = self._upload_to_storage(final_bytes, filename)
+        except Exception as e:
+            logger.warning(f"Overlay de post con foto real fallo, usando fondo sin overlay: {e}")
+            final_url = background_url
+        return background_url, final_url
+
     def generate_from_product_photo(self, photo_bytes: bytes, mime_type: str, caption: str,
                                     colors: list[str], tone: str, filename: str,
-                                    vision_context: str = '', max_qc_retries: int = 2) -> str:
+                                    vision_context: str = '', description: str = '',
+                                    keywords: list[str] = None, business_url: str = '',
+                                    max_qc_retries: int = 2) -> tuple[str, str]:
         """Primera generacion usando la foto real de producto -- nano banana
         ve la foto directamente en la misma llamada que la direccion
         creativa (Enfoque A, ya validado). Usa VERTEX_IMAGE_MODEL_LITE (2026-
@@ -306,7 +331,13 @@ class ImageGenerator:
         thinking activo para poder editar el contenido real que le mandamos
         -- sin thinking_config, el default es insuficiente y el modelo se
         rinde en vez de resolver la composicion. Ver thinking_config en
-        _generate_from_photo."""
+        _generate_from_photo.
+
+        Compone overlay de headline/subtitle/CTA/tag encima del fondo (foto
+        editada) via _upload_photo_post/_layered_pipeline, igual que un post
+        normal de produccion (2026-08-16, decision de Anuar). Devuelve
+        (background_url, final_url) -- el fondo limpio se guarda aparte para
+        que regenerate_with_reference lo edite sin overlay horneado encima."""
         try:
             color_str = ', '.join(colors[:3]) if colors else 'warm neutrals'
             context_line = f" Contexto del producto: {vision_context}." if vision_context else ''
@@ -341,16 +372,16 @@ class ImageGenerator:
                     logger.warning(f"Product photo generation sin imagen (attempt {attempt + 1}/{total_attempts}): {gen_err}")
                     continue
                 if self._validate_product_photo_generation(last_bytes):
-                    return self._upload_to_storage(last_bytes, filename)
+                    return self._upload_photo_post(last_bytes, caption, colors, tone, description, keywords, business_url, filename)
                 if attempt < max_qc_retries:
                     logger.warning(f"Product photo QC failed (attempt {attempt + 1}/{total_attempts}), regenerando...")
             if last_bytes is None:
                 raise ValueError("Ningun intento devolvio una imagen usable")
             logger.warning("Product photo QC: reintentos agotados, usando ultima imagen generada")
-            return self._upload_to_storage(last_bytes, filename)
+            return self._upload_photo_post(last_bytes, caption, colors, tone, description, keywords, business_url, filename)
         except Exception as e:
             logger.error(f"ImageGenerator.generate_from_product_photo error: {e}")
-            return ''
+            return '', ''
 
     def regenerate_with_reference(self, current_image_bytes: bytes, feedback: str,
                                     vision_context: str, filename: str, max_qc_retries: int = 2) -> str:
