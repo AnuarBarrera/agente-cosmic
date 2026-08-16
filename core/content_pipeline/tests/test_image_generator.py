@@ -1380,9 +1380,13 @@ class TestGenerateFromProductPhoto:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
         GOOGLE_CLOUD_LOCATION_TEXT='global',
-        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+        VERTEX_IMAGE_MODEL='gemini-3.1-flash-image',
     )
-    def test_sends_photo_and_creative_direction_uses_lite_model(self):
+    def test_sends_photo_and_creative_direction_uses_normal_model(self):
+        """Cambiado de VERTEX_IMAGE_MODEL_LITE a VERTEX_IMAGE_MODEL el
+        2026-08-16 (decision de Anuar) -- diagnostico en vivo de si el
+        rechazo (finish_reason=OTHER) de una foto real de producto es una
+        limitacion del modelo lite o tambien ocurre con el normal."""
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         mock_part = MagicMock()
@@ -1403,15 +1407,15 @@ class TestGenerateFromProductPhoto:
 
         assert url == 'https://storage.googleapis.com/test/img.png'
         call_kwargs = mock_gen_client.models.generate_content.call_args.kwargs
-        assert call_kwargs['model'] == 'gemini-3.1-flash-lite-image'
+        assert call_kwargs['model'] == 'gemini-3.1-flash-image'
         contents = call_kwargs['contents']
         assert len(contents) == 2
         assert isinstance(contents[0], str)  # el prompt de direccion creativa
         assert contents[1].inline_data.data == b'fake-photo-bytes'  # types.Part.from_bytes real, no mockeado
         assert contents[1].inline_data.mime_type == 'image/jpeg'
-        # El rate limit se pide sobre el modelo economico y la superficie Vertex
-        # (RPM_LIMITS['vertex']['gemini-3.1-flash-lite-image']), no sobre el modelo normal.
-        mock_throttle.assert_called_with('gemini-3.1-flash-lite-image', 'vertex')
+        # El rate limit se pide sobre el modelo normal y la superficie Vertex
+        # (RPM_LIMITS['vertex']['gemini-3.1-flash-image']).
+        mock_throttle.assert_called_with('gemini-3.1-flash-image', 'vertex')
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
@@ -1467,16 +1471,13 @@ class TestGenerateFromProductPhoto:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
         GOOGLE_CLOUD_LOCATION_TEXT='global',
-        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+        VERTEX_IMAGE_MODEL='gemini-3.1-flash-image',
     )
-    def test_records_cost_at_the_lite_model_rate(self):
-        """Este camino usa VERTEX_IMAGE_MODEL_LITE — contabilizarlo a la tarifa
-        del modelo normal (_GEMINI_IMAGE_COST_PER_IMAGE) inflaba el panel de
-        costo de Prometheus, justo la medicion para la que se eligio el lite."""
+    def test_records_cost_at_the_normal_model_rate(self):
+        """Desde el swap del 2026-08-16 este camino usa VERTEX_IMAGE_MODEL
+        (no el lite) -- record_gemini_image_generation no debe pasar
+        cost_per_image explicito, cae al default (tarifa del modelo normal)."""
         from core.content_pipeline.generators.image_generator import ImageGenerator
-        from core.shared.metrics_utils import (
-            _GEMINI_LITE_IMAGE_COST_PER_IMAGE, _GEMINI_IMAGE_COST_PER_IMAGE,
-        )
         gen = ImageGenerator(bucket_name='test-bucket')
         mock_part = MagicMock()
         mock_part.inline_data.data = b'fake-generated-png'
@@ -1495,10 +1496,7 @@ class TestGenerateFromProductPhoto:
                 filename='test-product',
             )
 
-        mock_record.assert_called_once_with(
-            'generate_from_photo', cost_per_image=_GEMINI_LITE_IMAGE_COST_PER_IMAGE,
-        )
-        assert _GEMINI_LITE_IMAGE_COST_PER_IMAGE != _GEMINI_IMAGE_COST_PER_IMAGE
+        mock_record.assert_called_once_with('generate_from_photo')
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
