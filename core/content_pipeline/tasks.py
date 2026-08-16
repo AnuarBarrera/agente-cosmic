@@ -130,7 +130,7 @@ def generate_sample_task(job_id: str) -> None:
         if (wanted_format == ContentPost.FORMAT_SINGLE and job.product_reference_image_path
                 and upload_exists(job.product_reference_image_path)):
             photo_bytes = read_upload(job.product_reference_image_path)
-            image_url = image_gen.generate_from_product_photo(
+            background_url, image_url = image_gen.generate_from_product_photo(
                 # mime real por magic bytes, no 'image/jpeg' hardcodeado: el
                 # frontend recomprime a JPEG casi siempre, pero el fallback de
                 # img.onerror (HEIC, imagen corrupta) y el POST sin JS no.
@@ -138,9 +138,12 @@ def generate_sample_task(job_id: str) -> None:
                 caption=post_data['caption'], colors=brand_dna.primary_colors,
                 tone=brand_dna.tone, filename=f"{job_id}-sample",
                 vision_context=brand_dna.product_photo_analysis,
+                description=brand_dna.description, keywords=brand_dna.keywords,
+                business_url=brand_dna.business_url,
             )
             image_urls, video_url = [], ''
         else:
+            background_url = ''
             image_url, image_urls, video_url = _generate_post_media(
                 image_gen, reel_script_gen, reel_gen,
                 fmt=wanted_format,
@@ -164,6 +167,7 @@ def generate_sample_task(job_id: str) -> None:
             image_url=image_url,
             image_urls=image_urls,
             video_url=video_url,
+            product_photo_background_url=background_url,
             format=wanted_format,
             suggested_time='09:00',
             hashtags=post_data.get('hashtags', []),
@@ -255,18 +259,25 @@ def regenerate_post_image_task(post_id: str, feedback: str) -> None:
         post = ContentPost.objects.select_related('calendar__brand_dna__job').get(id=post_id)
         brand_dna = post.calendar.brand_dna
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
-        current_bytes = read_upload_from_public_url(post.image_url)
-        new_url = image_gen.regenerate_with_reference(
-            current_image_bytes=current_bytes,
+        current_background_bytes = read_upload_from_public_url(post.product_photo_background_url)
+        background_url, new_url = image_gen.regenerate_with_reference(
+            current_background_bytes=current_background_bytes,
             feedback=feedback,
             vision_context=brand_dna.product_photo_analysis,
+            caption=post.caption,
+            colors=brand_dna.primary_colors,
+            tone=brand_dna.tone,
+            description=brand_dna.description,
+            keywords=brand_dna.keywords,
+            business_url=brand_dna.business_url,
             filename=f"{brand_dna.job.id}-day{post.day_number}-regen-{int(time.time())}",
         )
         if new_url:
             post.image_url = new_url
             post.image_urls = []
+            post.product_photo_background_url = background_url
         post.regenerating = False
-        post.save(update_fields=['image_url', 'image_urls', 'regenerating'])
+        post.save(update_fields=['image_url', 'image_urls', 'product_photo_background_url', 'regenerating'])
     except Exception as e:
         logger.error(f"regenerate_post_image_task error para post {post_id}: {e}")
         ContentPost.objects.filter(id=post_id).update(regenerating=False)

@@ -270,7 +270,7 @@ def test_generate_sample_task_uses_product_photo_when_present(job_with_dna_sampl
          patch('core.content_pipeline.tasks.EmailSender'), \
          patch('core.content_pipeline.tasks.schedule_daily_emails'):
         MockText.return_value.generate.return_value = _MOCK_POSTS_FOR_SAMPLE
-        MockImage.return_value.generate_from_product_photo.return_value = 'https://storage.test/product.png'
+        MockImage.return_value.generate_from_product_photo.return_value = ('https://storage.test/bg.png', 'https://storage.test/product.png')
 
         from core.content_pipeline.tasks import generate_sample_task
         generate_sample_task(str(job_with_dna_sample_image_and_photo.id))
@@ -281,8 +281,12 @@ def test_generate_sample_task_uses_product_photo_when_present(job_with_dna_sampl
     assert call_kwargs['photo_bytes'] == png_bytes
     # mime real derivado de los magic bytes, no 'image/jpeg' hardcodeado
     assert call_kwargs['mime_type'] == 'image/png'
+    assert call_kwargs['description'] == 'Agencia digital'
+    assert call_kwargs['keywords'] == ['diseno']
+    assert call_kwargs['business_url'] == 'https://tuwebmx.com'
     post = ContentPost.objects.get(calendar__brand_dna__job=job_with_dna_sample_image_and_photo)
     assert post.image_url == 'https://storage.test/product.png'
+    assert post.product_photo_background_url == 'https://storage.test/bg.png'
 
 
 @override_settings(
@@ -313,6 +317,7 @@ def test_generate_sample_task_falls_back_to_normal_path_when_photo_blob_is_gone(
     assert job_with_dna_sample_image_and_photo.status == AnalysisJob.STATUS_DONE
     post = ContentPost.objects.get(calendar__brand_dna__job=job_with_dna_sample_image_and_photo)
     assert post.image_url == 'https://storage.test/normal.png'
+    assert post.product_photo_background_url == ''
 
 
 @override_settings(
@@ -644,29 +649,42 @@ def test_backfill_image_task_skips_post_with_existing_image(calendar_with_dna):
 
 def test_regenerate_post_image_task_updates_image_and_clears_flag(calendar_with_dna):
     from core.content_pipeline.tasks import regenerate_post_image_task
-    post = _make_post(calendar_with_dna, 1, image_url='https://storage.googleapis.com/test-bucket/posts/old.png')
+    post = _make_post(
+        calendar_with_dna, 1, image_url='https://storage.googleapis.com/test-bucket/posts/old.png',
+        product_photo_background_url='https://storage.googleapis.com/test-bucket/posts/old-bg.png',
+    )
     post.regenerating = True
     post.save(update_fields=['regenerating'])
     job = calendar_with_dna.brand_dna.job
     job.product_reference_image_path = 'uploads/product_ref_test.jpg'
     job.save(update_fields=['product_reference_image_path'])
 
-    with patch('core.content_pipeline.tasks.read_upload_from_public_url', return_value=b'current-bytes'), \
+    with patch('core.content_pipeline.tasks.read_upload_from_public_url', return_value=b'current-bg-bytes'), \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
-        MockImage.return_value.regenerate_with_reference.return_value = 'https://storage.test/new.png'
+        MockImage.return_value.regenerate_with_reference.return_value = ('https://storage.test/new-bg.png', 'https://storage.test/new.png')
         regenerate_post_image_task(str(post.id), 'hazlo mas colorido')
 
     call_kwargs = MockImage.return_value.regenerate_with_reference.call_args.kwargs
-    assert call_kwargs['current_image_bytes'] == b'current-bytes'
+    assert call_kwargs['current_background_bytes'] == b'current-bg-bytes'
     assert call_kwargs['feedback'] == 'hazlo mas colorido'
+    assert call_kwargs['caption'] == post.caption
+    assert call_kwargs['colors'] == ['#1a1a2e']
+    assert call_kwargs['tone'] == 'profesional'
+    assert call_kwargs['description'] == 'Agencia digital'
+    assert call_kwargs['keywords'] == ['diseno']
+    assert call_kwargs['business_url'] == 'https://tuwebmx.com'
     post.refresh_from_db()
     assert post.image_url == 'https://storage.test/new.png'
+    assert post.product_photo_background_url == 'https://storage.test/new-bg.png'
     assert post.regenerating is False
 
 
 def test_regenerate_post_image_task_clears_flag_on_failure(calendar_with_dna):
     from core.content_pipeline.tasks import regenerate_post_image_task
-    post = _make_post(calendar_with_dna, 1, image_url='https://storage.googleapis.com/test-bucket/posts/old.png')
+    post = _make_post(
+        calendar_with_dna, 1, image_url='https://storage.googleapis.com/test-bucket/posts/old.png',
+        product_photo_background_url='https://storage.googleapis.com/test-bucket/posts/old-bg.png',
+    )
     post.regenerating = True
     post.save(update_fields=['regenerating'])
 
@@ -676,6 +694,7 @@ def test_regenerate_post_image_task_clears_flag_on_failure(calendar_with_dna):
     post.refresh_from_db()
     assert post.regenerating is False
     assert post.image_url == 'https://storage.googleapis.com/test-bucket/posts/old.png'  # sin cambio
+    assert post.product_photo_background_url == 'https://storage.googleapis.com/test-bucket/posts/old-bg.png'  # sin cambio
 
 
 def test_regenerate_post_image_task_clears_flag_when_post_lookup_fails(calendar_with_dna):
@@ -698,22 +717,26 @@ def test_regenerate_post_image_task_clears_flag_when_post_lookup_fails(calendar_
 
 
 def test_regenerate_post_image_task_keeps_previous_image_when_regen_returns_empty(calendar_with_dna):
-    """regenerate_with_reference agoto reintentos sin nada usable ('') — el post
-    debe conservar su imagen anterior, no quedarse en blanco."""
+    """regenerate_with_reference agoto reintentos sin nada usable ('', '') —
+    el post debe conservar su imagen y fondo anteriores, no quedarse en blanco."""
     from core.content_pipeline.tasks import regenerate_post_image_task
-    post = _make_post(calendar_with_dna, 1, image_url='https://storage.googleapis.com/test-bucket/posts/old.png')
+    post = _make_post(
+        calendar_with_dna, 1, image_url='https://storage.googleapis.com/test-bucket/posts/old.png',
+        product_photo_background_url='https://storage.googleapis.com/test-bucket/posts/old-bg.png',
+    )
     post.image_urls = ['https://storage.googleapis.com/test-bucket/posts/old.png']
     post.regenerating = True
     post.save(update_fields=['image_urls', 'regenerating'])
 
-    with patch('core.content_pipeline.tasks.read_upload_from_public_url', return_value=b'current-bytes'), \
+    with patch('core.content_pipeline.tasks.read_upload_from_public_url', return_value=b'current-bg-bytes'), \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
-        MockImage.return_value.regenerate_with_reference.return_value = ''
+        MockImage.return_value.regenerate_with_reference.return_value = ('', '')
         regenerate_post_image_task(str(post.id), 'hazlo mas colorido')
 
     post.refresh_from_db()
     assert post.image_url == 'https://storage.googleapis.com/test-bucket/posts/old.png'
     assert post.image_urls == ['https://storage.googleapis.com/test-bucket/posts/old.png']
+    assert post.product_photo_background_url == 'https://storage.googleapis.com/test-bucket/posts/old-bg.png'
     assert post.regenerating is False
 
 
