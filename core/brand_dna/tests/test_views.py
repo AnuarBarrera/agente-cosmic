@@ -592,6 +592,37 @@ def test_regenerate_action_carousel_with_unused_product_photo_stays_synchronous(
     assert post.image_urls == ['https://storage.test/s1-new.png', 'https://storage.test/s2-new.png']
 
 
+def test_regenerate_action_sample_image_without_photo_stays_synchronous(client, user, job_with_calendar):
+    # La foto es OPCIONAL en el formulario: un MODE_SAMPLE_IMAGE sin foto se genera
+    # por el camino normal (_generate_post_media, imagen diseñada con overlay), no
+    # por generate_from_product_photo. Rutearlo a async le borraria el diseño --
+    # el prompt de regenerate_with_reference pide "no agregues texto/diseño" y
+    # ademas vision_context llegaria vacio -- y lo dejaria con regenerating=True
+    # varios minutos sin foto alguna que analizar.
+    job = job_with_calendar
+    job.generation_mode = AnalysisJob.MODE_SAMPLE_IMAGE
+    job.save(update_fields=['generation_mode'])
+    assert not job.product_reference_image_path
+    post = job.brand_dna.calendar.posts.filter(format='single').first()
+    client.force_login(user)
+    with patch('core.brand_dna.views._regenerate_caption', return_value='Nuevo caption'), \
+         patch('core.content_pipeline.generators.image_generator.ImageGenerator'), \
+         patch('core.content_pipeline.tasks._generate_post_media',
+               return_value=('https://storage.test/normal.png', [], '')), \
+         patch('core.brand_dna.views.django_rq') as mock_rq:
+        response = client.post(f'/api/post/{post.id}/action/', data=json.dumps({
+            'action': 'regenerate', 'value': 'hazlo mas colorido',
+        }), content_type='application/json')
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['status'] == 'ok'
+    assert data['image_url'] == 'https://storage.test/normal.png'
+    mock_rq.enqueue.assert_not_called()
+    post.refresh_from_db()
+    assert post.regenerating is False
+
+
 def test_post_regen_status_api_returns_current_state(client, user, job_with_calendar):
     post = job_with_calendar.brand_dna.calendar.posts.filter(format='single').first()
     post.regenerating = True

@@ -542,16 +542,21 @@ def post_action_api(request, post_id):
         post.regen_count += 1
 
         brand_dna = post.calendar.brand_dna
-        # El gate es el MODO, no la mera presencia de product_reference_image_path:
-        # analyze_submit acepta la foto en CUALQUIER modo, asi que un MODE_FULL
-        # puede tenerla guardada sin que se haya usado nunca para generar. Hoy
-        # MODE_SAMPLE_IMAGE es el unico modo que rutea a generate_from_product_photo
-        # (generate_sample_task) y siempre produce exactamente 1 post single, asi
-        # que regenerar con referencia solo tiene sentido ahi. Con la condicion
-        # amplia, un carrusel de MODE_FULL caia aqui y image_urls=[] dejaba la
-        # tarjeta con el badge de carrusel mintiendo, y un single normal perdia
-        # su diseño/overlay al tratarse como si viniera de la foto real.
-        if brand_dna.job.generation_mode == AnalysisJob.MODE_SAMPLE_IMAGE and post.image_url:
+        job = brand_dna.job
+        # Hacen falta AMBAS señales, no una u otra -- este if espeja exactamente el
+        # gate de generate_sample_task (tasks.py: `wanted_format == FORMAT_SINGLE
+        # and job.product_reference_image_path`), el unico camino que produce
+        # imagenes via generate_from_product_photo:
+        #   - El MODO no basta: la foto es OPCIONAL en el formulario, asi que un
+        #     MODE_SAMPLE_IMAGE sin foto se generó por el camino normal (imagen
+        #     diseñada con overlay) y regenerarla "con referencia" le borraria el
+        #     diseño, ademas de dejar vision_context vacio.
+        #   - La FOTO tampoco basta: analyze_submit la acepta en cualquier modo, asi
+        #     que un MODE_FULL puede tenerla guardada sin haberla usado jamas. Con
+        #     esa condicion sola, un carrusel de MODE_FULL caia aqui y image_urls=[]
+        #     dejaba el badge de carrusel sin sus slides.
+        if (job.generation_mode == AnalysisJob.MODE_SAMPLE_IMAGE
+                and job.product_reference_image_path and post.image_url):
             # Foto real -- async, RQ + polling (regeneracion sincrona con foto
             # puede tardar varios minutos por el rate limit de 1 rpm de Vertex).
             post.regenerating = True
