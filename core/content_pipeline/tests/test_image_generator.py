@@ -1393,6 +1393,43 @@ class TestGenerateFromProductPhoto:
         assert url == ''
 
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_records_cost_at_the_lite_model_rate(self):
+        """Este camino usa VERTEX_IMAGE_MODEL_LITE — contabilizarlo a la tarifa
+        del modelo normal (_GEMINI_IMAGE_COST_PER_IMAGE) inflaba el panel de
+        costo de Prometheus, justo la medicion para la que se eligio el lite."""
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        from core.shared.metrics_utils import (
+            _GEMINI_LITE_IMAGE_COST_PER_IMAGE, _GEMINI_IMAGE_COST_PER_IMAGE,
+        )
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-generated-png'
+        mock_gen_client = MagicMock()
+        mock_gen_client.models.generate_content.return_value = MagicMock(
+            candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+        )
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
+             patch('core.shared.rate_limiter.throttle'), \
+             patch('core.content_pipeline.generators.image_generator.record_gemini_image_generation') as mock_record, \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True), \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/img.png'):
+            gen.generate_from_product_photo(
+                photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
+                caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
+                filename='test-product',
+            )
+
+        mock_record.assert_called_once_with(
+            'generate_from_photo', cost_per_image=_GEMINI_LITE_IMAGE_COST_PER_IMAGE,
+        )
+        assert _GEMINI_LITE_IMAGE_COST_PER_IMAGE != _GEMINI_IMAGE_COST_PER_IMAGE
+
+
 class TestRegenerateWithReference:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',

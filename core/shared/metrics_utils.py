@@ -39,6 +39,10 @@ def vertex_labels() -> dict:
 _GEMINI_INPUT_COST_PER_TOKEN = 0.075    # USD / 1M
 _GEMINI_OUTPUT_COST_PER_TOKEN = 0.300   # USD / 1M
 _GEMINI_IMAGE_COST_PER_IMAGE = 67000    # $0.067 = 67,000 microdólares
+# gemini-3.1-flash-lite-image: sin tarifa pública confirmada para este modelo
+# a la fecha (2026-08) — estimado conservador a la mitad del modelo normal,
+# hasta tener una factura real de GCP que lo confirme.
+_GEMINI_LITE_IMAGE_COST_PER_IMAGE = 33500    # $0.0335 estimado = 33,500 microdólares
 _VEO_COST_PER_SECOND = 100000           # $0.10/s = 100,000 microdólares (estimado)
 _STT_COST_PER_15S_BLOCK = 6000          # $0.006/bloque de 15s = 6,000 microdólares
 
@@ -114,15 +118,19 @@ def record_tokens(resp, operation: str = 'unknown', user_email: str = '', job_id
         pass
 
 
-def record_gemini_image_generation(imagen_type: str = 'generate'):
+def record_gemini_image_generation(imagen_type: str = 'generate', cost_per_image: float = _GEMINI_IMAGE_COST_PER_IMAGE):
     """Registra una generación de imagen (Gemini 3.1 Flash Image) con su costo estimado.
+    `cost_per_image` es parámetro (no constante fija) porque no todas las
+    generaciones usan el mismo modelo: el pipeline de foto real de producto usa
+    gemini-3.1-flash-lite-image (ver _GEMINI_LITE_IMAGE_COST_PER_IMAGE) y
+    contabilizarlo a la tarifa del modelo normal inflaba el panel de costo.
     Mismas llaves de Redis que antes (cosmic:prom:I:*/IC:*) — core/shared/metrics.py
     las sigue leyendo tal cual, el nombre de métrica de Prometheus expuesto
     (cosmic_imagen_generations_by_type_total) no cambia (decisión de Anuar,
     2026-08-07: es el nombre real de panel, más disruptivo de renombrar que este
     label interno)."""
     _redis_inc(f'cosmic:prom:I:{imagen_type}')
-    _redis_inc(f'cosmic:prom:IC:{imagen_type}', _GEMINI_IMAGE_COST_PER_IMAGE)
+    _redis_inc(f'cosmic:prom:IC:{imagen_type}', cost_per_image)
 
 
 def record_veo_generation(duration_seconds: float):

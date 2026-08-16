@@ -14,7 +14,7 @@ from google.genai import types
 from django.conf import settings
 from playwright.sync_api import sync_playwright
 from core.shared.metrics import GCS_OPERATIONS
-from core.shared.metrics_utils import track_external_api, record_tokens, record_gemini_image_generation, vertex_labels
+from core.shared.metrics_utils import track_external_api, record_tokens, record_gemini_image_generation, vertex_labels, _GEMINI_LITE_IMAGE_COST_PER_IMAGE
 from core.shared.rate_limiter import call_with_429_retry
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -343,7 +343,9 @@ class ImageGenerator:
             )
         for part in resp.candidates[0].content.parts:
             if part.inline_data:
-                record_gemini_image_generation('generate_from_photo')
+                # VERTEX_IMAGE_MODEL_LITE, no el modelo normal — su tarifa es
+                # distinta (ver _GEMINI_LITE_IMAGE_COST_PER_IMAGE).
+                record_gemini_image_generation('generate_from_photo', cost_per_image=_GEMINI_LITE_IMAGE_COST_PER_IMAGE)
                 return part.inline_data.data
         raise ValueError("No image returned")
 
