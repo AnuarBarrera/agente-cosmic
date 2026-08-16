@@ -13,10 +13,10 @@ from core.brand_dna.models import AnalysisJob
 from core.content_pipeline.models import ContentCalendar, ContentPost
 from core.tenant_management.models import Subscription, User
 from core.content_pipeline.generators.text_generator import TextGenerator
-from core.content_pipeline.generators.image_generator import ImageGenerator
+from core.content_pipeline.generators.image_generator import ImageGenerator, _detect_mime
 from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
 from core.content_pipeline.generators.reel_generator import ReelGenerator
-from core.shared.gcs_uploads import read_upload, read_upload_from_public_url
+from core.shared.gcs_uploads import read_upload, read_upload_from_public_url, upload_exists
 from core.content_pipeline.email_sender import EmailSender
 from core.content_pipeline.scheduler import schedule_daily_emails
 from core.content_pipeline.smart_scheduler import smart_schedule_dates
@@ -123,10 +123,18 @@ def generate_sample_task(job_id: str) -> None:
         reel_script_gen = ReelScriptGenerator()
         reel_gen = ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
 
-        if wanted_format == ContentPost.FORMAT_SINGLE and job.product_reference_image_path:
+        # upload_exists() espeja el guard de analyze_brand_task sobre esta misma
+        # foto: si el blob ya no esta en GCS, read_upload lanzaria y el job
+        # ENTERO se marcaria failed en vez de degradar al camino normal (imagen
+        # diseñada sin foto), que es el comportamiento por defecto del spec.
+        if (wanted_format == ContentPost.FORMAT_SINGLE and job.product_reference_image_path
+                and upload_exists(job.product_reference_image_path)):
             photo_bytes = read_upload(job.product_reference_image_path)
             image_url = image_gen.generate_from_product_photo(
-                photo_bytes=photo_bytes, mime_type='image/jpeg',
+                # mime real por magic bytes, no 'image/jpeg' hardcodeado: el
+                # frontend recomprime a JPEG casi siempre, pero el fallback de
+                # img.onerror (HEIC, imagen corrupta) y el POST sin JS no.
+                photo_bytes=photo_bytes, mime_type=_detect_mime(photo_bytes),
                 caption=post_data['caption'], colors=brand_dna.primary_colors,
                 tone=brand_dna.tone, filename=f"{job_id}-sample",
                 vision_context=brand_dna.product_photo_analysis,

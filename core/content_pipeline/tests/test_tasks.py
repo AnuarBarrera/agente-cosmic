@@ -262,9 +262,11 @@ def job_with_dna_sample_image_and_photo():
     GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
 )
 def test_generate_sample_task_uses_product_photo_when_present(job_with_dna_sample_image_and_photo):
+    png_bytes = b'\x89PNG\r\n\x1a\n' + b'fake-png-body'
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
-         patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes'), \
+         patch('core.content_pipeline.tasks.read_upload', return_value=png_bytes), \
+         patch('core.content_pipeline.tasks.upload_exists', return_value=True), \
          patch('core.content_pipeline.tasks.EmailSender'), \
          patch('core.content_pipeline.tasks.schedule_daily_emails'):
         MockText.return_value.generate.return_value = _MOCK_POSTS_FOR_SAMPLE
@@ -276,9 +278,41 @@ def test_generate_sample_task_uses_product_photo_when_present(job_with_dna_sampl
     MockImage.return_value.generate_from_product_photo.assert_called_once()
     MockImage.return_value.generate.assert_not_called()
     call_kwargs = MockImage.return_value.generate_from_product_photo.call_args.kwargs
-    assert call_kwargs['photo_bytes'] == b'fake-photo-bytes'
+    assert call_kwargs['photo_bytes'] == png_bytes
+    # mime real derivado de los magic bytes, no 'image/jpeg' hardcodeado
+    assert call_kwargs['mime_type'] == 'image/png'
     post = ContentPost.objects.get(calendar__brand_dna__job=job_with_dna_sample_image_and_photo)
     assert post.image_url == 'https://storage.test/product.png'
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+)
+def test_generate_sample_task_falls_back_to_normal_path_when_photo_blob_is_gone(job_with_dna_sample_image_and_photo):
+    """Si el blob ya no existe en GCS, read_upload lanzaria y el job ENTERO se
+    marcaba failed. Debe degradar al camino normal (imagen diseñada sin foto)."""
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.read_upload', side_effect=Exception('blob 404')), \
+         patch('core.content_pipeline.tasks.upload_exists', return_value=False), \
+         patch('core.content_pipeline.tasks._generate_post_media',
+               return_value=('https://storage.test/normal.png', [], '')) as mock_media, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS_FOR_SAMPLE
+
+        from core.content_pipeline.tasks import generate_sample_task
+        generate_sample_task(str(job_with_dna_sample_image_and_photo.id))
+
+    MockImage.return_value.generate_from_product_photo.assert_not_called()
+    mock_media.assert_called_once()
+    job_with_dna_sample_image_and_photo.refresh_from_db()
+    assert job_with_dna_sample_image_and_photo.status == AnalysisJob.STATUS_DONE
+    post = ContentPost.objects.get(calendar__brand_dna__job=job_with_dna_sample_image_and_photo)
+    assert post.image_url == 'https://storage.test/normal.png'
 
 
 @override_settings(
