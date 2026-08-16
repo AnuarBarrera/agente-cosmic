@@ -1429,6 +1429,11 @@ class TestGenerateFromProductPhoto:
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
     def test_sends_photo_and_creative_direction_uses_lite_model(self):
+        """De vuelta a VERTEX_IMAGE_MODEL_LITE el 2026-08-16 -- el swap
+        temporal al modelo normal (commit anterior) confirmo que el rechazo
+        no era exclusivo del lite; la causa real era thinking_config ausente
+        (ver test_enables_automatic_thinking), asi que se revierte al modelo
+        economico con thinking ya activo."""
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         mock_part = MagicMock()
@@ -1468,6 +1473,13 @@ class TestGenerateFromProductPhoto:
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
     def test_enables_automatic_thinking(self):
+        """Root cause real del rechazo (finish_reason=OTHER) confirmado por
+        Anuar probando 'Nano Banana Lite' en Vertex AI Studio (2026-08-16):
+        el modelo necesita thinking activo para poder editar el contenido
+        real que le mandamos -- sin thinking_config, el default es
+        insuficiente. thinking_budget=-1 = AUTOMATIC (deja que el modelo
+        decida cuanto pensar), no 0 (deshabilitado, que es lo que se usa a
+        proposito en las llamadas de QC de texto)."""
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         mock_part = MagicMock()
@@ -1517,6 +1529,8 @@ class TestGenerateFromProductPhoto:
         prompt_text = ' '.join(str(c) for c in call_kwargs['contents'] if isinstance(c, str))
         assert 'elimina' in prompt_text.lower() or 'remove' in prompt_text.lower() or 'quita' in prompt_text.lower()
         assert 'no agregues texto' in prompt_text.lower() or 'do not add text' in prompt_text.lower() or 'no text' in prompt_text.lower()
+        # caption y vision_context son entrada del usuario -- van delimitados
+        # con el mismo marcador que _regenerate_caption (core/brand_dna/views.py).
         assert '=== INICIO DATOS DEL CLIENTE' in prompt_text
         assert '=== FIN DATOS DEL CLIENTE' in prompt_text
 
@@ -1543,6 +1557,10 @@ class TestGenerateFromProductPhoto:
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
     def test_records_cost_at_the_lite_model_rate(self):
+        """De vuelta al modelo lite (2026-08-16) -- contabilizarlo a la
+        tarifa del modelo normal (_GEMINI_IMAGE_COST_PER_IMAGE) inflaba el
+        panel de costo de Prometheus, justo la medicion para la que se eligio
+        el lite."""
         from core.content_pipeline.generators.image_generator import ImageGenerator
         from core.shared.metrics_utils import (
             _GEMINI_LITE_IMAGE_COST_PER_IMAGE, _GEMINI_IMAGE_COST_PER_IMAGE,
@@ -1576,6 +1594,12 @@ class TestGenerateFromProductPhoto:
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
     def test_retries_when_gemini_returns_no_image_parts(self):
+        """Reproduce bug real de prueba manual (2026-08-16, job
+        94a75f45-0365-4953-97f6-f29c99f1a89d): Gemini respondio 200 OK pero
+        sin imagen (bloqueo de seguridad sobre la foto real) -- el intento 1
+        crasheaba y abortaba TODO el presupuesto de reintentos de QC (2 mas
+        disponibles) en vez de intentar de nuevo, dejando el post con
+        image_url='' aunque el intento 2 hubiera funcionado."""
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         blocked_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=None), finish_reason='SAFETY')])
@@ -1723,6 +1747,7 @@ class TestRegenerateWithReference:
         prompt_text = ' '.join(str(c) for c in call_kwargs['contents'] if isinstance(c, str))
         assert 'hazlo mas colorido' in prompt_text
         assert 'Aretes de plata con turquesa' in prompt_text
+        # feedback y vision_context son entrada del usuario -- delimitados.
         assert '=== INICIO DATOS DEL CLIENTE' in prompt_text
         assert '=== FIN DATOS DEL CLIENTE' in prompt_text
         assert 'Do not add new text' in prompt_text
@@ -1753,6 +1778,10 @@ class TestRegenerateWithReference:
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
     def test_retries_when_gemini_returns_no_image_parts(self):
+        """Mismo bug real que TestGenerateFromProductPhoto -- ver ese test para
+        el caso reproducido en produccion. Aqui se cubre el segundo caller de
+        _generate_from_photo_with_retry para no dejar la regeneracion con el
+        mismo hueco."""
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         blocked_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=None), finish_reason='SAFETY')])
