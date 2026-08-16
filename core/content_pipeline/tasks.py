@@ -150,6 +150,17 @@ def generate_sample_task(job_id: str) -> None:
                 image_gen, photo_bytes, _detect_mime(photo_bytes), script,
                 brand_dna.primary_colors, f"{job_id}-sample",
             )
+            if not video_url:
+                # Mismo fallback que ya usa _generate_post_media para el reel SIN
+                # foto: si el reel falla completo, degradar a una imagen generada
+                # desde cero en vez de dejar el post sin ningun medio.
+                image_url = image_gen.generate(
+                    caption=post_data['caption'], colors=brand_dna.primary_colors,
+                    tone=brand_dna.tone, filename=f"{job_id}-sample",
+                    brand_name=brand_dna.business_name, keywords=brand_dna.keywords,
+                    description=brand_dna.description, audience=brand_dna.audience,
+                    business_url=brand_dna.business_url,
+                )
             image_urls, background_url = [], ''
         else:
             background_url = ''

@@ -403,6 +403,37 @@ def test_generate_sample_task_reel_falls_back_to_normal_path_when_photo_blob_is_
 
 
 @override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+)
+def test_generate_sample_task_reel_falls_back_to_generated_image_when_photo_reel_fails_completely(job_with_dna_sample_reel_and_photo):
+    """Si generate_from_product_photo del reel falla completo (('','')), el
+    post no debe quedar sin ningun medio -- degrada a una imagen generada
+    desde cero, mismo patron que ya usa _generate_post_media para el reel
+    sin foto."""
+    png_bytes = b'\x89PNG\r\n\x1a\n' + b'fake-png-body'
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel, \
+         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockReelScript, \
+         patch('core.content_pipeline.tasks.read_upload', return_value=png_bytes), \
+         patch('core.content_pipeline.tasks.upload_exists', return_value=True), \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS_FOR_SAMPLE
+        MockReel.return_value.generate_from_product_photo.return_value = ('', '')
+        MockImage.return_value.generate.return_value = 'https://storage.test/fallback.png'
+
+        from core.content_pipeline.tasks import generate_sample_task
+        generate_sample_task(str(job_with_dna_sample_reel_and_photo.id))
+
+    MockImage.return_value.generate.assert_called_once()
+    post = ContentPost.objects.get(calendar__brand_dna__job=job_with_dna_sample_reel_and_photo)
+    assert post.image_url == 'https://storage.test/fallback.png'
+    assert post.video_url == ''
+
+
+@override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
     GOOGLE_CLOUD_LOCATION='us-central1',
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
