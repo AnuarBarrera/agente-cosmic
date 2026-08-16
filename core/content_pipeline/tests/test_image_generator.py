@@ -1498,6 +1498,66 @@ class TestGenerateFromPhotoAspectRatio:
         assert call_kwargs['config'].image_config.aspect_ratio == '9:16'
 
 
+class TestGenerateValidatedPhotoEdit:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_returns_bytes_when_first_attempt_passes_qc(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_from_photo_with_retry', return_value=b'good-bytes') as mock_gen, \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True):
+            result = gen._generate_validated_photo_edit('prompt', MagicMock(), max_qc_retries=2, aspect_ratio='9:16')
+
+        assert result == b'good-bytes'
+        mock_gen.assert_called_once_with('prompt', mock_gen.call_args.args[1], aspect_ratio='9:16')
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_retries_when_gemini_returns_no_image(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_from_photo_with_retry', side_effect=[ValueError('no image'), b'good-bytes']) as mock_gen, \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True):
+            result = gen._generate_validated_photo_edit('prompt', MagicMock(), max_qc_retries=2)
+
+        assert result == b'good-bytes'
+        assert mock_gen.call_count == 2
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_returns_none_when_every_attempt_returns_no_image(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_from_photo_with_retry', side_effect=ValueError('no image')) as mock_gen:
+            result = gen._generate_validated_photo_edit('prompt', MagicMock(), max_qc_retries=1)
+
+        assert result is None
+        assert mock_gen.call_count == 2  # 1 + max_qc_retries
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_returns_last_bytes_when_qc_never_passes(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_from_photo_with_retry', side_effect=[b'bad-1', b'bad-2']), \
+             patch.object(gen, '_validate_product_photo_generation', return_value=False):
+            result = gen._generate_validated_photo_edit('prompt', MagicMock(), max_qc_retries=1)
+
+        assert result == b'bad-2'  # reintentos agotados, se acepta la ultima imagen
+
+
 class TestGenerateFromProductPhoto:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',

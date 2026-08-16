@@ -316,6 +316,31 @@ class ImageGenerator:
             final_url = background_url
         return background_url, final_url
 
+    def _generate_validated_photo_edit(self, prompt: str, photo_part,
+                                         max_qc_retries: int = 2, aspect_ratio: str = '1:1') -> bytes | None:
+        """Ciclo compartido: nano banana edita (reintenta ante ValueError sin
+        imagen, mismo patron que _generate_background) + QC de fidelidad
+        (_validate_product_photo_generation). None si ningun intento produce
+        imagen usable -- el caller decide que hacer (fallback, degradar, etc).
+        Usado por generate_from_product_photo, regenerate_with_reference, y
+        ReelGenerator.generate_from_product_photo (2026-08-16)."""
+        last_bytes = None
+        total_attempts = max_qc_retries + 1
+        for attempt in range(total_attempts):
+            try:
+                last_bytes = self._generate_from_photo_with_retry(prompt, photo_part, aspect_ratio=aspect_ratio)
+            except ValueError as gen_err:
+                logger.warning(f"Photo edit sin imagen (attempt {attempt + 1}/{total_attempts}): {gen_err}")
+                continue
+            if self._validate_product_photo_generation(last_bytes):
+                return last_bytes
+            if attempt < max_qc_retries:
+                logger.warning(f"Photo edit QC failed (attempt {attempt + 1}/{total_attempts}), reintentando...")
+        if last_bytes is None:
+            return None
+        logger.warning("Photo edit QC: reintentos agotados, usando ultima imagen generada")
+        return last_bytes
+
     def generate_from_product_photo(self, photo_bytes: bytes, mime_type: str, caption: str,
                                     colors: list[str], tone: str, filename: str,
                                     vision_context: str = '', description: str = '',
@@ -362,25 +387,9 @@ class ImageGenerator:
                 f"DSLR camera quality, shallow depth of field, photorealistic. Square 1:1 format."
             )
             photo_part = types.Part.from_bytes(data=photo_bytes, mime_type=mime_type)
-            last_bytes = None
-            total_attempts = max_qc_retries + 1
-            for attempt in range(total_attempts):
-                try:
-                    last_bytes = self._generate_from_photo_with_retry(prompt, photo_part)
-                except ValueError as gen_err:
-                    # Gemini a veces no devuelve imagen (bloqueo de seguridad/politica de
-                    # contenido) -- un solo intento sin imagen no debe gastar TODO el
-                    # presupuesto de reintentos de QC, igual que _generate_background ya
-                    # hace con sus propios ValueError.
-                    logger.warning(f"Product photo generation sin imagen (attempt {attempt + 1}/{total_attempts}): {gen_err}")
-                    continue
-                if self._validate_product_photo_generation(last_bytes):
-                    return self._upload_photo_post(last_bytes, caption, colors, tone, description, keywords, business_url, filename)
-                if attempt < max_qc_retries:
-                    logger.warning(f"Product photo QC failed (attempt {attempt + 1}/{total_attempts}), regenerando...")
+            last_bytes = self._generate_validated_photo_edit(prompt, photo_part, max_qc_retries=max_qc_retries)
             if last_bytes is None:
                 raise ValueError("Ningun intento devolvio una imagen usable")
-            logger.warning("Product photo QC: reintentos agotados, usando ultima imagen generada")
             return self._upload_photo_post(last_bytes, caption, colors, tone, description, keywords, business_url, filename)
         except Exception as e:
             logger.error(f"ImageGenerator.generate_from_product_photo error: {e}")
@@ -414,23 +423,9 @@ class ImageGenerator:
                 f"DSLR camera quality, photorealistic, square 1:1 format."
             )
             image_part = types.Part.from_bytes(data=current_background_bytes, mime_type=_detect_mime(current_background_bytes))
-            last_bytes = None
-            total_attempts = max_qc_retries + 1
-            for attempt in range(total_attempts):
-                try:
-                    last_bytes = self._generate_from_photo_with_retry(prompt, image_part)
-                except ValueError as gen_err:
-                    # Ver nota en generate_from_product_photo: un intento sin imagen no
-                    # debe abortar todo el presupuesto de reintentos de QC.
-                    logger.warning(f"Regen generation sin imagen (attempt {attempt + 1}/{total_attempts}): {gen_err}")
-                    continue
-                if self._validate_product_photo_generation(last_bytes):
-                    return self._upload_photo_post(last_bytes, caption, colors, tone, description, keywords, business_url, filename)
-                if attempt < max_qc_retries:
-                    logger.warning(f"Regen QC failed (attempt {attempt + 1}/{total_attempts}), reintentando...")
+            last_bytes = self._generate_validated_photo_edit(prompt, image_part, max_qc_retries=max_qc_retries)
             if last_bytes is None:
                 raise ValueError("Ningun intento devolvio una imagen usable")
-            logger.warning("Regen QC: reintentos agotados, usando ultima imagen generada")
             return self._upload_photo_post(last_bytes, caption, colors, tone, description, keywords, business_url, filename)
         except Exception as e:
             logger.error(f"ImageGenerator.regenerate_with_reference error: {e}")
