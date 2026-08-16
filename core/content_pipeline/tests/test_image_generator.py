@@ -514,6 +514,52 @@ class TestLayeredPipeline:
         VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
         VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
     )
+    def test_skips_generate_background_when_background_bytes_given(self):
+        """El camino de foto real de producto (generate_from_product_photo/
+        regenerate_with_reference) pasa un fondo ya editado por nano banana --
+        _layered_pipeline NO debe pisarlo generando uno nuevo desde cero."""
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        given_bg = _png_bytes((10, 20, 30))
+        fake_content = {'headline': 'Hola', 'subtitle': 'Mundo', 'cta': 'Ver', 'tag': 'TEST'}
+        fake_shot = _png_bytes((100, 100, 100), size=(1080, 1080))
+
+        with patch.object(gen, '_generate_background') as mock_bg, \
+             patch.object(gen, '_generate_post_content', return_value=fake_content), \
+             patch.object(gen, '_render_html_template', return_value=fake_shot) as mock_render:
+            result = gen._layered_pipeline('Caption', ['#1a1a2e'], 'profesional', background_bytes=given_bg)
+
+        mock_bg.assert_not_called()
+        mock_render.assert_called_once_with(given_bg, fake_content, ['#1a1a2e'], svg_overlay='', font_seed='')
+        assert result == fake_shot
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_calls_generate_background_when_background_bytes_not_given(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_bg = _png_bytes((30, 30, 60))
+        fake_content = {'headline': 'Hola', 'subtitle': 'Mundo', 'cta': 'Ver', 'tag': 'TEST'}
+        fake_shot = _png_bytes((100, 100, 100), size=(1080, 1080))
+
+        with patch.object(gen, '_generate_background', return_value=fake_bg) as mock_bg, \
+             patch.object(gen, '_generate_post_content', return_value=fake_content), \
+             patch.object(gen, '_render_html_template', return_value=fake_shot) as mock_render:
+            gen._layered_pipeline('Caption', ['#1a1a2e'], 'profesional')
+
+        mock_bg.assert_called_once()
+        mock_render.assert_called_once_with(fake_bg, fake_content, ['#1a1a2e'], svg_overlay='', font_seed='')
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
     def test_pipeline_propagates_render_error(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')

@@ -463,8 +463,9 @@ class ImageGenerator:
     # Layered pipeline
     # ------------------------------------------------------------------
 
-    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, font_seed: str = '', business_url: str = '') -> bytes:
-        background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
+    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, font_seed: str = '', business_url: str = '', background_bytes: bytes = None) -> bytes:
+        if background_bytes is None:
+            background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
         kw_str = ', '.join((keywords or [])[:4])
         brand_ctx = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
         content = self._generate_post_content(caption, brand_context=brand_ctx, business_url=business_url)
