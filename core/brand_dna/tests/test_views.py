@@ -471,6 +471,7 @@ def job_with_calendar_and_product_photo(user):
     job = AnalysisJob.objects.create(
         email=user.email, business_url='https://tuwebmx.com', user=user,
         status=AnalysisJob.STATUS_DONE, stage=AnalysisJob.STAGE_COMPLETE, progress=100,
+        generation_mode=AnalysisJob.MODE_SAMPLE_IMAGE,
         product_reference_image_path='uploads/product_ref_test.jpg',
     )
     dna = BrandDNA.objects.create(
@@ -530,6 +531,65 @@ def test_regenerate_action_without_product_photo_stays_synchronous(client, user,
     mock_rq.enqueue.assert_not_called()
     post.refresh_from_db()
     assert post.regenerating is False
+
+
+def test_regenerate_action_with_unused_product_photo_stays_synchronous(client, user, job_with_calendar):
+    # MODE_FULL puede tener foto de producto guardada (analyze_submit la acepta en
+    # cualquier modo) sin que se haya usado JAMAS para generar: el unico camino que
+    # llama generate_from_product_photo es generate_sample_task/MODE_SAMPLE_IMAGE.
+    # Rutear esto a async rompia carruseles (image_urls=[] con el badge puesto) y
+    # le quitaba el diseño a los singles generados por el camino normal.
+    job = job_with_calendar
+    assert job.generation_mode == AnalysisJob.MODE_FULL
+    job.product_reference_image_path = 'uploads/product_ref_test.jpg'
+    job.save(update_fields=['product_reference_image_path'])
+    post = job.brand_dna.calendar.posts.filter(format='single').first()
+    client.force_login(user)
+    with patch('core.brand_dna.views._regenerate_caption', return_value='Nuevo caption'), \
+         patch('core.content_pipeline.generators.image_generator.ImageGenerator'), \
+         patch('core.content_pipeline.tasks._generate_post_media',
+               return_value=('https://storage.test/normal.png', [], '')), \
+         patch('core.brand_dna.views.django_rq') as mock_rq:
+        response = client.post(f'/api/post/{post.id}/action/', data=json.dumps({
+            'action': 'regenerate', 'value': 'hazlo mas colorido',
+        }), content_type='application/json')
+
+    assert response.status_code == 200
+    assert response.json()['status'] == 'ok'
+    mock_rq.enqueue.assert_not_called()
+    post.refresh_from_db()
+    assert post.regenerating is False
+
+
+def test_regenerate_action_carousel_with_unused_product_photo_stays_synchronous(client, user, job_with_calendar):
+    # El caso concreto de regresion: un carrusel de MODE_FULL con foto subida NO
+    # debe irse por async, porque regenerate_with_reference devuelve 1 sola URL y
+    # image_urls=[] dejaria la tarjeta con el badge de carrusel sin sus slides.
+    job = job_with_calendar
+    job.product_reference_image_path = 'uploads/product_ref_test.jpg'
+    job.save(update_fields=['product_reference_image_path'])
+    post = job.brand_dna.calendar.posts.filter(day_number=1).first()
+    post.format = ContentPost.FORMAT_CAROUSEL
+    post.image_urls = ['https://storage.test/s1.png', 'https://storage.test/s2.png']
+    post.save(update_fields=['format', 'image_urls'])
+    client.force_login(user)
+    with patch('core.brand_dna.views._regenerate_caption', return_value='Nuevo caption'), \
+         patch('core.content_pipeline.generators.image_generator.ImageGenerator'), \
+         patch('core.content_pipeline.tasks._generate_post_media',
+               return_value=('https://storage.test/s1-new.png',
+                             ['https://storage.test/s1-new.png', 'https://storage.test/s2-new.png'], '')), \
+         patch('core.brand_dna.views.django_rq') as mock_rq:
+        response = client.post(f'/api/post/{post.id}/action/', data=json.dumps({
+            'action': 'regenerate', 'value': 'hazlo mas colorido',
+        }), content_type='application/json')
+
+    assert response.status_code == 200
+    assert response.json()['status'] == 'ok'
+    mock_rq.enqueue.assert_not_called()
+    post.refresh_from_db()
+    assert post.regenerating is False
+    # El carrusel conserva sus slides -- no se degrada a imagen unica.
+    assert post.image_urls == ['https://storage.test/s1-new.png', 'https://storage.test/s2-new.png']
 
 
 def test_post_regen_status_api_returns_current_state(client, user, job_with_calendar):

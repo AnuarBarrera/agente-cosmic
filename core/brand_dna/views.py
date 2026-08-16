@@ -542,7 +542,16 @@ def post_action_api(request, post_id):
         post.regen_count += 1
 
         brand_dna = post.calendar.brand_dna
-        if brand_dna.job.product_reference_image_path and post.image_url:
+        # El gate es el MODO, no la mera presencia de product_reference_image_path:
+        # analyze_submit acepta la foto en CUALQUIER modo, asi que un MODE_FULL
+        # puede tenerla guardada sin que se haya usado nunca para generar. Hoy
+        # MODE_SAMPLE_IMAGE es el unico modo que rutea a generate_from_product_photo
+        # (generate_sample_task) y siempre produce exactamente 1 post single, asi
+        # que regenerar con referencia solo tiene sentido ahi. Con la condicion
+        # amplia, un carrusel de MODE_FULL caia aqui y image_urls=[] dejaba la
+        # tarjeta con el badge de carrusel mintiendo, y un single normal perdia
+        # su diseño/overlay al tratarse como si viniera de la foto real.
+        if brand_dna.job.generation_mode == AnalysisJob.MODE_SAMPLE_IMAGE and post.image_url:
             # Foto real -- async, RQ + polling (regeneracion sincrona con foto
             # puede tardar varios minutos por el rate limit de 1 rpm de Vertex).
             post.regenerating = True

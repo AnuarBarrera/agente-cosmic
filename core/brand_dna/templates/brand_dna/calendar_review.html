@@ -343,13 +343,23 @@
     const maxAttempts = 40; // 40 x 3s = 2 min de margen
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(function(resolve) { setTimeout(resolve, 3000); });
-      const res = await fetch(`/api/post/${postId}/regen-status/`);
-      const data = await res.json();
-      if (!data.regenerating) {
-        updatePostImage(postId, data);
-        setCardStatus(postId, 'change_requested', '↺ Cambio solicitado');
-        showToast('Imagen regenerada ✨', '#f0c040');
-        return;
+      // Un 502 momentaneo, un blip de red o una sesion expirada (que devuelve
+      // HTML de login en vez de JSON) reventaba la funcion async entera: el
+      // polling moria en silencio y la tarjeta quedaba clavada en "Generando
+      // imagen..." sin siquiera el toast de fallback. Son ~40 peticiones en 2
+      // minutos, asi que un error transitorio solo debe perder ESE intento.
+      try {
+        const res = await fetch(`/api/post/${postId}/regen-status/`);
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (!data.regenerating) {
+          updatePostImage(postId, data);
+          setCardStatus(postId, 'change_requested', '↺ Cambio solicitado');
+          showToast('Imagen regenerada ✨', '#f0c040');
+          return;
+        }
+      } catch (e) {
+        continue;
       }
     }
     showToast('La regeneración está tardando más de lo esperado, recarga la página en un momento', '#f0c040', 6000);
