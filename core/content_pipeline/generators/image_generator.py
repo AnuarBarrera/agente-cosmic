@@ -14,7 +14,7 @@ from google.genai import types
 from django.conf import settings
 from playwright.sync_api import sync_playwright
 from core.shared.metrics import GCS_OPERATIONS
-from core.shared.metrics_utils import track_external_api, record_tokens, record_gemini_image_generation, vertex_labels
+from core.shared.metrics_utils import track_external_api, record_tokens, record_gemini_image_generation, vertex_labels, _GEMINI_LITE_IMAGE_COST_PER_IMAGE
 from core.shared.rate_limiter import call_with_429_retry
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -298,11 +298,15 @@ class ImageGenerator:
                                     vision_context: str = '', max_qc_retries: int = 2) -> str:
         """Primera generacion usando la foto real de producto -- nano banana
         ve la foto directamente en la misma llamada que la direccion
-        creativa (Enfoque A, ya validado). Usaba VERTEX_IMAGE_MODEL_LITE para
-        probar costo antes de escalar; cambiado a VERTEX_IMAGE_MODEL (modelo
-        normal) el 2026-08-16 por decision de Anuar -- diagnostico en vivo de
-        si el rechazo (finish_reason=OTHER) de una foto real de producto es
-        una limitacion del modelo lite o tambien ocurre con el normal."""
+        creativa (Enfoque A, ya validado). Usa VERTEX_IMAGE_MODEL_LITE (2026-
+        08-16, decision de Anuar -- probar costo antes de escalar).
+
+        Root cause del rechazo (finish_reason=OTHER) confirmado por Anuar
+        probando "Nano Banana Lite" en Vertex AI Studio: el modelo necesita
+        thinking activo para poder editar el contenido real que le mandamos
+        -- sin thinking_config, el default es insuficiente y el modelo se
+        rinde en vez de resolver la composicion. Ver thinking_config en
+        _generate_from_photo."""
         try:
             color_str = ', '.join(colors[:3]) if colors else 'warm neutrals'
             context_line = f" Contexto del producto: {vision_context}." if vision_context else ''
@@ -397,11 +401,7 @@ class ImageGenerator:
         provider = 'gemini_api' if self._use_gemini_api else 'vertex'
         return call_with_429_retry(
             lambda: self._generate_from_photo(prompt, photo_part),
-            # Cambiado de VERTEX_IMAGE_MODEL_LITE a VERTEX_IMAGE_MODEL el
-            # 2026-08-16 (decision de Anuar) -- diagnostico en vivo de si el
-            # rechazo (finish_reason=OTHER) de una foto real de producto es
-            # una limitacion del modelo lite o tambien ocurre con el normal.
-            settings.VERTEX_IMAGE_MODEL, provider=provider,
+            settings.VERTEX_IMAGE_MODEL_LITE, provider=provider,
         )
 
     def _generate_from_photo(self, prompt: str, photo_part) -> bytes:
@@ -409,12 +409,19 @@ class ImageGenerator:
         config_kwargs = dict(
             response_modalities=['IMAGE', 'TEXT'],
             image_config=types.ImageConfig(aspect_ratio='1:1'),
+            # Root cause real del rechazo (finish_reason=OTHER) confirmado por
+            # Anuar probando "Nano Banana Lite" en Vertex AI Studio
+            # (2026-08-16): el modelo necesita thinking activo para poder
+            # editar el contenido real que le mandamos. -1 = AUTOMATIC (el
+            # modelo decide cuanto pensar) -- 0 seria DESHABILITADO, que es
+            # lo que las llamadas de QC de texto usan a proposito.
+            thinking_config=types.ThinkingConfig(thinking_budget=-1),
         )
         if not self._use_gemini_api:
             config_kwargs['labels'] = vertex_labels()
         with track_external_api('gemini_image', operation='image_generate_from_photo'):
             resp = client.models.generate_content(
-                model=settings.VERTEX_IMAGE_MODEL,
+                model=settings.VERTEX_IMAGE_MODEL_LITE,
                 contents=[prompt, photo_part],
                 config=types.GenerateContentConfig(**config_kwargs),
             )
@@ -423,9 +430,9 @@ class ImageGenerator:
             raise ValueError(f"No image returned by Gemini ({_finish_reason(resp)})")
         for part in parts:
             if part.inline_data:
-                # VERTEX_IMAGE_MODEL (normal) desde el 2026-08-16 -- tarifa
-                # default de record_gemini_image_generation, no la del lite.
-                record_gemini_image_generation('generate_from_photo')
+                # VERTEX_IMAGE_MODEL_LITE, no el modelo normal — su tarifa es
+                # distinta (ver _GEMINI_LITE_IMAGE_COST_PER_IMAGE).
+                record_gemini_image_generation('generate_from_photo', cost_per_image=_GEMINI_LITE_IMAGE_COST_PER_IMAGE)
                 return part.inline_data.data
         raise ValueError("No image returned")
 
