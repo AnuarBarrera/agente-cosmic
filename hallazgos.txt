@@ -4679,3 +4679,66 @@ Severidad: Alta -- bloquea en la practica toda generacion real de imagen
 Prioridad: Alta -- resolver antes de considerar el HALLAZGO 90 cerrado
   en este entorno especifico (el codigo esta listo; la configuracion de
   despliegue no).
+
+=================================================================
+HALLAZGO 93 — Modulo 1/3 (foto real de producto en MODE_SAMPLE_IMAGE):
+  requisitos de despliegue -- rqworker DEBE recrearse, la migracion no
+  basta
+Categoria: Requisito de despliegue + verificacion previa a la prueba
+  manual (el codigo esta completo y en verde)
+Estado: 🟡 REPORTADO — SIN FIX — 2026-08-16 (requiere accion humana:
+  recrear contenedores y una llamada de humo a Vertex)
+=================================================================
+Que se implemento (plan de 7 tareas, rango c8e05e1..f07550c en `main`,
+  mas el ciclo de fix de la revision final):
+  - Generacion de imagen a partir de la FOTO REAL de producto que sube el
+    negocio, en el modo MODE_SAMPLE_IMAGE: `ProductPhotoAnalyzer`
+    (analisis de vision de la foto, guardado en
+    `BrandDNA.product_photo_analysis`/`product_category`) +
+    `ImageGenerator.generate_from_product_photo` (la foto viaja en la
+    misma llamada que la direccion creativa, Enfoque A) via
+    `gemini-3.1-flash-lite-image` (`VERTEX_IMAGE_MODEL_LITE`) --
+    modelo economico por decision explicita de Anuar, para medir costo
+    antes de escalar al modelo normal.
+  - Regeneracion con referencia (`ImageGenerator.regenerate_with_reference`):
+    el modelo ve la imagen ACTUAL que el usuario esta mirando + su
+    feedback + el analisis de vision guardado. Corre ASINCRONA
+    (`regenerate_post_image_task` en RQ, `job_timeout=900`) con el flag
+    `ContentPost.regenerating` + polling desde `calendar_review.html`:
+    sincrona era inviable con el rate limit real de 1 rpm de Vertex mas
+    hasta 3 reintentos de QC.
+  - QC visual propio del camino de foto (`_validate_product_photo_generation`,
+    `ProductPhotoQCSchema`): a diferencia de `_validate_background`, el
+    texto NO se rechaza por su sola presencia, solo si esta mal escrito
+    (decision de Anuar 2026-08-15).
+
+Requisito de despliegue (BLOQUEANTE para que la regeneracion funcione):
+  La migracion de `ContentPost.regenerating` se aplica sola al reiniciar
+  `backend` (`entrypoint.sh` corre `manage.py migrate` al arrancar), pero
+  eso NO alcanza: `rqworker` (3 replicas, sin migrate propio) **tambien
+  debe recrearse**, porque `regenerate_post_image_task` es una funcion de
+  tarea RQ NUEVA -- un worker con codigo viejo no puede deserializar ese
+  job, la tarea nunca corre, y el post queda con `regenerating=True`
+  para siempre (gastando una de las 2 regeneraciones disponibles sin
+  producir nada, y con el guard de reentrada nuevo bloqueando ese post).
+
+    docker compose up -d --force-recreate --no-deps backend rqworker
+
+  (`--force-recreate` y no `restart`: ver feedback_gunicorn_restart.md --
+  con DEBUG=False ni .py ni .html bastan con restart simple.)
+
+Verificacion recomendada ANTES de la prueba manual (del revisor final):
+  Confirmar con una llamada suelta desde `manage.py shell` que
+  `gemini-3.1-flash-lite-image` responde en Vertex para este proyecto y
+  region. Si el modelo no existe o no esta habilitado, el fallo es
+  SILENCIOSO y no se ve como error: `generate_from_product_photo` atrapa
+  la excepcion y devuelve `''`, el post se crea igual con
+  `image_url=''`, y el job se marca `STATUS_DONE` -- se ve como "genero
+  pero sin imagen". Recordar tambien el HALLAZGO 92 (`GOOGLE_CLOUD_LOCATION`
+  en el `.env` de este servidor): si sigue en `us-central1`, la llamada
+  devuelve 404 igual que en la migracion anterior.
+
+Severidad: Media -- el codigo esta completo y verde, pero sin el
+  force-recreate de `rqworker` la regeneracion queda muerta en silencio
+  en el primer intento real.
+Prioridad: Alta -- ejecutar antes de la verificacion manual de Anuar.
