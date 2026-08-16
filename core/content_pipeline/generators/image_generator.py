@@ -174,10 +174,28 @@ def _response_parts(resp):
 
 
 def _finish_reason(resp) -> str:
+    """Detalle de por que Gemini no devolvio imagen -- finish_reason solo
+    (ej. OTHER) casi no dice nada; finish_message y safety_ratings suelen
+    traer la explicacion real (bloqueo de seguridad especifico, foto
+    rechazada, etc.), cuando el SDK las llena."""
     candidates = resp.candidates or []
     if not candidates:
-        return 'sin candidatos'
-    return f"finish_reason={getattr(candidates[0], 'finish_reason', 'unknown')}"
+        feedback = getattr(resp, 'prompt_feedback', None)
+        return f"sin candidatos (prompt_feedback={feedback})"
+    c = candidates[0]
+    parts = [f"finish_reason={getattr(c, 'finish_reason', 'unknown')}"]
+    msg = getattr(c, 'finish_message', None)
+    if msg:
+        parts.append(f"finish_message={msg}")
+    ratings = getattr(c, 'safety_ratings', None)
+    if ratings:
+        flagged = [f"{r.category}:{r.probability}" for r in ratings if getattr(r, 'blocked', False) or str(getattr(r, 'probability', '')).upper() not in ('', 'NEGLIGIBLE', 'LOW')]
+        if flagged:
+            parts.append(f"safety_ratings={flagged}")
+    feedback = getattr(resp, 'prompt_feedback', None)
+    if feedback:
+        parts.append(f"prompt_feedback={feedback}")
+    return ', '.join(parts)
 
 
 def _luminance(hex_color: str) -> float:
