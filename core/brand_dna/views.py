@@ -17,7 +17,7 @@ from django.utils import timezone
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, FileResponse, HttpResponse, Http404
 from django.shortcuts import render, redirect, get_object_or_404
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_GET
 from core.brand_dna.models import AnalysisJob, BrandDNA
 from core.shared.metrics import POST_ACTIONS
 from core.shared.gcs_uploads import save_upload
@@ -541,12 +541,27 @@ def post_action_api(request, post_id):
         post.user_status = ContentPost.USER_STATUS_CHANGE_REQUESTED
         post.regen_count += 1
 
+        brand_dna = post.calendar.brand_dna
+        if brand_dna.job.product_reference_image_path and post.image_url:
+            # Foto real -- async, RQ + polling (regeneracion sincrona con foto
+            # puede tardar varios minutos por el rate limit de 1 rpm de Vertex).
+            post.regenerating = True
+            post.save(update_fields=['caption', 'user_note', 'user_status', 'regen_count', 'regenerating'])
+            from core.content_pipeline.tasks import regenerate_post_image_task
+            django_rq.enqueue(regenerate_post_image_task, str(post.id), value, job_timeout=900)
+            POST_ACTIONS.labels(action='regenerated').inc()
+            return JsonResponse({
+                'status': 'processing',
+                'caption': new_caption,
+                'remaining_regens': remaining - 1,
+            })
+
+        # Sin foto -- comportamiento de hoy, sin cambios.
         # Regenerar imagen (o slides del carrusel, H20 + roadmap #5) con el nuevo caption
         new_image_url = post.image_url
         try:
             from core.content_pipeline.generators.image_generator import ImageGenerator
             from core.content_pipeline.tasks import _generate_post_media
-            brand_dna = post.calendar.brand_dna
             job_id = str(brand_dna.job.id)
             image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
             generated_url, generated_urls, _ = _generate_post_media(
@@ -585,6 +600,23 @@ def post_action_api(request, post_id):
         })
 
     return JsonResponse({'error': 'Acción desconocida'}, status=400)
+
+
+@login_required
+@require_GET
+def post_regen_status_api(request, post_id):
+    """Polling de la regeneracion async con foto real (ver regenerate_post_image_task)."""
+    from core.content_pipeline.models import ContentPost
+    post = get_object_or_404(
+        ContentPost.objects.select_related('calendar__brand_dna__job'),
+        id=post_id,
+        calendar__brand_dna__job__user=request.user,
+    )
+    return JsonResponse({
+        'regenerating': post.regenerating,
+        'image_url': post.image_url,
+        'image_urls': post.image_urls,
+    })
 
 
 class ReanalyzeTextSchema(BaseModel):

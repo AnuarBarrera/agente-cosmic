@@ -466,6 +466,100 @@ def job_with_calendar(user):
     return job
 
 
+@pytest.fixture
+def job_with_calendar_and_product_photo(user):
+    job = AnalysisJob.objects.create(
+        email=user.email, business_url='https://tuwebmx.com', user=user,
+        status=AnalysisJob.STATUS_DONE, stage=AnalysisJob.STAGE_COMPLETE, progress=100,
+        product_reference_image_path='uploads/product_ref_test.jpg',
+    )
+    dna = BrandDNA.objects.create(
+        job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
+        description='Agencia digital', keywords=['diseno'], audience='PYMEs',
+        tone='profesional', primary_colors=['#1a1a2e'],
+        product_photo_analysis='Aretes de plata con turquesa',
+    )
+    calendar = ContentCalendar.objects.create(brand_dna=dna)
+    for i in range(1, 8):
+        ContentPost.objects.create(
+            calendar=calendar, day_number=i, caption=f'Post {i}',
+            image_url='https://storage.googleapis.com/test-bucket/posts/old.png',
+            suggested_time='19:00', hashtags=[],
+            scheduled_at=timezone.now() + timedelta(days=i),
+        )
+    return job
+
+
+def test_regenerate_action_with_product_photo_enqueues_async_task(client, user, job_with_calendar_and_product_photo):
+    post = job_with_calendar_and_product_photo.brand_dna.calendar.posts.filter(format='single').first()
+    client.force_login(user)
+    with patch('core.brand_dna.views._regenerate_caption', return_value='Nuevo caption'), \
+         patch('core.brand_dna.views.django_rq') as mock_rq:
+        response = client.post(f'/api/post/{post.id}/action/', data=json.dumps({
+            'action': 'regenerate', 'value': 'hazlo mas colorido',
+        }), content_type='application/json')
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['status'] == 'processing'
+    assert data['caption'] == 'Nuevo caption'
+    mock_rq.enqueue.assert_called_once()
+    call_args = mock_rq.enqueue.call_args
+    assert call_args[0][1] == str(post.id)
+    assert call_args[0][2] == 'hazlo mas colorido'
+    post.refresh_from_db()
+    assert post.regenerating is True
+
+
+def test_regenerate_action_without_product_photo_stays_synchronous(client, user, job_with_calendar):
+    post = job_with_calendar.brand_dna.calendar.posts.filter(format='single').first()
+    client.force_login(user)
+    with patch('core.brand_dna.views._regenerate_caption', return_value='Nuevo caption'), \
+         patch('core.content_pipeline.generators.image_generator.ImageGenerator'), \
+         patch('core.content_pipeline.tasks._generate_post_media',
+               return_value=('https://storage.test/normal.png', [], '')), \
+         patch('core.brand_dna.views.django_rq') as mock_rq:
+        response = client.post(f'/api/post/{post.id}/action/', data=json.dumps({
+            'action': 'regenerate', 'value': 'hazlo mas colorido',
+        }), content_type='application/json')
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['status'] == 'ok'
+    assert data['image_url'] == 'https://storage.test/normal.png'
+    mock_rq.enqueue.assert_not_called()
+    post.refresh_from_db()
+    assert post.regenerating is False
+
+
+def test_post_regen_status_api_returns_current_state(client, user, job_with_calendar):
+    post = job_with_calendar.brand_dna.calendar.posts.filter(format='single').first()
+    post.regenerating = True
+    post.save(update_fields=['regenerating'])
+    client.force_login(user)
+    response = client.get(f'/api/post/{post.id}/regen-status/')
+    assert response.status_code == 200
+    data = response.json()
+    assert data['regenerating'] is True
+    assert data['image_url'] == post.image_url
+
+
+def test_post_regen_status_api_rejects_other_users_post(user, job_with_calendar, django_user_model, free_plan):
+    from core.tenant_management.models import TenantModel, Subscription
+    post = job_with_calendar.brand_dna.calendar.posts.filter(format='single').first()
+    other = django_user_model.objects.create_user(
+        username='intruso@test.com', email='intruso@test.com', password='pass1234'
+    )
+    tenant = TenantModel.objects.create(name=other.email, status='active')
+    Subscription.objects.create(tenant=tenant, plan=free_plan)
+    other.tenant = tenant
+    other.save(update_fields=['tenant'])
+    c = Client()
+    c.force_login(other)
+    response = c.get(f'/api/post/{post.id}/regen-status/')
+    assert response.status_code == 404
+
+
 def test_mark_published_sets_timestamp(client, user, job_with_calendar):
     post = job_with_calendar.brand_dna.calendar.posts.get(day_number=1)
     client.force_login(user)

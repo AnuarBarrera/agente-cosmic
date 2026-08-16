@@ -26,6 +26,7 @@ urlpatterns = [
     path('auth/reactivate/<str:token>/', auth_views.reactivate_account_view, name='reactivate_account'),
     path('calendar/<uuid:job_id>/', views.calendar_review_view, name='calendar_review'),
     path('api/post/<uuid:post_id>/action/', views.post_action_api, name='post_action_api'),
+    path('api/post/<uuid:post_id>/regen-status/', views.post_regen_status_api, name='post_regen_status_api'),
     path('api/post/<uuid:post_id>/download/', views.download_post_image, name='download_post_image'),
     path('api/calendar/<uuid:job_id>/delete/', views.delete_calendar_api, name='delete_calendar_api'),
     path('api/brand-dna/<uuid:job_id>/field/', views.brand_dna_field_action_api, name='brand_dna_field_action_api'),
