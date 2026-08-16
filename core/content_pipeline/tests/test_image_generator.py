@@ -1358,6 +1358,36 @@ class TestValidateProductPhotoGeneration:
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
         VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
     )
+    def test_asks_gemini_to_not_penalize_visual_distortion_of_original_text(self):
+        """Hallazgo real (2026-08-16, Anuar): la foto de origen a veces ya trae
+        texto propio del producto (ej. un globo con "Feliz Cumpleanos" impreso).
+        La edicion de nano banana puede dejar ese texto borroso/recortado/
+        deformado sin que las palabras en si sean invalidas -- el juez de QC
+        confundia esa distorsion visual con texto mal formado y rechazaba de
+        mas. El prompt debe instruir explicitamente a no penalizar la
+        distorsion visual, solo el contenido de las palabras."""
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = (
+            '{"has_text": true, "text_is_correct_spanish": true, "is_abstract_3d": false, '
+            '"has_screen_content": false, "has_malformed_object": false, '
+            '"has_unrealistic_grounding": false, "has_suggestive_or_exposed_content": false, "ok": true}'
+        )
+        mock_client.models.generate_content.return_value = mock_resp
+        with patch('core.content_pipeline.generators.image_generator._vertex_text_client', return_value=mock_client):
+            gen._validate_product_photo_generation(b'fake-png')
+
+        call_kwargs = mock_client.models.generate_content.call_args.kwargs
+        prompt = next(c for c in call_kwargs['contents'] if isinstance(c, str))
+        assert 'visual imperfection alone is NOT an error' in prompt
+        assert 'ORIGINAL text that already existed on the product' in prompt
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
     def test_rejects_when_text_is_incorrect_spanish(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
