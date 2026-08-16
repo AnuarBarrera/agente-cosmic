@@ -81,7 +81,7 @@ def analyze_brand_task(job_id: str) -> None:
             django_rq.enqueue(content_generation_task, str(job_id), job_timeout=300)
         else:
             # generate_sample_task sigue siendo monolítico (1 sola pieza, prospección)
-            django_rq.enqueue(generate_sample_task, str(job_id), job_timeout=2400)
+            django_rq.enqueue(generate_sample_task, str(job_id), job_timeout=2700)
 
     except Exception as e:
         ANALYSIS_DURATION.observe(time.monotonic() - start)
