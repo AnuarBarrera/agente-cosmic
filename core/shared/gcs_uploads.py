@@ -31,6 +31,14 @@ def read_upload(gcs_path: str) -> bytes:
     return data
 
 
+def read_upload_from_public_url(url: str) -> bytes:
+    """Lee de GCS a partir de la URL publica que guardamos en el modelo
+    (https://storage.googleapis.com/<bucket>/<path>[?query]). Lanza IndexError
+    si la URL no pertenece al bucket configurado -- el caller decide que hacer."""
+    path = url.split(f'{settings.GOOGLE_CLOUD_STORAGE_BUCKET}/', 1)[1].split('?', 1)[0]
+    return read_upload(path)
+
+
 def upload_exists(gcs_path: str) -> bool:
     bucket = _client().bucket(settings.GOOGLE_CLOUD_STORAGE_BUCKET)
     return bucket.blob(gcs_path).exists()

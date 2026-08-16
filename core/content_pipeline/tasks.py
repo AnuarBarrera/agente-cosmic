@@ -16,7 +16,7 @@ from core.content_pipeline.generators.text_generator import TextGenerator
 from core.content_pipeline.generators.image_generator import ImageGenerator
 from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
 from core.content_pipeline.generators.reel_generator import ReelGenerator
-from core.shared.gcs_uploads import read_upload
+from core.shared.gcs_uploads import read_upload, read_upload_from_public_url
 from core.content_pipeline.email_sender import EmailSender
 from core.content_pipeline.scheduler import schedule_daily_emails
 from core.content_pipeline.smart_scheduler import smart_schedule_dates
@@ -232,6 +232,33 @@ def backfill_image_task(post_id: str) -> None:
         logger.info(f"Post {post_id} ya tiene imagen — nada que hacer")
         return
     _generate_missing_image(post)
+
+
+def regenerate_post_image_task(post_id: str, feedback: str) -> None:
+    """Regeneracion async con foto real -- ver ImageGenerator.regenerate_with_reference.
+    Sincrono era inviable: 1 rpm en Vertex + hasta 3 reintentos de QC pueden
+    tardar varios minutos, mucho para un request HTTP. Decision de Anuar
+    2026-08-16."""
+    post = ContentPost.objects.select_related('calendar__brand_dna__job').get(id=post_id)
+    try:
+        brand_dna = post.calendar.brand_dna
+        image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
+        current_bytes = read_upload_from_public_url(post.image_url)
+        new_url = image_gen.regenerate_with_reference(
+            current_image_bytes=current_bytes,
+            feedback=feedback,
+            vision_context=brand_dna.product_photo_analysis,
+            filename=f"{brand_dna.job.id}-day{post.day_number}-regen-{int(time.time())}",
+        )
+        if new_url:
+            post.image_url = new_url
+            post.image_urls = []
+        post.regenerating = False
+        post.save(update_fields=['image_url', 'image_urls', 'regenerating'])
+    except Exception as e:
+        logger.error(f"regenerate_post_image_task error para post {post_id}: {e}")
+        post.regenerating = False
+        post.save(update_fields=['regenerating'])
 
 
 def send_daily_email_task(post_id: str) -> None:

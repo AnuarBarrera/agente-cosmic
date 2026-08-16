@@ -305,7 +305,7 @@ class ImageGenerator:
                 f"consistent with the context above. Do not add new text, headline, or CTA. "
                 f"DSLR camera quality, photorealistic, square 1:1 format."
             )
-            image_part = types.Part.from_bytes(data=current_image_bytes, mime_type='image/png')
+            image_part = types.Part.from_bytes(data=current_image_bytes, mime_type=_detect_mime(current_image_bytes))
             last_bytes = None
             total_attempts = max_qc_retries + 1
             for attempt in range(total_attempts):

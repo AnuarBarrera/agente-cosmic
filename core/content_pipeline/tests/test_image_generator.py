@@ -1444,3 +1444,29 @@ class TestRegenerateWithReference:
             )
         assert url == ''
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_detects_real_mime_type_of_current_image(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-regenerated-png'
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = MagicMock(
+            candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+        )
+        jpeg_bytes = b'\xff\xd8\xff' + b'fake-jpeg-body'
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_client), \
+             patch('core.shared.rate_limiter.throttle'), \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True), \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/regen.png'):
+            gen.regenerate_with_reference(
+                current_image_bytes=jpeg_bytes, feedback='mas colorido',
+                vision_context='', filename='test-product-regen',
+            )
+        call_kwargs = mock_client.models.generate_content.call_args.kwargs
+        assert call_kwargs['contents'][1].inline_data.mime_type == 'image/jpeg'
+

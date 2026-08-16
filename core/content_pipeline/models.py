@@ -73,6 +73,10 @@ class ContentPost(models.Model):
     user_note = models.TextField(blank=True, default='')
     regen_count = models.PositiveIntegerField(default=0)
     edit_count = models.PositiveIntegerField(default=0)
+    # True mientras regenerate_post_image_task corre en RQ (solo camino con foto
+    # real de producto). El frontend hace polling de post_regen_status_api hasta
+    # que vuelve a False.
+    regenerating = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'content_pipeline_post'

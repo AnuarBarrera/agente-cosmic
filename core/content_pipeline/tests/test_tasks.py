@@ -608,6 +608,42 @@ def test_backfill_image_task_skips_post_with_existing_image(calendar_with_dna):
     assert post.image_url == 'https://example.com/already-there.jpg'
 
 
+def test_regenerate_post_image_task_updates_image_and_clears_flag(calendar_with_dna):
+    from core.content_pipeline.tasks import regenerate_post_image_task
+    post = _make_post(calendar_with_dna, 1, image_url='https://storage.googleapis.com/test-bucket/posts/old.png')
+    post.regenerating = True
+    post.save(update_fields=['regenerating'])
+    job = calendar_with_dna.brand_dna.job
+    job.product_reference_image_path = 'uploads/product_ref_test.jpg'
+    job.save(update_fields=['product_reference_image_path'])
+
+    with patch('core.content_pipeline.tasks.read_upload_from_public_url', return_value=b'current-bytes'), \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
+        MockImage.return_value.regenerate_with_reference.return_value = 'https://storage.test/new.png'
+        regenerate_post_image_task(str(post.id), 'hazlo mas colorido')
+
+    call_kwargs = MockImage.return_value.regenerate_with_reference.call_args.kwargs
+    assert call_kwargs['current_image_bytes'] == b'current-bytes'
+    assert call_kwargs['feedback'] == 'hazlo mas colorido'
+    post.refresh_from_db()
+    assert post.image_url == 'https://storage.test/new.png'
+    assert post.regenerating is False
+
+
+def test_regenerate_post_image_task_clears_flag_on_failure(calendar_with_dna):
+    from core.content_pipeline.tasks import regenerate_post_image_task
+    post = _make_post(calendar_with_dna, 1, image_url='https://storage.googleapis.com/test-bucket/posts/old.png')
+    post.regenerating = True
+    post.save(update_fields=['regenerating'])
+
+    with patch('core.content_pipeline.tasks.read_upload_from_public_url', side_effect=Exception('boom')):
+        regenerate_post_image_task(str(post.id), 'hazlo mas colorido')
+
+    post.refresh_from_db()
+    assert post.regenerating is False
+    assert post.image_url == 'https://storage.googleapis.com/test-bucket/posts/old.png'  # sin cambio
+
+
 def test_backfill_image_task_skips_deleted_calendar(calendar_with_dna):
     from django.utils import timezone as tz
     job = calendar_with_dna.brand_dna.job
