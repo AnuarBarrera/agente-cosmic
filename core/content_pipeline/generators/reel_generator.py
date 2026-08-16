@@ -657,12 +657,16 @@ class ReelGenerator:
 
         return clips
 
-    def _generate_single_clip(self, prompt: str) -> bytes | None:
+    def _generate_single_clip(self, prompt: str, image_bytes: bytes = None,
+                               image_mime_type: str = 'image/png') -> bytes | None:
         try:
             client = _vertex_client()
 
             def _call():
                 with track_external_api('veo', operation='video_generate'):
+                    kwargs = {}
+                    if image_bytes is not None:
+                        kwargs['image'] = types.Image(image_bytes=image_bytes, mime_type=image_mime_type)
                     return client.models.generate_videos(
                         model=settings.VERTEX_VIDEO_MODEL,
                         prompt=prompt,
@@ -674,6 +678,7 @@ class ReelGenerator:
                             negative_prompt=self._VEO_SAFE_CONSTRAINTS.strip(),
                             labels=vertex_labels(),
                         ),
+                        **kwargs,
                     )
             operation = call_with_429_retry(_call, settings.VERTEX_VIDEO_MODEL)
             client = _vertex_client()

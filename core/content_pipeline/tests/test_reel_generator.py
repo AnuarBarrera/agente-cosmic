@@ -265,6 +265,57 @@ class TestGenerateSingleClip:
         assert 'fabric' in constraints or 'cloth' in constraints
         assert 'spatial continuity' in constraints
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
+    )
+    def test_passes_image_to_generate_videos_when_given(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_video = b'fake-video-bytes'
+        mock_video = MagicMock()
+        mock_video.video_bytes = fake_video
+        mock_generated = MagicMock()
+        mock_generated.video = mock_video
+        mock_op = MagicMock()
+        mock_op.done = True
+        mock_op.error = None
+        mock_op.result.generated_videos = [mock_generated]
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc, \
+             patch('core.content_pipeline.generators.reel_generator.types.Image') as mock_image_type:
+            mock_vc.return_value.models.generate_videos.return_value = mock_op
+            result = gen._generate_single_clip('a scene', image_bytes=b'hero-image-bytes', image_mime_type='image/png')
+
+        assert result == fake_video
+        mock_image_type.assert_called_once_with(image_bytes=b'hero-image-bytes', mime_type='image/png')
+        call_kwargs = mock_vc.return_value.models.generate_videos.call_args.kwargs
+        assert call_kwargs['image'] == mock_image_type.return_value
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
+    )
+    def test_omits_image_kwarg_when_not_given(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_video = b'fake-video-bytes'
+        mock_video = MagicMock()
+        mock_video.video_bytes = fake_video
+        mock_generated = MagicMock()
+        mock_generated.video = mock_video
+        mock_op = MagicMock()
+        mock_op.done = True
+        mock_op.error = None
+        mock_op.result.generated_videos = [mock_generated]
+        with patch('core.content_pipeline.generators.reel_generator._vertex_client') as mock_vc:
+            mock_vc.return_value.models.generate_videos.return_value = mock_op
+            gen._generate_single_clip('a scene')
+
+        call_kwargs = mock_vc.return_value.models.generate_videos.call_args.kwargs
+        assert 'image' not in call_kwargs
+
 
 class TestGenerateVideoClips:
     @override_settings(
