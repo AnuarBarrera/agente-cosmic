@@ -48,6 +48,14 @@ class ContentPost(models.Model):
     # Reel (roadmap #7): URL del MP4 final. image_url guarda el poster frame
     # (segundo 1 del video) para retrocompatibilidad con email/thumbnail.
     video_url = models.URLField(max_length=1000, blank=True, default='')
+    # Fondo limpio (foto real editada por nano banana, SIN overlay) -- solo se
+    # llena para posts del camino de foto real (generate_from_product_photo/
+    # regenerate_with_reference). Vacio para el resto, igual que image_urls
+    # hoy solo se llena para carruseles. Se guarda aparte de image_url (que
+    # SIEMPRE es la imagen final, con overlay si se pudo componer) para que
+    # la regeneracion pueda editar el fondo limpio en vez de una imagen con
+    # texto ya horneado encima.
+    product_photo_background_url = models.URLField(max_length=1000, blank=True, default='')
     format = models.CharField(max_length=20, choices=FORMAT_CHOICES, default=FORMAT_SINGLE)
     suggested_time = models.TimeField()
     hashtags = models.JSONField(default=list)
