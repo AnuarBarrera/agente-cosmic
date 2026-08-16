@@ -85,6 +85,34 @@ def test_generate_with_vertex_records_image_cost_not_token_cost():
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
     GOOGLE_CLOUD_LOCATION='global',
     VERTEX_IMAGE_MODEL='gemini-3.1-flash-image',
+)
+def test_generate_with_vertex_raises_value_error_when_no_image_parts():
+    """Reproduce bug real (2026-08-16): cuando Gemini bloquea la respuesta
+    (seguridad/politica de contenido) devuelve 200 OK pero con
+    candidates[0].content.parts=None. Sin guard, iterar sobre eso crashea con
+    TypeError('NoneType' object is not iterable) sin control -- un ValueError
+    limpio es lo que _generate_background ya sabe atrapar y reintentar con un
+    prompt de respaldo (ver _generate_background, except ValueError)."""
+    from core.content_pipeline.generators.image_generator import ImageGenerator
+    gen = ImageGenerator(bucket_name='test-bucket')
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = MagicMock(
+        candidates=[MagicMock(content=MagicMock(parts=None), finish_reason='SAFETY')]
+    )
+    with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_client):
+        try:
+            gen._generate_with_vertex('a test prompt')
+            assert False, "esperaba ValueError, no crasheo"
+        except ValueError:
+            pass
+        except TypeError:
+            assert False, "crasheo con TypeError sin control en vez de un ValueError limpio"
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='global',
+    VERTEX_IMAGE_MODEL='gemini-3.1-flash-image',
     GEMINI_API_KEY='fake-api-key',
 )
 def test_generate_with_vertex_uses_gemini_api_client_when_paid_and_omits_labels():
@@ -1472,6 +1500,61 @@ class TestGenerateFromProductPhoto:
         )
         assert _GEMINI_LITE_IMAGE_COST_PER_IMAGE != _GEMINI_IMAGE_COST_PER_IMAGE
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_retries_when_gemini_returns_no_image_parts(self):
+        """Reproduce bug real de prueba manual (2026-08-16, job
+        94a75f45-0365-4953-97f6-f29c99f1a89d): Gemini respondio 200 OK pero
+        sin imagen (bloqueo de seguridad sobre la foto real) -- el intento 1
+        crasheaba y abortaba TODO el presupuesto de reintentos de QC (2 mas
+        disponibles) en vez de intentar de nuevo, dejando el post con
+        image_url='' aunque el intento 2 hubiera funcionado."""
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        blocked_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=None), finish_reason='SAFETY')])
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-generated-png'
+        ok_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=[mock_part]))])
+        mock_gen_client = MagicMock()
+        mock_gen_client.models.generate_content.side_effect = [blocked_resp, ok_resp]
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
+             patch('core.shared.rate_limiter.throttle'), \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True), \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/img.png'):
+            url = gen.generate_from_product_photo(
+                photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
+                caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
+                filename='test-product', max_qc_retries=2,
+            )
+
+        assert url == 'https://storage.test/img.png'
+        assert mock_gen_client.models.generate_content.call_count == 2
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_returns_empty_string_when_every_attempt_returns_no_image(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_gen_client = MagicMock()
+        mock_gen_client.models.generate_content.return_value = MagicMock(
+            candidates=[MagicMock(content=MagicMock(parts=None), finish_reason='SAFETY')]
+        )
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
+             patch('core.shared.rate_limiter.throttle'):
+            url = gen.generate_from_product_photo(
+                photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
+                caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
+                filename='test-product', max_qc_retries=2,
+            )
+        assert url == ''
+        assert mock_gen_client.models.generate_content.call_count == 3  # 1 + max_qc_retries
+
 
 class TestRegenerateWithReference:
     @override_settings(
@@ -1527,6 +1610,35 @@ class TestRegenerateWithReference:
                 vision_context='', filename='test-product-regen',
             )
         assert url == ''
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_retries_when_gemini_returns_no_image_parts(self):
+        """Mismo bug real que TestGenerateFromProductPhoto -- ver ese test para
+        el caso reproducido en produccion. Aqui se cubre el segundo caller de
+        _generate_from_photo_with_retry para no dejar la regeneracion con el
+        mismo hueco."""
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        blocked_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=None), finish_reason='SAFETY')])
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-regenerated-png'
+        ok_resp = MagicMock(candidates=[MagicMock(content=MagicMock(parts=[mock_part]))])
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = [blocked_resp, ok_resp]
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_client), \
+             patch('core.shared.rate_limiter.throttle'), \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True), \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/regen.png'):
+            url = gen.regenerate_with_reference(
+                current_image_bytes=b'current-image-bytes', feedback='mas colorido',
+                vision_context='', filename='test-product-regen', max_qc_retries=2,
+            )
+        assert url == 'https://storage.test/regen.png'
+        assert mock_client.models.generate_content.call_count == 2
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',

@@ -159,6 +159,27 @@ def _detect_mime(image_bytes: bytes) -> str:
     return 'image/jpeg'
 
 
+def _response_parts(resp):
+    """Gemini a veces responde 200 OK sin imagen -- bloqueo de seguridad/
+    politica de contenido sobre la foto real, entre otras causas. Sin este
+    guard, `resp.candidates[0].content.parts` puede ser None y un `for part
+    in ...` directo crashea con TypeError('NoneType' object is not
+    iterable') sin control (bug real, prueba manual 2026-08-16). Devuelve
+    None si no hay partes usables, para que el caller decida (reintentar,
+    fallback, etc.) en vez de heredar un crash del SDK."""
+    candidates = resp.candidates or []
+    if not candidates or not candidates[0].content:
+        return None
+    return candidates[0].content.parts or None
+
+
+def _finish_reason(resp) -> str:
+    candidates = resp.candidates or []
+    if not candidates:
+        return 'sin candidatos'
+    return f"finish_reason={getattr(candidates[0], 'finish_reason', 'unknown')}"
+
+
 def _luminance(hex_color: str) -> float:
     """Luminancia relativa (0=negro, 1=blanco) de un color hex."""
     try:
@@ -286,11 +307,21 @@ class ImageGenerator:
             last_bytes = None
             total_attempts = max_qc_retries + 1
             for attempt in range(total_attempts):
-                last_bytes = self._generate_from_photo_with_retry(prompt, photo_part)
+                try:
+                    last_bytes = self._generate_from_photo_with_retry(prompt, photo_part)
+                except ValueError as gen_err:
+                    # Gemini a veces no devuelve imagen (bloqueo de seguridad/politica de
+                    # contenido) -- un solo intento sin imagen no debe gastar TODO el
+                    # presupuesto de reintentos de QC, igual que _generate_background ya
+                    # hace con sus propios ValueError.
+                    logger.warning(f"Product photo generation sin imagen (attempt {attempt + 1}/{total_attempts}): {gen_err}")
+                    continue
                 if self._validate_product_photo_generation(last_bytes):
                     return self._upload_to_storage(last_bytes, filename)
                 if attempt < max_qc_retries:
                     logger.warning(f"Product photo QC failed (attempt {attempt + 1}/{total_attempts}), regenerando...")
+            if last_bytes is None:
+                raise ValueError("Ningun intento devolvio una imagen usable")
             logger.warning("Product photo QC: reintentos agotados, usando ultima imagen generada")
             return self._upload_to_storage(last_bytes, filename)
         except Exception as e:
@@ -323,11 +354,19 @@ class ImageGenerator:
             last_bytes = None
             total_attempts = max_qc_retries + 1
             for attempt in range(total_attempts):
-                last_bytes = self._generate_from_photo_with_retry(prompt, image_part)
+                try:
+                    last_bytes = self._generate_from_photo_with_retry(prompt, image_part)
+                except ValueError as gen_err:
+                    # Ver nota en generate_from_product_photo: un intento sin imagen no
+                    # debe abortar todo el presupuesto de reintentos de QC.
+                    logger.warning(f"Regen generation sin imagen (attempt {attempt + 1}/{total_attempts}): {gen_err}")
+                    continue
                 if self._validate_product_photo_generation(last_bytes):
                     return self._upload_to_storage(last_bytes, filename)
                 if attempt < max_qc_retries:
                     logger.warning(f"Regen QC failed (attempt {attempt + 1}/{total_attempts}), reintentando...")
+            if last_bytes is None:
+                raise ValueError("Ningun intento devolvio una imagen usable")
             logger.warning("Regen QC: reintentos agotados, usando ultima imagen generada")
             return self._upload_to_storage(last_bytes, filename)
         except Exception as e:
@@ -355,7 +394,10 @@ class ImageGenerator:
                 contents=[prompt, photo_part],
                 config=types.GenerateContentConfig(**config_kwargs),
             )
-        for part in resp.candidates[0].content.parts:
+        parts = _response_parts(resp)
+        if not parts:
+            raise ValueError(f"No image returned by Gemini ({_finish_reason(resp)})")
+        for part in parts:
             if part.inline_data:
                 # VERTEX_IMAGE_MODEL_LITE, no el modelo normal — su tarifa es
                 # distinta (ver _GEMINI_LITE_IMAGE_COST_PER_IMAGE).
@@ -1011,7 +1053,10 @@ class ImageGenerator:
                 contents=full_prompt,
                 config=types.GenerateContentConfig(**config_kwargs),
             )
-        for part in resp.candidates[0].content.parts:
+        parts = _response_parts(resp)
+        if not parts:
+            raise ValueError(f"No image returned by Vertex AI ({_finish_reason(resp)})")
+        for part in parts:
             if part.inline_data:
                 record_gemini_image_generation('generate')
                 return part.inline_data.data
