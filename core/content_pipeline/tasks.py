@@ -259,7 +259,9 @@ def regenerate_post_image_task(post_id: str, feedback: str) -> None:
         post = ContentPost.objects.select_related('calendar__brand_dna__job').get(id=post_id)
         brand_dna = post.calendar.brand_dna
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
-        current_background_bytes = read_upload_from_public_url(post.product_photo_background_url)
+        current_background_bytes = read_upload_from_public_url(
+            post.product_photo_background_url or post.image_url
+        )
         background_url, new_url = image_gen.regenerate_with_reference(
             current_background_bytes=current_background_bytes,
             feedback=feedback,

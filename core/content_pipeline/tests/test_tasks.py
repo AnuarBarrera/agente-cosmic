@@ -679,6 +679,34 @@ def test_regenerate_post_image_task_updates_image_and_clears_flag(calendar_with_
     assert post.regenerating is False
 
 
+def test_regenerate_post_image_task_falls_back_to_image_url_when_background_is_empty(calendar_with_dna):
+    """Posts legacy (pre-migracion 0015) o con background_url vacio por blob
+    perdido en la 1a generacion -- debe caer a image_url (que en esos casos
+    ES el fondo limpio, porque no existia overlay antes de este plan) en vez
+    de fallar en silencio con IndexError sobre read_upload_from_public_url('')."""
+    from core.content_pipeline.tasks import regenerate_post_image_task
+    post = _make_post(
+        calendar_with_dna, 1, image_url='https://storage.googleapis.com/test-bucket/posts/legacy.png',
+        product_photo_background_url='',
+    )
+    post.regenerating = True
+    post.save(update_fields=['regenerating'])
+    job = calendar_with_dna.brand_dna.job
+    job.product_reference_image_path = 'uploads/product_ref_test.jpg'
+    job.save(update_fields=['product_reference_image_path'])
+
+    with patch('core.content_pipeline.tasks.read_upload_from_public_url', return_value=b'legacy-image-bytes') as mock_read, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
+        MockImage.return_value.regenerate_with_reference.return_value = ('https://storage.test/new-bg.png', 'https://storage.test/new.png')
+        regenerate_post_image_task(str(post.id), 'hazlo mas colorido')
+
+    mock_read.assert_called_once_with('https://storage.googleapis.com/test-bucket/posts/legacy.png')
+    post.refresh_from_db()
+    assert post.image_url == 'https://storage.test/new.png'
+    assert post.product_photo_background_url == 'https://storage.test/new-bg.png'
+    assert post.regenerating is False
+
+
 def test_regenerate_post_image_task_clears_flag_on_failure(calendar_with_dna):
     from core.content_pipeline.tasks import regenerate_post_image_task
     post = _make_post(
