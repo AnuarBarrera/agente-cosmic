@@ -343,10 +343,13 @@ class ImageGenerator:
             context_line = f" Contexto del producto: {vision_context}." if vision_context else ''
             prompt = (
                 f"Edit this real product photo into a professional social media post background.\n"
-                f"Extract only the real product from the photo. Remove/eliminate any text, "
-                f"watermark, or logo present in the original photo — do not carry them into "
-                f"the new composition. Do not add text of any kind either — no new "
-                f"headline, no CTA, no captions, no labels.\n"
+                f"Extract only the real product from the photo, keeping it fully intact and "
+                f"consistent with the original — any text, brand names, or logos printed on "
+                f"the product itself (packaging, labels, wrapping) are part of the product "
+                f"and must stay exactly as they are, do not alter or remove them. Only remove "
+                f"watermarks or illegible/garbled text overlays that are NOT part of the "
+                f"product (e.g. stock photo watermarks, screenshot UI elements). Do not add "
+                f"text of any kind either — no new headline, no CTA, no captions, no labels.\n"
                 # Mismo patron de delimitacion de entrada no confiable que
                 # _regenerate_caption (core/brand_dna/views.py): caption y
                 # vision_context vienen del usuario -- vision_context ademas es

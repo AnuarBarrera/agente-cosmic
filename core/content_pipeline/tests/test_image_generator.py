@@ -1536,7 +1536,14 @@ class TestGenerateFromProductPhoto:
         GOOGLE_CLOUD_LOCATION_TEXT='global',
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
-    def test_prompt_instructs_remove_original_text_and_no_new_text(self):
+    def test_prompt_preserves_product_text_removes_only_watermarks_and_no_new_text(self):
+        """Hallazgo real (2026-08-16, Anuar): pedirle a nano banana que borre
+        CUALQUIER texto/logo de la foto original causaba que intentara borrar
+        texto legitimo del producto (branding en un globo, en envolturas de
+        dulces) y dejara restos garabateados -- confirmado en 3 fotos reales
+        distintas. Fix: el prompt ahora distingue texto/marca que es PARTE del
+        producto (debe conservarse intacto) de marcas de agua/texto ilegible
+        que NO es parte del producto (si se puede borrar)."""
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         mock_part = MagicMock()
@@ -1557,8 +1564,14 @@ class TestGenerateFromProductPhoto:
 
         call_kwargs = mock_gen_client.models.generate_content.call_args.kwargs
         prompt_text = ' '.join(str(c) for c in call_kwargs['contents'] if isinstance(c, str))
-        assert 'elimina' in prompt_text.lower() or 'remove' in prompt_text.lower() or 'quita' in prompt_text.lower()
-        assert 'no agregues texto' in prompt_text.lower() or 'do not add text' in prompt_text.lower() or 'no text' in prompt_text.lower()
+        # Texto/marca que es parte del producto: conservar intacto, no tocar.
+        assert 'must stay exactly as they are' in prompt_text
+        assert 'do not alter or remove them' in prompt_text
+        # Solo se borra lo que NO es parte del producto: marcas de agua / texto ilegible.
+        assert 'watermark' in prompt_text.lower()
+        assert 'illegible' in prompt_text.lower() or 'garbled' in prompt_text.lower()
+        # No agregar texto nuevo sigue vigente.
+        assert 'do not add text' in prompt_text.lower() or 'no text' in prompt_text.lower()
         # caption y vision_context son entrada del usuario -- van delimitados
         # con el mismo marcador que _regenerate_caption (core/brand_dna/views.py).
         assert '=== INICIO DATOS DEL CLIENTE' in prompt_text
