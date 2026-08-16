@@ -241,6 +241,72 @@ def job_with_dna_sample_reel():
     return job
 
 
+@pytest.fixture
+def job_with_dna_sample_image_and_photo():
+    job = AnalysisJob.objects.create(
+        email='t@t.com', business_url='https://tuwebmx.com',
+        status=AnalysisJob.STATUS_PROCESSING, stage=AnalysisJob.STAGE_CONTENT, progress=78,
+        generation_mode=AnalysisJob.MODE_SAMPLE_IMAGE,
+        product_reference_image_path='uploads/product_ref_test.jpg',
+    )
+    BrandDNA.objects.create(
+        job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
+        description='Agencia digital', keywords=['diseno'], audience='PYMEs',
+        tone='profesional', primary_colors=['#1a1a2e'],
+    )
+    return job
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+)
+def test_generate_sample_task_uses_product_photo_when_present(job_with_dna_sample_image_and_photo):
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.read_upload', return_value=b'fake-photo-bytes'), \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS_FOR_SAMPLE
+        MockImage.return_value.generate_from_product_photo.return_value = 'https://storage.test/product.png'
+
+        from core.content_pipeline.tasks import generate_sample_task
+        generate_sample_task(str(job_with_dna_sample_image_and_photo.id))
+
+    MockImage.return_value.generate_from_product_photo.assert_called_once()
+    MockImage.return_value.generate.assert_not_called()
+    call_kwargs = MockImage.return_value.generate_from_product_photo.call_args.kwargs
+    assert call_kwargs['photo_bytes'] == b'fake-photo-bytes'
+    post = ContentPost.objects.get(calendar__brand_dna__job=job_with_dna_sample_image_and_photo)
+    assert post.image_url == 'https://storage.test/product.png'
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    VERTEX_IMAGE_MODEL='publishers/google/models/gemini-2.5-flash-image',
+    GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+)
+def test_generate_sample_task_ignores_photo_for_reel_mode(job_with_dna_sample_reel):
+    # El modo reel no rutea a generate_from_product_photo en este plan --
+    # eso es el modulo 2 (fuera de alcance aqui).
+    job_with_dna_sample_reel.product_reference_image_path = 'uploads/product_ref_test.jpg'
+    job_with_dna_sample_reel.save(update_fields=['product_reference_image_path'])
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel, \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS_FOR_SAMPLE
+        MockScript.return_value.generate.return_value = {'hook_text': 'H', 'scene_prompts': ['a']}
+        MockReel.return_value.generate.return_value = ('https://storage.test/reel.mp4', 'https://storage.test/poster.png')
+
+        from core.content_pipeline.tasks import generate_sample_task
+        generate_sample_task(str(job_with_dna_sample_reel.id))
+
+    MockImage.return_value.generate_from_product_photo.assert_not_called()
+
 
 @override_settings(
     GOOGLE_CLOUD_PROJECT='agente-cosmic',

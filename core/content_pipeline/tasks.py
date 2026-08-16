@@ -123,21 +123,31 @@ def generate_sample_task(job_id: str) -> None:
         reel_script_gen = ReelScriptGenerator()
         reel_gen = ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
 
-        image_url, image_urls, video_url = _generate_post_media(
-            image_gen, reel_script_gen, reel_gen,
-            fmt=wanted_format,
-            filename=f"{job_id}-sample",
-            caption=post_data['caption'],
-            colors=brand_dna.primary_colors,
-            tone=brand_dna.tone,
-            brand_name=brand_dna.business_name,
-            keywords=brand_dna.keywords,
-            description=brand_dna.description,
-            audience=brand_dna.audience,
-            business_url=brand_dna.business_url,
-            brand_dna=brand_dna,
-            post_data=post_data,
-        )
+        if wanted_format == ContentPost.FORMAT_SINGLE and job.product_reference_image_path:
+            photo_bytes = read_upload(job.product_reference_image_path)
+            image_url = image_gen.generate_from_product_photo(
+                photo_bytes=photo_bytes, mime_type='image/jpeg',
+                caption=post_data['caption'], colors=brand_dna.primary_colors,
+                tone=brand_dna.tone, filename=f"{job_id}-sample",
+                vision_context=brand_dna.product_photo_analysis,
+            )
+            image_urls, video_url = [], ''
+        else:
+            image_url, image_urls, video_url = _generate_post_media(
+                image_gen, reel_script_gen, reel_gen,
+                fmt=wanted_format,
+                filename=f"{job_id}-sample",
+                caption=post_data['caption'],
+                colors=brand_dna.primary_colors,
+                tone=brand_dna.tone,
+                brand_name=brand_dna.business_name,
+                keywords=brand_dna.keywords,
+                description=brand_dna.description,
+                audience=brand_dna.audience,
+                business_url=brand_dna.business_url,
+                brand_dna=brand_dna,
+                post_data=post_data,
+            )
 
         ContentPost.objects.create(
             calendar=calendar,
