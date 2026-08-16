@@ -142,6 +142,15 @@ def generate_sample_task(job_id: str) -> None:
                 business_url=brand_dna.business_url,
             )
             image_urls, video_url = [], ''
+        elif (wanted_format == ContentPost.FORMAT_REEL and job.product_reference_image_path
+                and upload_exists(job.product_reference_image_path)):
+            photo_bytes = read_upload(job.product_reference_image_path)
+            script = reel_script_gen.generate(post_data, brand_dna)
+            video_url, image_url = reel_gen.generate_from_product_photo(
+                image_gen, photo_bytes, _detect_mime(photo_bytes), script,
+                brand_dna.primary_colors, f"{job_id}-sample",
+            )
+            image_urls, background_url = [], ''
         else:
             background_url = ''
             image_url, image_urls, video_url = _generate_post_media(
