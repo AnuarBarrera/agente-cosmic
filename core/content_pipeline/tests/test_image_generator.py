@@ -1302,6 +1302,45 @@ class TestValidateProductPhotoGeneration:
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
         VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
     )
+    def test_does_not_trust_the_models_ok_field_when_inconsistent(self):
+        """El veredicto se deriva en Python de los 7 booleanos. Si el modelo se
+        contradice (ok=true con is_abstract_3d=true — la condicion tiene un OR
+        anidado, la forma que un LLM compone peor), el QC debe rechazar igual."""
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = (
+            '{"has_text": false, "text_is_correct_spanish": true, "is_abstract_3d": true, '
+            '"has_screen_content": false, "has_malformed_object": false, '
+            '"has_unrealistic_grounding": false, "has_suggestive_or_exposed_content": false, "ok": true}'
+        )
+        mock_client.models.generate_content.return_value = mock_resp
+        with patch('core.content_pipeline.generators.image_generator._vertex_text_client', return_value=mock_client):
+            assert gen._validate_product_photo_generation(b'fake-png') is False
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_rejects_suggestive_content_even_if_model_says_ok(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = (
+            '{"has_text": false, "text_is_correct_spanish": true, "is_abstract_3d": false, '
+            '"has_screen_content": false, "has_malformed_object": false, '
+            '"has_unrealistic_grounding": false, "has_suggestive_or_exposed_content": true, "ok": true}'
+        )
+        mock_client.models.generate_content.return_value = mock_resp
+        with patch('core.content_pipeline.generators.image_generator._vertex_text_client', return_value=mock_client):
+            assert gen._validate_product_photo_generation(b'fake-png') is False
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
     def test_fail_open_on_error(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
@@ -1374,6 +1413,10 @@ class TestGenerateFromProductPhoto:
         prompt_text = ' '.join(str(c) for c in call_kwargs['contents'] if isinstance(c, str))
         assert 'elimina' in prompt_text.lower() or 'remove' in prompt_text.lower() or 'quita' in prompt_text.lower()
         assert 'no agregues texto' in prompt_text.lower() or 'do not add text' in prompt_text.lower() or 'no text' in prompt_text.lower()
+        # caption y vision_context son entrada del usuario -- van delimitados
+        # con el mismo marcador que _regenerate_caption (core/brand_dna/views.py).
+        assert '=== INICIO DATOS DEL CLIENTE' in prompt_text
+        assert '=== FIN DATOS DEL CLIENTE' in prompt_text
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
@@ -1461,6 +1504,10 @@ class TestRegenerateWithReference:
         prompt_text = ' '.join(str(c) for c in call_kwargs['contents'] if isinstance(c, str))
         assert 'hazlo mas colorido' in prompt_text
         assert 'Aretes de plata con turquesa' in prompt_text
+        # feedback y vision_context son entrada del usuario -- delimitados.
+        assert '=== INICIO DATOS DEL CLIENTE' in prompt_text
+        assert '=== FIN DATOS DEL CLIENTE' in prompt_text
+        assert 'Do not add new text' in prompt_text
         # La imagen enviada es la ACTUAL, no la foto original del producto.
         contents = call_kwargs['contents']
         assert contents[1].inline_data.data == b'current-image-bytes'
