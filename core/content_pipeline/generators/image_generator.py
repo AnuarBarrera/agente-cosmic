@@ -436,18 +436,18 @@ class ImageGenerator:
             logger.error(f"ImageGenerator.regenerate_with_reference error: {e}")
             return '', ''
 
-    def _generate_from_photo_with_retry(self, prompt: str, photo_part) -> bytes:
+    def _generate_from_photo_with_retry(self, prompt: str, photo_part, aspect_ratio: str = '1:1') -> bytes:
         provider = 'gemini_api' if self._use_gemini_api else 'vertex'
         return call_with_429_retry(
-            lambda: self._generate_from_photo(prompt, photo_part),
+            lambda: self._generate_from_photo(prompt, photo_part, aspect_ratio=aspect_ratio),
             settings.VERTEX_IMAGE_MODEL_LITE, provider=provider,
         )
 
-    def _generate_from_photo(self, prompt: str, photo_part) -> bytes:
+    def _generate_from_photo(self, prompt: str, photo_part, aspect_ratio: str = '1:1') -> bytes:
         client = _gemini_api_client() if self._use_gemini_api else _vertex_client()
         config_kwargs = dict(
             response_modalities=['IMAGE', 'TEXT'],
-            image_config=types.ImageConfig(aspect_ratio='1:1'),
+            image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
             # Root cause real del rechazo (finish_reason=OTHER) confirmado por
             # Anuar probando "Nano Banana Lite" en Vertex AI Studio
             # (2026-08-16): el modelo necesita thinking activo para poder

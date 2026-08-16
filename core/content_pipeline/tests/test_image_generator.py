@@ -1452,6 +1452,52 @@ class TestValidateProductPhotoGeneration:
             assert gen._validate_product_photo_generation(b'fake-png') is True
 
 
+class TestGenerateFromPhotoAspectRatio:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_defaults_to_square_aspect_ratio(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-generated-png'
+        mock_gen_client = MagicMock()
+        mock_gen_client.models.generate_content.return_value = MagicMock(
+            candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+        )
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
+             patch('core.shared.rate_limiter.throttle'):
+            gen._generate_from_photo_with_retry('a prompt', MagicMock())
+
+        call_kwargs = mock_gen_client.models.generate_content.call_args.kwargs
+        assert call_kwargs['config'].image_config.aspect_ratio == '1:1'
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_uses_explicit_aspect_ratio(self):
+        """Los shots de reel necesitan formato vertical 9:16 -- distinto del
+        1:1 cuadrado que usan los posts."""
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-generated-png'
+        mock_gen_client = MagicMock()
+        mock_gen_client.models.generate_content.return_value = MagicMock(
+            candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+        )
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
+             patch('core.shared.rate_limiter.throttle'):
+            gen._generate_from_photo_with_retry('a prompt', MagicMock(), aspect_ratio='9:16')
+
+        call_kwargs = mock_gen_client.models.generate_content.call_args.kwargs
+        assert call_kwargs['config'].image_config.aspect_ratio == '9:16'
+
+
 class TestGenerateFromProductPhoto:
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
