@@ -1251,6 +1251,39 @@ class TestValidateProductPhotoGeneration:
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
         VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
     )
+    def test_asks_gemini_for_the_lenient_text_rule_not_the_strict_one(self):
+        """El criterio de texto de este auditor (rechazar solo si esta MAL escrito,
+        no por su sola presencia) vive en el prompt y en el response_schema — no en
+        codigo Python. Sin estas aserciones, volver a la regla estricta de
+        _validate_background, o pasar ImageQCSchema por error, dejaria la suite en
+        verde igual."""
+        from core.content_pipeline.generators.image_generator import (
+            ImageGenerator, ProductPhotoQCSchema,
+        )
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = (
+            '{"has_text": true, "text_is_correct_spanish": true, "is_abstract_3d": false, '
+            '"has_screen_content": false, "has_malformed_object": false, '
+            '"has_unrealistic_grounding": false, "has_suggestive_or_exposed_content": false, "ok": true}'
+        )
+        mock_client.models.generate_content.return_value = mock_resp
+        with patch('core.content_pipeline.generators.image_generator._vertex_text_client', return_value=mock_client):
+            gen._validate_product_photo_generation(b'fake-png')
+
+        call_kwargs = mock_client.models.generate_content.call_args.kwargs
+        assert call_kwargs['config'].response_schema is ProductPhotoQCSchema
+        prompt = next(c for c in call_kwargs['contents'] if isinstance(c, str))
+        # La regla laxa: el texto presente solo descalifica si esta mal escrito.
+        assert '(has_text=false OR text_is_correct_spanish=true)' in prompt
+        # Y explicitamente NO la regla estricta de _validate_background.
+        assert 'ok: true ONLY if has_text=false' not in prompt
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
     def test_rejects_when_text_is_incorrect_spanish(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
