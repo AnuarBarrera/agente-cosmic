@@ -582,7 +582,10 @@ class ReelGenerator:
         clips = self._generate_video_clips(scene_prompts)
         if len(clips) < 3:
             return clips, False
+        return self._wrap_with_branding(clips, hook_text, highlight_word, tag_cta, primary_color, filename_prefix)
 
+    def _wrap_with_branding(self, clips: list[bytes], hook_text: str, highlight_word: str,
+                             tag_cta: str, primary_color: str, filename_prefix: str) -> tuple[list[bytes], bool]:
         width, height, fps = self._probe_clip_dimensions(clips[0])
 
         font_seed = filename_prefix.rsplit('-day', 1)[0] if '-day' in filename_prefix else filename_prefix

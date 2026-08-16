@@ -960,6 +960,24 @@ class TestGenerateClipsWithBranding:
         assert has_branding is False
         mock_branded.assert_not_called()
 
+    def test_wrap_with_branding_reused_directly(self):
+        """_wrap_with_branding debe ser llamable de forma independiente (sin pasar
+        por _generate_video_clips) -- lo reusa el camino de foto real (Task 5)."""
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
+             patch.object(gen, '_choose_reel_template', return_value='panel-wipe'), \
+             patch('core.content_pipeline.generators.reel_generator.choose_font_preset',
+                   return_value={'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins'}), \
+             patch.object(gen, '_generate_branded_segment', side_effect=[b'portada-raw', b'contra-raw']), \
+             patch.object(gen, '_normalize_branded_segment', side_effect=[b'portada-norm', b'contra-norm']):
+            clips, has_branding = gen._wrap_with_branding(
+                [b'v', b's1', b's2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
+            )
+
+        assert has_branding is True
+        assert clips == [b'portada-norm', b'v', b's1', b's2', b'contra-norm']
+
 
 class TestNormalizeBrandedSegment:
     def test_builds_scale_command_with_exact_dimensions(self):
