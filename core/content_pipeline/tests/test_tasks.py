@@ -644,6 +644,45 @@ def test_regenerate_post_image_task_clears_flag_on_failure(calendar_with_dna):
     assert post.image_url == 'https://storage.googleapis.com/test-bucket/posts/old.png'  # sin cambio
 
 
+def test_regenerate_post_image_task_clears_flag_when_post_lookup_fails(calendar_with_dna):
+    """La limpieza del flag no debe depender de tener el objeto post en memoria:
+    si el propio get() revienta (blip de DB), la fila quedaba con
+    regenerating=True para siempre y el guard de reentrada de views.py
+    bloqueaba ese post permanentemente."""
+    from core.content_pipeline.tasks import regenerate_post_image_task
+    post = _make_post(calendar_with_dna, 1, image_url='https://storage.googleapis.com/test-bucket/posts/old.png')
+    post.regenerating = True
+    post.save(update_fields=['regenerating'])
+
+    # El lookup del post es ContentPost.objects.select_related(...).get(...) —
+    # se revienta el select_related para que ni siquiera exista objeto `post`.
+    with patch.object(ContentPost.objects, 'select_related', side_effect=Exception('db blip')):
+        regenerate_post_image_task(str(post.id), 'hazlo mas colorido')
+
+    post.refresh_from_db()
+    assert post.regenerating is False
+
+
+def test_regenerate_post_image_task_keeps_previous_image_when_regen_returns_empty(calendar_with_dna):
+    """regenerate_with_reference agoto reintentos sin nada usable ('') — el post
+    debe conservar su imagen anterior, no quedarse en blanco."""
+    from core.content_pipeline.tasks import regenerate_post_image_task
+    post = _make_post(calendar_with_dna, 1, image_url='https://storage.googleapis.com/test-bucket/posts/old.png')
+    post.image_urls = ['https://storage.googleapis.com/test-bucket/posts/old.png']
+    post.regenerating = True
+    post.save(update_fields=['image_urls', 'regenerating'])
+
+    with patch('core.content_pipeline.tasks.read_upload_from_public_url', return_value=b'current-bytes'), \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
+        MockImage.return_value.regenerate_with_reference.return_value = ''
+        regenerate_post_image_task(str(post.id), 'hazlo mas colorido')
+
+    post.refresh_from_db()
+    assert post.image_url == 'https://storage.googleapis.com/test-bucket/posts/old.png'
+    assert post.image_urls == ['https://storage.googleapis.com/test-bucket/posts/old.png']
+    assert post.regenerating is False
+
+
 def test_backfill_image_task_skips_deleted_calendar(calendar_with_dna):
     from django.utils import timezone as tz
     job = calendar_with_dna.brand_dna.job

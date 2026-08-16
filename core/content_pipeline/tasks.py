@@ -239,8 +239,12 @@ def regenerate_post_image_task(post_id: str, feedback: str) -> None:
     Sincrono era inviable: 1 rpm en Vertex + hasta 3 reintentos de QC pueden
     tardar varios minutos, mucho para un request HTTP. Decision de Anuar
     2026-08-16."""
-    post = ContentPost.objects.select_related('calendar__brand_dna__job').get(id=post_id)
     try:
+        # El get() va DENTRO del try a proposito: si falla (blip transitorio de
+        # DB), la limpieza del flag de abajo no depende de tener el objeto en
+        # memoria -- si no, la fila quedaba con regenerating=True para siempre y
+        # el guard de reentrada de views.py bloqueaba ese post permanentemente.
+        post = ContentPost.objects.select_related('calendar__brand_dna__job').get(id=post_id)
         brand_dna = post.calendar.brand_dna
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
         current_bytes = read_upload_from_public_url(post.image_url)
@@ -257,8 +261,7 @@ def regenerate_post_image_task(post_id: str, feedback: str) -> None:
         post.save(update_fields=['image_url', 'image_urls', 'regenerating'])
     except Exception as e:
         logger.error(f"regenerate_post_image_task error para post {post_id}: {e}")
-        post.regenerating = False
-        post.save(update_fields=['regenerating'])
+        ContentPost.objects.filter(id=post_id).update(regenerating=False)
 
 
 def send_daily_email_task(post_id: str) -> None:

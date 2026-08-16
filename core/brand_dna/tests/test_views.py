@@ -512,6 +512,29 @@ def test_regenerate_action_with_product_photo_enqueues_async_task(client, user, 
     assert post.regenerating is True
 
 
+def test_regenerate_action_returns_409_when_already_regenerating(client, user, job_with_calendar_and_product_photo):
+    """Guard de reentrada: recargar la pagina reponia el boton y permitia
+    reencolar un segundo job sobre el mismo post (ambos leen la misma imagen
+    vieja y se pisan, gastando 2 slots de una cuota de 1 rpm)."""
+    post = job_with_calendar_and_product_photo.brand_dna.calendar.posts.filter(format='single').first()
+    post.regenerating = True
+    post.save(update_fields=['regenerating'])
+    client.force_login(user)
+    with patch('core.brand_dna.views._regenerate_caption', return_value='Nuevo caption') as mock_caption, \
+         patch('core.brand_dna.views.django_rq') as mock_rq:
+        response = client.post(f'/api/post/{post.id}/action/', data=json.dumps({
+            'action': 'regenerate', 'value': 'hazlo mas colorido',
+        }), content_type='application/json')
+
+    assert response.status_code == 409
+    assert 'en curso' in response.json()['error']
+    mock_rq.enqueue.assert_not_called()
+    # Ni siquiera se gasta el caption (el guard va antes de cualquier trabajo).
+    mock_caption.assert_not_called()
+    post.refresh_from_db()
+    assert post.regen_count == 0
+
+
 def test_regenerate_action_without_product_photo_stays_synchronous(client, user, job_with_calendar):
     post = job_with_calendar.brand_dna.calendar.posts.filter(format='single').first()
     client.force_login(user)

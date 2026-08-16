@@ -535,6 +535,14 @@ def post_action_api(request, post_id):
                 'error': 'Límite de regeneraciones alcanzado para este post (máximo 2).',
                 'limit_reached': True,
             }, status=429)
+        # Guard de reentrada ANTES de gastar cualquier trabajo (incluido el
+        # caption): el boton solo se oculta en el DOM de la pestaña que disparo
+        # la regeneracion, asi que recargar la pagina -- justo lo que sugiere el
+        # toast de timeout -- permitia reencolar sobre el mismo post. Ambos jobs
+        # leerian la misma imagen vieja y se escribirian uno encima del otro,
+        # gastando 2 slots de una cuota de 1 rpm en Vertex.
+        if post.regenerating:
+            return JsonResponse({'error': 'Ya hay una regeneración en curso para este post.'}, status=409)
         new_caption = _regenerate_caption(post, value)
         post.caption = new_caption
         post.user_note = value
