@@ -1200,6 +1200,61 @@ class TestGenerateCarousel:
         assert mock_render.call_args.kwargs['font_seed'] == 'job-abc'
 
 
+class TestGenerateCarouselFromProductPhotos:
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_returns_one_url_per_photo_slide(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_slides = [{'headline': f'H{i}', 'subtitle': 'S', 'cta': 'CTA', 'tag': 'TAG'} for i in range(3)]
+        with patch.object(gen, '_generate_carousel_slides_content', return_value=fake_slides) as mock_slides, \
+             patch.object(gen, '_generate_validated_photo_edit',
+                           side_effect=[b'slide-bg-1', b'slide-bg-2', b'slide-bg-3']) as mock_edit, \
+             patch.object(gen, '_render_html_template', return_value=b'rendered') as mock_render, \
+             patch.object(gen, '_upload_to_storage',
+                           side_effect=[f'https://storage.test/slide{i}.png' for i in range(1, 4)]) as mock_upload:
+            urls = gen.generate_carousel_from_product_photos(
+                [b'photo-a', b'photo-b', b'photo-c'], ['image/jpeg'] * 3,
+                'Caption', ['#1a1a2e'], 'profesional', 'job1-day3',
+            )
+        assert urls == [f'https://storage.test/slide{i}.png' for i in range(1, 4)]
+        mock_slides.assert_called_once_with('Caption', business_url='', num_slides=3)
+        assert mock_edit.call_count == 3
+        assert mock_render.call_count == 3
+        for i, call_args in enumerate(mock_render.call_args_list):
+            assert call_args.args[0] == [b'slide-bg-1', b'slide-bg-2', b'slide-bg-3'][i]
+        uploaded_filenames = [call.args[1] for call in mock_upload.call_args_list]
+        assert uploaded_filenames == ['job1-day3-slide1', 'job1-day3-slide2', 'job1-day3-slide3']
+
+    @override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1')
+    def test_skips_slide_when_photo_edit_fails(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_slides = [{'headline': f'H{i}', 'subtitle': 'S', 'cta': 'CTA', 'tag': 'TAG'} for i in range(3)]
+        with patch.object(gen, '_generate_carousel_slides_content', return_value=fake_slides), \
+             patch.object(gen, '_generate_validated_photo_edit', side_effect=[b'slide-bg-1', None, b'slide-bg-3']), \
+             patch.object(gen, '_render_html_template', return_value=b'rendered'), \
+             patch.object(gen, '_upload_to_storage', side_effect=['https://storage.test/s1.png', 'https://storage.test/s3.png']):
+            urls = gen.generate_carousel_from_product_photos(
+                [b'photo-a', b'photo-b', b'photo-c'], ['image/jpeg'] * 3,
+                'Caption', ['#1a1a2e'], 'profesional', 'job1-day3',
+            )
+        assert len(urls) == 2  # una slide se omitio
+
+    @override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1')
+    def test_returns_empty_list_on_error(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_carousel_slides_content', side_effect=Exception('boom')):
+            urls = gen.generate_carousel_from_product_photos(
+                [b'photo-a'], ['image/jpeg'], 'Caption', ['#1a1a2e'], 'profesional', 'job1-day3',
+            )
+        assert urls == []
+
+
 class TestSanitizeWebVisitMention:
     def test_no_url_and_mentions_website_returns_fallback(self):
         from core.content_pipeline.generators.image_generator import _sanitize_web_visit_mention
