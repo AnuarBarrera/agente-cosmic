@@ -175,7 +175,7 @@ def test_analyze_submit_saves_product_reference_photo_when_permitted(user, free_
         })
     job = AnalysisJob.objects.filter(user=user).latest('created_at')
     assert job.generation_mode == AnalysisJob.MODE_SAMPLE_IMAGE
-    assert job.product_reference_image_path != ''
+    assert job.product_reference_image_paths != []
     mock_save.assert_called_once()
 
 
@@ -472,7 +472,7 @@ def job_with_calendar_and_product_photo(user):
         email=user.email, business_url='https://tuwebmx.com', user=user,
         status=AnalysisJob.STATUS_DONE, stage=AnalysisJob.STAGE_COMPLETE, progress=100,
         generation_mode=AnalysisJob.MODE_SAMPLE_IMAGE,
-        product_reference_image_path='uploads/product_ref_test.jpg',
+        product_reference_image_paths=['uploads/product_ref_test.jpg'],
     )
     dna = BrandDNA.objects.create(
         job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
@@ -564,8 +564,8 @@ def test_regenerate_action_with_unused_product_photo_stays_synchronous(client, u
     # le quitaba el diseño a los singles generados por el camino normal.
     job = job_with_calendar
     assert job.generation_mode == AnalysisJob.MODE_FULL
-    job.product_reference_image_path = 'uploads/product_ref_test.jpg'
-    job.save(update_fields=['product_reference_image_path'])
+    job.product_reference_image_paths = ['uploads/product_ref_test.jpg']
+    job.save(update_fields=['product_reference_image_paths'])
     post = job.brand_dna.calendar.posts.filter(format='single').first()
     client.force_login(user)
     with patch('core.brand_dna.views._regenerate_caption', return_value='Nuevo caption'), \
@@ -589,8 +589,8 @@ def test_regenerate_action_carousel_with_unused_product_photo_stays_synchronous(
     # debe irse por async, porque regenerate_with_reference devuelve 1 sola URL y
     # image_urls=[] dejaria la tarjeta con el badge de carrusel sin sus slides.
     job = job_with_calendar
-    job.product_reference_image_path = 'uploads/product_ref_test.jpg'
-    job.save(update_fields=['product_reference_image_path'])
+    job.product_reference_image_paths = ['uploads/product_ref_test.jpg']
+    job.save(update_fields=['product_reference_image_paths'])
     post = job.brand_dna.calendar.posts.filter(day_number=1).first()
     post.format = ContentPost.FORMAT_CAROUSEL
     post.image_urls = ['https://storage.test/s1.png', 'https://storage.test/s2.png']
@@ -625,7 +625,7 @@ def test_regenerate_action_sample_image_without_photo_stays_synchronous(client, 
     job = job_with_calendar
     job.generation_mode = AnalysisJob.MODE_SAMPLE_IMAGE
     job.save(update_fields=['generation_mode'])
-    assert not job.product_reference_image_path
+    assert not job.product_reference_image_paths
     post = job.brand_dna.calendar.posts.filter(format='single').first()
     client.force_login(user)
     with patch('core.brand_dna.views._regenerate_caption', return_value='Nuevo caption'), \

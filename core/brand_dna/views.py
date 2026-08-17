@@ -204,7 +204,7 @@ def analyze_submit(request):
         user=request.user,
         generation_mode=requested_mode,
         logo_file_path=logo_path,
-        product_reference_image_path=product_reference_path,
+        product_reference_image_paths=[product_reference_path] if product_reference_path else [],
     )
 
     from core.brand_dna.tasks import analyze_brand_task
@@ -593,7 +593,7 @@ def post_action_api(request, post_id):
         #     esa condicion sola, un carrusel de MODE_FULL caia aqui y image_urls=[]
         #     dejaba el badge de carrusel sin sus slides.
         if (job.generation_mode == AnalysisJob.MODE_SAMPLE_IMAGE
-                and job.product_reference_image_path and post.image_url):
+                and job.product_reference_image_paths and post.image_url):
             # Foto real -- async, RQ + polling (regeneracion sincrona con foto
             # puede tardar varios minutos por el rate limit de 1 rpm de Vertex).
             post.regenerating = True

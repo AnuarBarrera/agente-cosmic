@@ -247,7 +247,7 @@ def job_with_dna_sample_image_and_photo():
         email='t@t.com', business_url='https://tuwebmx.com',
         status=AnalysisJob.STATUS_PROCESSING, stage=AnalysisJob.STAGE_CONTENT, progress=78,
         generation_mode=AnalysisJob.MODE_SAMPLE_IMAGE,
-        product_reference_image_path='uploads/product_ref_test.jpg',
+        product_reference_image_paths=['uploads/product_ref_test.jpg'],
     )
     BrandDNA.objects.create(
         job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
@@ -326,7 +326,7 @@ def job_with_dna_sample_reel_and_photo():
         email='t@t.com', business_url='https://tuwebmx.com',
         status=AnalysisJob.STATUS_PROCESSING, stage=AnalysisJob.STAGE_CONTENT, progress=78,
         generation_mode=AnalysisJob.MODE_SAMPLE_REEL,
-        product_reference_image_path='uploads/product_ref_test.jpg',
+        product_reference_image_paths=['uploads/product_ref_test.jpg'],
     )
     BrandDNA.objects.create(
         job=job, business_name='Tu Web MX', business_url='https://tuwebmx.com',
@@ -742,8 +742,8 @@ def test_regenerate_post_image_task_updates_image_and_clears_flag(calendar_with_
     post.regenerating = True
     post.save(update_fields=['regenerating'])
     job = calendar_with_dna.brand_dna.job
-    job.product_reference_image_path = 'uploads/product_ref_test.jpg'
-    job.save(update_fields=['product_reference_image_path'])
+    job.product_reference_image_paths = ['uploads/product_ref_test.jpg']
+    job.save(update_fields=['product_reference_image_paths'])
 
     with patch('core.content_pipeline.tasks.read_upload_from_public_url', return_value=b'current-bg-bytes'), \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
@@ -778,8 +778,8 @@ def test_regenerate_post_image_task_falls_back_to_image_url_when_background_is_e
     post.regenerating = True
     post.save(update_fields=['regenerating'])
     job = calendar_with_dna.brand_dna.job
-    job.product_reference_image_path = 'uploads/product_ref_test.jpg'
-    job.save(update_fields=['product_reference_image_path'])
+    job.product_reference_image_paths = ['uploads/product_ref_test.jpg']
+    job.save(update_fields=['product_reference_image_paths'])
 
     with patch('core.content_pipeline.tasks.read_upload_from_public_url', return_value=b'legacy-image-bytes') as mock_read, \
          patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:

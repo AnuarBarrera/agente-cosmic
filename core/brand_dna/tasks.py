@@ -48,9 +48,10 @@ def analyze_brand_task(job_id: str) -> None:
         job.update_progress(AnalysisJob.STAGE_LOGO, 55)
 
         product_photo_data = {'description': '', 'category': ''}
-        if job.product_reference_image_path:
-            if upload_exists(job.product_reference_image_path):
-                product_photo_bytes = normalize_image(read_upload(job.product_reference_image_path))
+        if job.product_reference_image_paths:
+            first_photo_path = job.product_reference_image_paths[0]
+            if upload_exists(first_photo_path):
+                product_photo_bytes = normalize_image(read_upload(first_photo_path))
                 product_photo_data = ProductPhotoAnalyzer().analyze(product_photo_bytes, 'image/webp')
 
         job.update_progress(AnalysisJob.STAGE_POSTS, 75)

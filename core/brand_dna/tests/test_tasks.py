@@ -27,7 +27,7 @@ def job_with_product_photo():
         email='test@example.com',
         business_url='https://tuwebmx.com',
         business_description='Joyeria Luna\nJoyeria artesanal.',
-        product_reference_image_path='uploads/product_ref_test.jpg',
+        product_reference_image_paths=['uploads/product_ref_test.jpg'],
     )
 
 

@@ -127,9 +127,9 @@ def generate_sample_task(job_id: str) -> None:
         # foto: si el blob ya no esta en GCS, read_upload lanzaria y el job
         # ENTERO se marcaria failed en vez de degradar al camino normal (imagen
         # diseñada sin foto), que es el comportamiento por defecto del spec.
-        if (wanted_format == ContentPost.FORMAT_SINGLE and job.product_reference_image_path
-                and upload_exists(job.product_reference_image_path)):
-            photo_bytes = read_upload(job.product_reference_image_path)
+        if (wanted_format == ContentPost.FORMAT_SINGLE and job.product_reference_image_paths
+                and upload_exists(job.product_reference_image_paths[0])):
+            photo_bytes = read_upload(job.product_reference_image_paths[0])
             background_url, image_url = image_gen.generate_from_product_photo(
                 # mime real por magic bytes, no 'image/jpeg' hardcodeado: el
                 # frontend recomprime a JPEG casi siempre, pero el fallback de
@@ -142,9 +142,9 @@ def generate_sample_task(job_id: str) -> None:
                 business_url=brand_dna.business_url,
             )
             image_urls, video_url = [], ''
-        elif (wanted_format == ContentPost.FORMAT_REEL and job.product_reference_image_path
-                and upload_exists(job.product_reference_image_path)):
-            photo_bytes = read_upload(job.product_reference_image_path)
+        elif (wanted_format == ContentPost.FORMAT_REEL and job.product_reference_image_paths
+                and upload_exists(job.product_reference_image_paths[0])):
+            photo_bytes = read_upload(job.product_reference_image_paths[0])
             script = reel_script_gen.generate(post_data, brand_dna)
             video_url, image_url = reel_gen.generate_from_product_photo(
                 image_gen, photo_bytes, _detect_mime(photo_bytes), script,

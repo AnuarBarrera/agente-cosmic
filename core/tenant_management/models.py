@@ -39,6 +39,11 @@ class Plan(models.Model):
     # producto por usuario cada 24h (ver ProductPhotoPrecheckAttempt) —
     # mitiga abuso de costo de un usuario autenticado probando muchas fotos.
     max_photo_prechecks_per_day = models.PositiveIntegerField(default=10)
+    # Limite de fotos reales de producto que el usuario puede subir para que
+    # el calendario completo las reutilice (ver _next_reference_photos en
+    # content_pipeline/tasks.py) -- plan gratis/Tester/Admin quedan en el
+    # default (7), plan pagado se ajusta a 14 via Django Admin.
+    max_product_reference_photos = models.PositiveIntegerField(default=7)
     # Permite generar 1 sola pieza de muestra (imagen o reel) desde el
     # formulario de analisis, en vez del calendario completo de 7 dias —
     # pensado para prospeccion. Activado hoy solo en el Plan Admin.
