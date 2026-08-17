@@ -1,6 +1,6 @@
 from datetime import timedelta
 from django.utils import timezone
-from core.brand_dna.models import AnalysisJob
+from core.brand_dna.models import AnalysisJob, ProductPhotoPrecheckAttempt
 
 
 def get_user_plan(user):
@@ -47,4 +47,15 @@ def can_edit(post, user) -> tuple[bool, int]:
     calendar = post.calendar
     total_used = calendar.posts.aggregate(total=Sum('edit_count'))['total'] or 0
     remaining = max(0, plan.max_post_edits - total_used)
+    return remaining > 0, remaining
+
+
+def can_precheck_photo(user) -> tuple[bool, int]:
+    """Límite diario de llamadas reales al precheck de copyright/marca de
+    foto de producto (ver ProductPhotoPrecheckAttempt). Ventana móvil de 24h,
+    no día calendario."""
+    plan = get_user_plan(user)
+    since = timezone.now() - timedelta(hours=24)
+    used = ProductPhotoPrecheckAttempt.objects.filter(user=user, created_at__gte=since).count()
+    remaining = max(0, plan.max_photo_prechecks_per_day - used)
     return remaining > 0, remaining

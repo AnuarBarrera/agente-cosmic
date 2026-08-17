@@ -199,3 +199,65 @@ class TestGetUserPlanByGroup:
         user = User.objects.create_user(email='p@test.com', password=_TEST_PWD, username='p@test.com', tenant=tenant)
         user.groups.add(all_groups['admin'])
         assert get_user_plan(user).name == 'User'
+
+
+class TestCanPrecheckPhoto(TestCase):
+    def test_allowed_when_under_limit(self):
+        from core.brand_dna.rate_limits import can_precheck_photo
+        from core.tenant_management.models import Plan
+        Plan.objects.get_or_create(
+            name='User',
+            defaults={'max_calendars_per_week': 2, 'max_post_regenerations': 2,
+                      'max_post_edits': 2, 'max_photo_prechecks_per_day': 10, 'price': '0.00'},
+        )
+        user = MagicMock()
+        user.tenant = None
+        with patch('core.brand_dna.rate_limits.ProductPhotoPrecheckAttempt') as MockAttempt:
+            MockAttempt.objects.filter.return_value.count.return_value = 3
+            allowed, remaining = can_precheck_photo(user)
+        assert allowed is True
+        assert remaining == 7
+
+    def test_blocked_when_at_limit(self):
+        from core.brand_dna.rate_limits import can_precheck_photo
+        from core.tenant_management.models import Plan
+        Plan.objects.get_or_create(
+            name='User',
+            defaults={'max_calendars_per_week': 2, 'max_post_regenerations': 2,
+                      'max_post_edits': 2, 'max_photo_prechecks_per_day': 10, 'price': '0.00'},
+        )
+        user = MagicMock()
+        user.tenant = None
+        with patch('core.brand_dna.rate_limits.ProductPhotoPrecheckAttempt') as MockAttempt:
+            MockAttempt.objects.filter.return_value.count.return_value = 10
+            allowed, remaining = can_precheck_photo(user)
+        assert allowed is False
+        assert remaining == 0
+
+    def test_only_counts_attempts_within_last_24h(self):
+        """Un intento de hace 25h no debe contar contra el límite del día."""
+        from core.brand_dna.rate_limits import can_precheck_photo
+        from core.brand_dna.models import ProductPhotoPrecheckAttempt
+        from core.tenant_management.models import Plan, TenantModel, Subscription
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        plan, _ = Plan.objects.get_or_create(
+            name='User',
+            defaults={'max_calendars_per_week': 2, 'max_post_regenerations': 2,
+                      'max_post_edits': 2, 'max_photo_prechecks_per_day': 10, 'price': '0.00'},
+        )
+        user = User.objects.create_user(
+            username='precheck-window@test.com', email='precheck-window@test.com', password='pass1234',
+        )
+        tenant = TenantModel.objects.create(name=user.email, status='active')
+        Subscription.objects.create(tenant=tenant, plan=plan)
+        user.tenant = tenant
+        user.save(update_fields=['tenant'])
+
+        old_attempt = ProductPhotoPrecheckAttempt.objects.create(user=user)
+        old_attempt.created_at = timezone.now() - timedelta(hours=25)
+        old_attempt.save(update_fields=['created_at'])
+
+        allowed, remaining = can_precheck_photo(user)
+        assert allowed is True
+        assert remaining == 10
