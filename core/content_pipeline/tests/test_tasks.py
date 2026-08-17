@@ -691,6 +691,90 @@ def test_generate_missing_image_routes_trial_content_to_vertex(calendar_with_dna
     assert MockReel.call_args.kwargs['use_gemini_api'] is False
 
 
+def test_generate_missing_image_single_uses_photo_pool_when_available(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 1, image_url='', format='single')
+    job = calendar_with_dna.brand_dna.job
+    job.product_reference_image_paths = ['uploads/a.jpg']
+    job.save(update_fields=['product_reference_image_paths'])
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.upload_exists', return_value=True), \
+         patch('core.content_pipeline.tasks.read_upload', return_value=b'photo-bytes'):
+        MockImage.return_value.generate_from_product_photo.return_value = (
+            'https://storage.test/bg.png', 'https://storage.test/final.png',
+        )
+        from core.content_pipeline.tasks import _generate_missing_image
+        _generate_missing_image(post)
+
+    MockImage.return_value.generate_from_product_photo.assert_called_once()
+    MockImage.return_value.generate.assert_not_called()
+    post.refresh_from_db()
+    assert post.image_url == 'https://storage.test/final.png'
+
+
+def test_generate_missing_image_single_falls_back_to_scratch_when_pool_empty(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 1, image_url='', format='single')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
+        MockImage.return_value.generate.return_value = 'https://storage.test/img.png'
+        from core.content_pipeline.tasks import _generate_missing_image
+        _generate_missing_image(post)
+
+    MockImage.return_value.generate_from_product_photo.assert_not_called()
+    MockImage.return_value.generate.assert_called_once()
+    post.refresh_from_db()
+    assert post.image_url == 'https://storage.test/img.png'
+
+
+def test_generate_missing_image_carousel_uses_photo_pool_when_available(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 3, image_url='', format='carousel')
+    job = calendar_with_dna.brand_dna.job
+    job.product_reference_image_paths = ['uploads/a.jpg', 'uploads/b.jpg', 'uploads/c.jpg']
+    job.save(update_fields=['product_reference_image_paths'])
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.upload_exists', return_value=True), \
+         patch('core.content_pipeline.tasks.read_upload', return_value=b'photo-bytes'):
+        MockImage.return_value.generate_carousel_from_product_photos.return_value = [
+            'https://storage.test/s1.png', 'https://storage.test/s2.png',
+        ]
+        from core.content_pipeline.tasks import _generate_missing_image
+        _generate_missing_image(post)
+
+    MockImage.return_value.generate_carousel_from_product_photos.assert_called_once()
+    MockImage.return_value.generate_carousel.assert_not_called()
+    post.refresh_from_db()
+    assert post.image_urls == ['https://storage.test/s1.png', 'https://storage.test/s2.png']
+
+
+def test_generate_missing_image_reel_passes_pool_to_reel_generator(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 1, image_url='', format='reel')
+    job = calendar_with_dna.brand_dna.job
+    job.product_reference_image_paths = ['uploads/a.jpg', 'uploads/b.jpg', 'uploads/c.jpg']
+    job.save(update_fields=['product_reference_image_paths'])
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel, \
+         patch('core.content_pipeline.tasks.upload_exists', return_value=True), \
+         patch('core.content_pipeline.tasks.read_upload', return_value=b'photo-bytes'):
+        MockScript.return_value.generate.return_value = {'hook_text': 'H', 'scene_prompts': ['a', 'b', 'c']}
+        MockReel.return_value.generate.return_value = ('https://storage.test/reel.mp4', 'https://storage.test/poster.png')
+        from core.content_pipeline.tasks import _generate_missing_image
+        _generate_missing_image(post)
+
+    call_kwargs = MockReel.return_value.generate.call_args.kwargs
+    assert call_kwargs['photos'] == [b'photo-bytes', b'photo-bytes', b'photo-bytes']
+    assert call_kwargs['image_gen'] is MockImage.return_value
+
+
+def test_next_reference_photos_not_called_when_pool_empty(calendar_with_dna):
+    """Guard de rendimiento: sin pool, no debe ni intentar leer GCS."""
+    post = _make_post(calendar_with_dna, 1, image_url='', format='single')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.upload_exists') as mock_exists:
+        MockImage.return_value.generate.return_value = 'https://storage.test/img.png'
+        from core.content_pipeline.tasks import _generate_missing_image
+        _generate_missing_image(post)
+    mock_exists.assert_not_called()
+
+
 def test_backfill_image_task_generates_missing_image(calendar_with_dna):
     post = _make_post(calendar_with_dna, 3, image_url='')
     with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:

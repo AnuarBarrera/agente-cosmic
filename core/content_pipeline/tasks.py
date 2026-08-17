@@ -27,22 +27,44 @@ logger = logging.getLogger(__name__)
 
 def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptGenerator, reel_gen: ReelGenerator,
                           fmt: str, filename: str, brand_dna=None, post_data: dict = None,
-                          max_qc_retries: int = 2, skip_veo: bool = False, **kwargs) -> tuple[str, list[str], str]:
+                          max_qc_retries: int = 2, skip_veo: bool = False,
+                          photos: list[bytes] = None, mime_types: list[str] = None, **kwargs) -> tuple[str, list[str], str]:
     """Genera el/los medio(s) de un post segun su formato. Retorna
     (image_url, image_urls, video_url) — image_url es siempre la portada
-    (slide 1 del carrusel, poster frame del reel) para retrocompatibilidad."""
+    (slide 1 del carrusel, poster frame del reel) para retrocompatibilidad.
+    `photos`/`mime_types` son el pool de fotos reales de producto asignado a
+    este dia por _next_reference_photos (rotacion circular) -- None/vacio
+    deja el comportamiento identico a hoy (generado desde cero por IA)."""
     if fmt == ContentPost.FORMAT_REEL:
         script = reel_script_gen.generate(post_data, brand_dna)
         video_url, poster_url = reel_gen.generate(
             script=script, colors=kwargs.get('colors', []), filename_prefix=filename, skip_veo=skip_veo,
+            image_gen=image_gen, photos=photos, mime_types=mime_types,
         )
         if not video_url:
             url = image_gen.generate(filename=filename, max_qc_retries=max_qc_retries, **kwargs)
             return url, [], ''
         return poster_url, [], video_url
     if fmt == ContentPost.FORMAT_CAROUSEL:
-        urls = image_gen.generate_carousel(filename_prefix=filename, max_qc_retries=max_qc_retries, **kwargs)
+        if photos:
+            urls = image_gen.generate_carousel_from_product_photos(
+                photos, mime_types, caption=kwargs.get('caption', ''), colors=kwargs.get('colors', []),
+                tone=kwargs.get('tone', ''), filename_prefix=filename,
+                business_url=kwargs.get('business_url', ''), max_qc_retries=max_qc_retries,
+            )
+        else:
+            urls = image_gen.generate_carousel(filename_prefix=filename, max_qc_retries=max_qc_retries, **kwargs)
         return (urls[0] if urls else ''), urls, ''
+    if photos:
+        background_url, url = image_gen.generate_from_product_photo(
+            photo_bytes=photos[0], mime_type=mime_types[0], caption=kwargs.get('caption', ''),
+            colors=kwargs.get('colors', []), tone=kwargs.get('tone', ''), filename=filename,
+            vision_context=(brand_dna.product_photo_analysis if brand_dna else ''),
+            description=kwargs.get('description', ''), keywords=kwargs.get('keywords', []),
+            business_url=kwargs.get('business_url', ''), max_qc_retries=max_qc_retries,
+        )
+        if url:
+            return url, [], ''
     url = image_gen.generate(filename=filename, max_qc_retries=max_qc_retries, **kwargs)
     return url, [], ''
 
@@ -252,10 +274,17 @@ def _next_reference_photos(job: AnalysisJob, day_number: int, count: int) -> lis
 def _generate_missing_image(post: ContentPost) -> None:
     """Genera y guarda la imagen de un post que quedo sin image_url. No lanza — loggea y sigue."""
     brand_dna = post.calendar.brand_dna
-    job_id = str(brand_dna.job.id)
+    job = brand_dna.job
+    job_id = str(job.id)
     try:
         use_gemini_api = _is_paid_content(post)
         image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET, use_gemini_api=use_gemini_api)
+        # Pool de fotos reales de producto para este dia -- single usa 1,
+        # carrusel/reel usan hasta 3 (ver _next_reference_photos). Pool vacio
+        # en el job devuelve lista vacia de inmediato, sin tocar GCS.
+        photo_count = 1 if post.format == ContentPost.FORMAT_SINGLE else 3
+        photos = _next_reference_photos(job, post.day_number, photo_count)
+        mime_types = [_detect_mime(p) for p in photos]
         post.image_url, post.image_urls, post.video_url = _generate_post_media(
             image_gen, ReelScriptGenerator(), ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET, use_gemini_api=use_gemini_api),
             fmt=post.format,
@@ -275,6 +304,8 @@ def _generate_missing_image(post: ContentPost) -> None:
             # probado manualmente y aceptado). Solo el plan pagado real usa
             # Veo, misma condicion que use_gemini_api.
             skip_veo=not use_gemini_api,
+            photos=photos,
+            mime_types=mime_types,
         )
         post.save(update_fields=['image_url', 'image_urls', 'video_url'])
     except Exception as img_err:
