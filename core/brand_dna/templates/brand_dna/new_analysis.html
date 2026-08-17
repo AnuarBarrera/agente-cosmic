@@ -122,8 +122,10 @@
         </div>
       </div>
       <div class="form-group" id="productPhotoGroup">
-        <label>Foto real del producto <span class="optional-badge">opcional</span></label>
-        <input type="file" name="product_reference_photo" accept="image/*" id="productPhotoInput">
+        <label>Fotos reales de tus productos <span class="optional-badge">opcional</span></label>
+        <input type="file" name="product_reference_photo" accept="image/*" id="productPhotoInput" multiple>
+        <small id="photoCounter" style="display:block;margin-top:6px;font-size:0.85rem;color:#888;">0/{{ max_product_reference_photos }} fotos</small>
+        <div id="photoThumbnails" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
         <small id="photoPrecheckStatus" style="display:none;margin-top:6px;font-size:0.85rem;"></small>
       </div>
       {% endif %}
@@ -171,9 +173,42 @@
       return Promise.all(Array.from(files).map(compressImage));
     }
 
-    var photoPrecheckOk = true;
+    var MAX_PRODUCT_PHOTOS = {{ max_product_reference_photos|default:7 }};
+    var selectedPhotos = []; // {id, file, status: 'checking'|'ok'|'rejected'|'skipped'}
+    var photoSeq = 0;
     var formSubmitting = false;
-    var precheckSeq = 0;
+
+    function renderPhotoCounter() {
+      var accepted = selectedPhotos.filter(function(p) { return p.status !== 'rejected'; });
+      var counterEl = document.getElementById('photoCounter');
+      if (counterEl) counterEl.textContent = accepted.length + '/' + MAX_PRODUCT_PHOTOS + ' fotos';
+    }
+
+    function renderPhotoThumbnails() {
+      var container = document.getElementById('photoThumbnails');
+      if (!container) return;
+      container.innerHTML = '';
+      selectedPhotos.filter(function(p) { return p.status !== 'rejected'; }).forEach(function(photo) {
+        var wrap = document.createElement('div');
+        wrap.style.cssText = 'position:relative;width:64px;height:64px;';
+        var img = document.createElement('img');
+        img.src = URL.createObjectURL(photo.file);
+        img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:6px;opacity:' + (photo.status === 'checking' ? '0.5' : '1') + ';';
+        wrap.appendChild(img);
+        var removeBtn = document.createElement('a');
+        removeBtn.href = '#';
+        removeBtn.textContent = '×';
+        removeBtn.style.cssText = 'position:absolute;top:-6px;right:-6px;background:#e94560;color:#fff;border-radius:50%;width:18px;height:18px;text-align:center;line-height:18px;font-size:12px;text-decoration:none;';
+        removeBtn.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          selectedPhotos = selectedPhotos.filter(function(p) { return p.id !== photo.id; });
+          renderPhotoThumbnails();
+          renderPhotoCounter();
+        });
+        wrap.appendChild(removeBtn);
+        container.appendChild(wrap);
+      });
+    }
 
     function setPrecheckStatus(cls, text) {
       var el = document.getElementById('photoPrecheckStatus');
@@ -183,75 +218,61 @@
       el.style.display = text ? 'block' : 'none';
     }
 
-    function updateSubmitButtonForPrecheck() {
-      if (formSubmitting) return;
-      var btn = document.getElementById('submitBtn');
-      btn.disabled = !photoPrecheckOk;
-    }
-
     var productPhotoInputEl = document.getElementById('productPhotoInput');
     if (productPhotoInputEl) {
       productPhotoInputEl.addEventListener('change', function() {
-        precheckSeq += 1;
-        var mySeq = precheckSeq;
-        photoPrecheckOk = true;
-        updateSubmitButtonForPrecheck();
-        if (!this.files.length) {
-          setPrecheckStatus('', '');
-          return;
+        var accepted = selectedPhotos.filter(function(p) { return p.status !== 'rejected'; });
+        var incoming = Array.from(this.files);
+        var room = MAX_PRODUCT_PHOTOS - accepted.length;
+        if (incoming.length > room) {
+          setPrecheckStatus('warning', '⚠ Llegaste al límite de ' + MAX_PRODUCT_PHOTOS + ' fotos para tu plan — se agregaron solo las primeras ' + Math.max(room, 0) + '.');
         }
-        setPrecheckStatus('checking', 'Analizando tu foto...');
-        compressImage(this.files[0]).then(function(compressed) {
-          var fd = new FormData();
-          fd.append('csrfmiddlewaretoken', document.querySelector('#analyzeForm [name="csrfmiddlewaretoken"]').value);
-          fd.append('product_reference_photo', compressed);
-          var xhr = new XMLHttpRequest();
-          xhr.open('POST', '{% url "product_photo_precheck_api" %}');
-          xhr.onload = function() {
-            if (mySeq !== precheckSeq) return;
-            if (xhr.status !== 200) {
-              setPrecheckStatus('', '');
-              photoPrecheckOk = true;
-              updateSubmitButtonForPrecheck();
-              return;
-            }
-            var data;
-            try { data = JSON.parse(xhr.responseText); } catch (e) { data = {ok: true, skipped: true}; }
-            if (data.ok === false) {
-              photoPrecheckOk = false;
-              setPrecheckStatus('warning', '⚠ ' + (data.reason || 'Esta foto no se puede usar.'));
-              var statusEl = document.getElementById('photoPrecheckStatus');
-              if (statusEl) {
-                var removeLink = document.createElement('a');
-                removeLink.href = '#';
-                removeLink.textContent = ' Quitar foto';
-                removeLink.style.marginLeft = '6px';
-                removeLink.addEventListener('click', function(ev) {
-                  ev.preventDefault();
-                  var input = document.getElementById('productPhotoInput');
-                  if (input) {
-                    input.value = '';
-                    input.dispatchEvent(new Event('change'));
-                  }
-                });
-                statusEl.appendChild(removeLink);
+        var toAdd = incoming.slice(0, Math.max(room, 0));
+        this.value = ''; // libera el input para poder abrir el dialogo de nuevo y sumar mas fotos
+
+        toAdd.forEach(function(file) {
+          photoSeq += 1;
+          var photoId = photoSeq;
+          selectedPhotos.push({id: photoId, file: file, status: 'checking'});
+          renderPhotoThumbnails();
+          renderPhotoCounter();
+
+          compressImage(file).then(function(compressed) {
+            var fd = new FormData();
+            fd.append('csrfmiddlewaretoken', document.querySelector('#analyzeForm [name="csrfmiddlewaretoken"]').value);
+            fd.append('product_reference_photo', compressed);
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', '{% url "product_photo_precheck_api" %}');
+            xhr.onload = function() {
+              var entry = selectedPhotos.find(function(p) { return p.id === photoId; });
+              if (!entry) return; // el usuario ya la quito manualmente mientras el precheck corria
+              if (xhr.status !== 200) {
+                entry.status = 'skipped';
+                renderPhotoThumbnails();
+                return;
               }
-            } else if (data.skipped) {
-              photoPrecheckOk = true;
-              setPrecheckStatus('', '');
-            } else {
-              photoPrecheckOk = true;
-              setPrecheckStatus('ok', '✓ Foto lista para usar');
-            }
-            updateSubmitButtonForPrecheck();
-          };
-          xhr.onerror = function() {
-            if (mySeq !== precheckSeq) return;
-            photoPrecheckOk = true;
-            setPrecheckStatus('', '');
-            updateSubmitButtonForPrecheck();
-          };
-          xhr.send(fd);
+              var data;
+              try { data = JSON.parse(xhr.responseText); } catch (e) { data = {ok: true, skipped: true}; }
+              if (data.ok === false) {
+                entry.status = 'rejected';
+                var rejectedCount = selectedPhotos.filter(function(p) { return p.status === 'rejected'; }).length;
+                setPrecheckStatus(
+                  'warning',
+                  '⚠ Quitamos ' + rejectedCount + ' foto(s) porque no cumplen con las políticas de contenido — sube otra si quieres reemplazarlas.',
+                );
+                renderPhotoThumbnails();
+                renderPhotoCounter();
+              } else {
+                entry.status = 'ok';
+                renderPhotoThumbnails();
+              }
+            };
+            xhr.onerror = function() {
+              var entry = selectedPhotos.find(function(p) { return p.id === photoId; });
+              if (entry) { entry.status = 'skipped'; renderPhotoThumbnails(); }
+            };
+            xhr.send(fd);
+          });
         });
       });
     }
@@ -269,11 +290,11 @@
       text.textContent = 'Comprimiendo imagenes...';
 
       var logoInput = form.querySelector('[name="logo"]');
-      var productPhotoInput = form.querySelector('[name="product_reference_photo"]');
+      var productPhotoFiles = selectedPhotos.filter(function(p) { return p.status !== 'rejected'; }).map(function(p) { return p.file; });
 
       Promise.all([
         logoInput.files.length ? compressAll(logoInput.files) : Promise.resolve([]),
-        productPhotoInput && productPhotoInput.files.length ? compressAll(productPhotoInput.files) : Promise.resolve([]),
+        productPhotoFiles.length ? compressAll(productPhotoFiles) : Promise.resolve([]),
       ]).then(function(results) {
         var fd = new FormData();
         fd.append('csrfmiddlewaretoken', form.querySelector('[name="csrfmiddlewaretoken"]').value);
