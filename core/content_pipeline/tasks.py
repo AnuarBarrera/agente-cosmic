@@ -227,6 +227,28 @@ def _is_paid_content(post: ContentPost) -> bool:
         return False
 
 
+def _next_reference_photos(job: AnalysisJob, day_number: int, count: int) -> list[bytes]:
+    """Rotacion circular DETERMINISTA sobre el pool de fotos reales de
+    producto del job (AnalysisJob.product_reference_image_paths), usando
+    day_number como offset -- cada dia del calendario avanza la rotacion
+    sin necesitar estado compartido entre los jobs de RQ independientes que
+    generan cada post (_enqueue_post_images_then encola un job por post).
+    Pool vacio devuelve lista vacia -- comportamiento sin cambios (generacion
+    desde cero por IA). Pool mas chico que `count` repite fotos, nunca
+    bloquea un dia por falta de fotos."""
+    paths = job.product_reference_image_paths
+    if not paths:
+        return []
+    start = (day_number - 1) % len(paths)
+    photos = []
+    for offset in range(count):
+        path = paths[(start + offset) % len(paths)]
+        if not upload_exists(path):
+            continue
+        photos.append(read_upload(path))
+    return photos
+
+
 def _generate_missing_image(post: ContentPost) -> None:
     """Genera y guarda la imagen de un post que quedo sin image_url. No lanza — loggea y sigue."""
     brand_dna = post.calendar.brand_dna

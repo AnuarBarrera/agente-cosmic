@@ -1608,3 +1608,49 @@ def test_send_reactivation_emails_task_skips_calendar_for_tester_and_admin_plans
         send_reactivation_emails_task()
     MockEmail.return_value.send_reactivation_calendar.assert_not_called()
 
+
+class TestNextReferencePhotos:
+    def test_empty_pool_returns_empty_list(self, calendar_with_dna):
+        from core.content_pipeline.tasks import _next_reference_photos
+        job = calendar_with_dna.brand_dna.job
+        job.product_reference_image_paths = []
+        job.save(update_fields=['product_reference_image_paths'])
+        assert _next_reference_photos(job, day_number=1, count=3) == []
+
+    def test_pool_smaller_than_count_wraps_around(self, calendar_with_dna):
+        from core.content_pipeline.tasks import _next_reference_photos
+        job = calendar_with_dna.brand_dna.job
+        job.product_reference_image_paths = ['uploads/a.jpg']
+        job.save(update_fields=['product_reference_image_paths'])
+        with patch('core.content_pipeline.tasks.upload_exists', return_value=True), \
+             patch('core.content_pipeline.tasks.read_upload', return_value=b'photo-a'):
+            photos = _next_reference_photos(job, day_number=1, count=3)
+        assert photos == [b'photo-a', b'photo-a', b'photo-a']
+
+    def test_rotation_offset_derived_from_day_number(self, calendar_with_dna):
+        """dia 1 empieza en indice 0, dia 2 en indice 1, etc -- sin estado
+        compartido entre jobs de RQ (cada post se genera en un job aparte)."""
+        from core.content_pipeline.tasks import _next_reference_photos
+        job = calendar_with_dna.brand_dna.job
+        job.product_reference_image_paths = ['uploads/a.jpg', 'uploads/b.jpg', 'uploads/c.jpg']
+        job.save(update_fields=['product_reference_image_paths'])
+        fake_bytes = {'uploads/a.jpg': b'A', 'uploads/b.jpg': b'B', 'uploads/c.jpg': b'C'}
+        with patch('core.content_pipeline.tasks.upload_exists', return_value=True), \
+             patch('core.content_pipeline.tasks.read_upload', side_effect=lambda p: fake_bytes[p]):
+            day1 = _next_reference_photos(job, day_number=1, count=1)
+            day2 = _next_reference_photos(job, day_number=2, count=1)
+            day4 = _next_reference_photos(job, day_number=4, count=1)  # da la vuelta: (4-1)%3=0
+        assert day1 == [b'A']
+        assert day2 == [b'B']
+        assert day4 == [b'A']
+
+    def test_skips_photo_when_blob_missing_from_storage(self, calendar_with_dna):
+        from core.content_pipeline.tasks import _next_reference_photos
+        job = calendar_with_dna.brand_dna.job
+        job.product_reference_image_paths = ['uploads/a.jpg', 'uploads/b.jpg']
+        job.save(update_fields=['product_reference_image_paths'])
+        with patch('core.content_pipeline.tasks.upload_exists', side_effect=[False, True]), \
+             patch('core.content_pipeline.tasks.read_upload', return_value=b'photo-b'):
+            photos = _next_reference_photos(job, day_number=1, count=2)
+        assert photos == [b'photo-b']
+
