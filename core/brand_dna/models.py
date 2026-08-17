@@ -106,3 +106,16 @@ class BrandDNA(models.Model):
 
     def __str__(self):
         return f"BrandDNA — {self.business_name}"
+
+
+class ProductPhotoPrecheckAttempt(models.Model):
+    """Registra cada llamada real al precheck de copyright/marca de foto de
+    producto (core/brand_dna/extractors/product_photo_copyright_precheck.py) —
+    solo cuando la llamada a Gemini se completó (éxito o rechazo), nunca en
+    fail-open. Usado por can_precheck_photo (rate_limits.py) para limitar
+    abuso de costo: un usuario autenticado probando muchas fotos seguidas."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'brand_dna_product_photo_precheck_attempt'

@@ -47,6 +47,18 @@ def test_analysis_job_progress_update(analysis_job):
     assert refreshed.stage == 'logo'
 
 
+def test_product_photo_precheck_attempt_creation():
+    from django.contrib.auth import get_user_model
+    from core.brand_dna.models import ProductPhotoPrecheckAttempt
+    User = get_user_model()
+    user = User.objects.create_user(
+        username='precheck@test.com', email='precheck@test.com', password='pass1234',
+    )
+    attempt = ProductPhotoPrecheckAttempt.objects.create(user=user)
+    assert attempt.user == user
+    assert attempt.created_at is not None
+
+
 @pytest.fixture
 def analysis_job():
     return AnalysisJob.objects.create(

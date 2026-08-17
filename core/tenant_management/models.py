@@ -35,6 +35,10 @@ class Plan(models.Model):
     max_calendars_per_week = models.PositiveIntegerField(default=2)
     max_post_regenerations = models.PositiveIntegerField(default=2)
     max_post_edits = models.PositiveIntegerField(default=2)
+    # Límite de llamadas reales al precheck de copyright/marca de foto de
+    # producto por usuario cada 24h (ver ProductPhotoPrecheckAttempt) —
+    # mitiga abuso de costo de un usuario autenticado probando muchas fotos.
+    max_photo_prechecks_per_day = models.PositiveIntegerField(default=10)
     # Permite generar 1 sola pieza de muestra (imagen o reel) desde el
     # formulario de analisis, en vez del calendario completo de 7 dias —
     # pensado para prospeccion. Activado hoy solo en el Plan Admin.
