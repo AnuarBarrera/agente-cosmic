@@ -1233,3 +1233,11 @@ def test_precheck_api_quota_exceeded_skips_without_calling_gemini(user, free_pla
     assert not ProductPhotoPrecheckAttempt.objects.filter(user=user).exists()
 
 
+def test_precheck_api_missing_file_fails_open(user):
+    c = Client()
+    c.force_login(user)
+    response = c.post('/api/brand-dna/product-photo-precheck/', {})
+    data = json.loads(response.content)
+    assert data == {'ok': True, 'skipped': True}
+
+

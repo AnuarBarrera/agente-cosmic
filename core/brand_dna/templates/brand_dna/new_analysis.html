@@ -172,6 +172,8 @@
     }
 
     var photoPrecheckOk = true;
+    var formSubmitting = false;
+    var precheckSeq = 0;
 
     function setPrecheckStatus(cls, text) {
       var el = document.getElementById('photoPrecheckStatus');
@@ -182,6 +184,7 @@
     }
 
     function updateSubmitButtonForPrecheck() {
+      if (formSubmitting) return;
       var btn = document.getElementById('submitBtn');
       btn.disabled = !photoPrecheckOk;
     }
@@ -189,6 +192,8 @@
     var productPhotoInputEl = document.getElementById('productPhotoInput');
     if (productPhotoInputEl) {
       productPhotoInputEl.addEventListener('change', function() {
+        precheckSeq += 1;
+        var mySeq = precheckSeq;
         photoPrecheckOk = true;
         updateSubmitButtonForPrecheck();
         if (!this.files.length) {
@@ -196,7 +201,6 @@
           return;
         }
         setPrecheckStatus('checking', 'Analizando tu foto...');
-        var self = this;
         compressImage(this.files[0]).then(function(compressed) {
           var fd = new FormData();
           fd.append('csrfmiddlewaretoken', document.querySelector('#analyzeForm [name="csrfmiddlewaretoken"]').value);
@@ -204,6 +208,7 @@
           var xhr = new XMLHttpRequest();
           xhr.open('POST', '{% url "product_photo_precheck_api" %}');
           xhr.onload = function() {
+            if (mySeq !== precheckSeq) return;
             if (xhr.status !== 200) {
               setPrecheckStatus('', '');
               photoPrecheckOk = true;
@@ -215,6 +220,22 @@
             if (data.ok === false) {
               photoPrecheckOk = false;
               setPrecheckStatus('warning', '⚠ ' + (data.reason || 'Esta foto no se puede usar.'));
+              var statusEl = document.getElementById('photoPrecheckStatus');
+              if (statusEl) {
+                var removeLink = document.createElement('a');
+                removeLink.href = '#';
+                removeLink.textContent = ' Quitar foto';
+                removeLink.style.marginLeft = '6px';
+                removeLink.addEventListener('click', function(ev) {
+                  ev.preventDefault();
+                  var input = document.getElementById('productPhotoInput');
+                  if (input) {
+                    input.value = '';
+                    input.dispatchEvent(new Event('change'));
+                  }
+                });
+                statusEl.appendChild(removeLink);
+              }
             } else if (data.skipped) {
               photoPrecheckOk = true;
               setPrecheckStatus('', '');
@@ -225,6 +246,7 @@
             updateSubmitButtonForPrecheck();
           };
           xhr.onerror = function() {
+            if (mySeq !== precheckSeq) return;
             photoPrecheckOk = true;
             setPrecheckStatus('', '');
             updateSubmitButtonForPrecheck();
@@ -236,6 +258,7 @@
 
     document.getElementById('analyzeForm').addEventListener('submit', function(e) {
       e.preventDefault();
+      formSubmitting = true;
       if (typeof gtag === 'function') gtag('event', 'analyze_submit', { event_category: 'onboarding' });
       var form = this;
       var btn = document.getElementById('submitBtn');
@@ -278,12 +301,14 @@
             document.open(); document.write(xhr.responseText); document.close();
           } else {
             text.textContent = 'Error — intenta de nuevo';
+            formSubmitting = false;
             btn.disabled = false;
             spinner.style.display = 'none';
           }
         };
         xhr.onerror = function() {
           text.textContent = 'Error de conexion';
+          formSubmitting = false;
           btn.disabled = false;
           spinner.style.display = 'none';
         };

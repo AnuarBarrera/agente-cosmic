@@ -222,7 +222,7 @@ def product_photo_precheck_api(request):
     Fail-open (ok:true, skipped:true) ante excepcion o cupo diario agotado --
     nano banana sigue siendo el filtro real al final del pipeline."""
     if 'product_reference_photo' not in request.FILES:
-        return JsonResponse({'ok': False, 'reason': 'No se recibió ninguna foto.'})
+        return JsonResponse({'ok': True, 'skipped': True})
 
     photo_bytes = request.FILES['product_reference_photo'].read()
     if not _validate_image_bytes(photo_bytes):
