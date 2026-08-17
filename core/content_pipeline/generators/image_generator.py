@@ -495,7 +495,8 @@ class ImageGenerator:
 
     def generate_carousel_from_product_photos(self, photos: list[bytes], mime_types: list[str], caption: str,
                                                 colors: list[str], tone: str, filename_prefix: str,
-                                                business_url: str = '', max_qc_retries: int = 1) -> list[str]:
+                                                business_url: str = '', max_qc_retries: int = 1,
+                                                description: str = '', keywords: list[str] = None) -> list[str]:
         """Carrusel con fotos reales de producto -- una slide por foto (hasta
         3), cada una editada individualmente via nano banana en vez del fondo
         unico generado desde cero que usa generate_carousel. Reusa el mismo
@@ -504,8 +505,10 @@ class ImageGenerator:
         try:
             font_seed = filename_prefix.rsplit('-day', 1)[0] if '-day' in filename_prefix else filename_prefix
             color_str = ', '.join(colors[:3]) if colors else 'warm neutrals'
+            kw_str = ', '.join((keywords or [])[:4])
+            brand_ctx = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
             slides_content = self._generate_carousel_slides_content(
-                caption, business_url=business_url, num_slides=len(photos),
+                caption, brand_ctx, business_url=business_url, num_slides=len(photos),
             )
             urls = []
             for i, (photo_bytes, mime_type, slide_content) in enumerate(

@@ -15,7 +15,7 @@ def test_analysis_job_creation():
     assert str(job.id) != ''
 
 
-def test_analysis_job_product_reference_image_path_defaults_to_empty():
+def test_analysis_job_product_reference_image_paths_defaults_to_empty_list():
     job = AnalysisJob.objects.create(email='t@t.com', business_url='https://tuwebmx.com')
     assert job.product_reference_image_paths == []
 

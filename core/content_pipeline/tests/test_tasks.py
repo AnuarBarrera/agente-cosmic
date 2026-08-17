@@ -724,6 +724,33 @@ def test_generate_missing_image_single_falls_back_to_scratch_when_pool_empty(cal
     assert post.image_url == 'https://storage.test/img.png'
 
 
+def test_generate_missing_image_carousel_falls_back_to_scratch_when_pool_empty(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 3, image_url='', format='carousel')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
+        MockImage.return_value.generate_carousel.return_value = ['https://storage.test/s1.png']
+        from core.content_pipeline.tasks import _generate_missing_image
+        _generate_missing_image(post)
+
+    MockImage.return_value.generate_carousel_from_product_photos.assert_not_called()
+    MockImage.return_value.generate_carousel.assert_called_once()
+    post.refresh_from_db()
+    assert post.image_urls == ['https://storage.test/s1.png']
+
+
+def test_generate_missing_image_reel_falls_back_to_scratch_when_pool_empty(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 1, image_url='', format='reel')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel:
+        MockScript.return_value.generate.return_value = {'hook_text': 'H', 'scene_prompts': ['a', 'b', 'c']}
+        MockReel.return_value.generate.return_value = ('https://storage.test/reel.mp4', 'https://storage.test/poster.png')
+        from core.content_pipeline.tasks import _generate_missing_image
+        _generate_missing_image(post)
+
+    call_kwargs = MockReel.return_value.generate.call_args.kwargs
+    assert call_kwargs['photos'] == []
+
+
 def test_generate_missing_image_carousel_uses_photo_pool_when_available(calendar_with_dna):
     post = _make_post(calendar_with_dna, 3, image_url='', format='carousel')
     job = calendar_with_dna.brand_dna.job

@@ -1221,13 +1221,31 @@ class TestGenerateCarouselFromProductPhotos:
                 'Caption', ['#1a1a2e'], 'profesional', 'job1-day3',
             )
         assert urls == [f'https://storage.test/slide{i}.png' for i in range(1, 4)]
-        mock_slides.assert_called_once_with('Caption', business_url='', num_slides=3)
+        mock_slides.assert_called_once_with('Caption', 'Tono: profesional.', business_url='', num_slides=3)
         assert mock_edit.call_count == 3
         assert mock_render.call_count == 3
         for i, call_args in enumerate(mock_render.call_args_list):
             assert call_args.args[0] == [b'slide-bg-1', b'slide-bg-2', b'slide-bg-3'][i]
         uploaded_filenames = [call.args[1] for call in mock_upload.call_args_list]
         assert uploaded_filenames == ['job1-day3-slide1', 'job1-day3-slide2', 'job1-day3-slide3']
+
+    @override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1')
+    def test_passes_brand_context_to_slides_content(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        fake_slides = [{'headline': 'H', 'subtitle': 'S', 'cta': 'CTA', 'tag': 'TAG'}]
+        with patch.object(gen, '_generate_carousel_slides_content', return_value=fake_slides) as mock_slides, \
+             patch.object(gen, '_generate_validated_photo_edit', return_value=b'slide-bg'), \
+             patch.object(gen, '_render_html_template', return_value=b'rendered'), \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/s1.png'):
+            gen.generate_carousel_from_product_photos(
+                [b'photo-a'], ['image/jpeg'], 'Caption', ['#1a1a2e'], 'profesional', 'job1-day3',
+                description='Vendemos gelatinas artesanales', keywords=['gelatina', 'artesanal'],
+            )
+        mock_slides.assert_called_once_with(
+            'Caption', 'Vendemos gelatinas artesanales. Tono: profesional. Palabras clave: gelatina, artesanal.',
+            business_url='', num_slides=1,
+        )
 
     @override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1')
     def test_skips_slide_when_photo_edit_fails(self):

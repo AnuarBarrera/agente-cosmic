@@ -583,10 +583,14 @@ def post_action_api(request, post_id):
 
         brand_dna = post.calendar.brand_dna
         job = brand_dna.job
-        # Hacen falta AMBAS señales, no una u otra -- este if espeja exactamente el
-        # gate de generate_sample_task (tasks.py: `wanted_format == FORMAT_SINGLE
-        # and job.product_reference_image_path`), el unico camino que produce
-        # imagenes via generate_from_product_photo:
+        # Hacen falta AMBAS señales, no una u otra -- este if cubre la
+        # regeneracion async de la MUESTRA individual (generate_sample_task,
+        # MODE_SAMPLE_IMAGE). Desde el plan del pool de fotos (2026-08-17),
+        # generate_from_product_photo TAMBIEN se usa para posts del calendario
+        # completo (MODE_FULL) cuando hay pool disponible -- pero regenerar
+        # esos posts NO esta cubierto por este guard todavia (deuda conocida,
+        # diferida explicitamente por el spec de ese plan): un MODE_FULL con
+        # foto real cae al else de abajo y pierde la foto real al regenerar.
         #   - El MODO no basta: la foto es OPCIONAL en el formulario, asi que un
         #     MODE_SAMPLE_IMAGE sin foto se generó por el camino normal (imagen
         #     diseñada con overlay) y regenerarla "con referencia" le borraria el

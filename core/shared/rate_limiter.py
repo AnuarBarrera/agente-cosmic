@@ -40,6 +40,11 @@ RPM_LIMITS = {
     },
     'gemini_api': {
         'gemini-3.1-flash-image': 20,
+        # Primera vez que este modelo se alcanza via Gemini API (antes solo
+        # Vertex) -- valor de partida conservador (mismo que el modelo
+        # normal), sin validacion empirica propia en esta superficie todavia.
+        # Ver docs/superpowers/specs/2026-08-17-product-photo-pool-design.md.
+        'gemini-3.1-flash-lite-image': 20,
     },
 }
 

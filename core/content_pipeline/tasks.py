@@ -46,13 +46,15 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
             return url, [], ''
         return poster_url, [], video_url
     if fmt == ContentPost.FORMAT_CAROUSEL:
+        urls = []
         if photos:
             urls = image_gen.generate_carousel_from_product_photos(
                 photos, mime_types, caption=kwargs.get('caption', ''), colors=kwargs.get('colors', []),
                 tone=kwargs.get('tone', ''), filename_prefix=filename,
-                business_url=kwargs.get('business_url', ''), max_qc_retries=max_qc_retries,
+                business_url=kwargs.get('business_url', ''), max_qc_retries=1,
+                description=kwargs.get('description', ''), keywords=kwargs.get('keywords', []),
             )
-        else:
+        if not urls:
             urls = image_gen.generate_carousel(filename_prefix=filename, max_qc_retries=max_qc_retries, **kwargs)
         return (urls[0] if urls else ''), urls, ''
     if photos:
