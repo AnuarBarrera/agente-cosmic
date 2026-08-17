@@ -236,7 +236,7 @@ def test_analyze_submit_product_photo_upload_failure_shows_error_and_does_not_or
             'product_reference_photo': _fake_product_photo(),
         })
     assert response.status_code == 200
-    assert b'No pudimos subir tu foto de producto' in response.content
+    assert b'No pudimos subir una de tus fotos de producto' in response.content
     assert not AnalysisJob.objects.filter(user=user).exists()
     mock_rq.enqueue.assert_not_called()
 
@@ -254,6 +254,66 @@ def test_analyze_submit_ignores_product_mode_without_permission(user):
     job = AnalysisJob.objects.filter(user=user).latest('created_at')
     assert job.generation_mode == AnalysisJob.MODE_FULL
 
+
+def test_analyze_submit_accepts_multiple_product_photos(user, free_plan):
+    free_plan.allows_sample_generation = True
+    free_plan.max_product_reference_photos = 7
+    free_plan.save(update_fields=['allows_sample_generation', 'max_product_reference_photos'])
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.save_upload') as mock_save, \
+         patch('core.brand_dna.views.django_rq.enqueue'):
+        response = c.post('/analizar/', {
+            'business_name': 'Mi Negocio', 'business_description': 'Vendemos cosas',
+            'product_reference_photo': [_fake_product_photo(), _fake_product_photo()],
+        })
+    job = AnalysisJob.objects.filter(user=user).first()
+    assert job is not None
+    assert len(job.product_reference_image_paths) == 2
+    assert mock_save.call_count == 2  # logo no se subio, solo las 2 fotos
+
+
+def test_analyze_submit_truncates_photos_over_plan_limit(user, free_plan):
+    free_plan.allows_sample_generation = True
+    free_plan.max_product_reference_photos = 2
+    free_plan.save(update_fields=['allows_sample_generation', 'max_product_reference_photos'])
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.save_upload'), \
+         patch('core.brand_dna.views.django_rq.enqueue'):
+        c.post('/analizar/', {
+            'business_name': 'Mi Negocio', 'business_description': 'Vendemos cosas',
+            'product_reference_photo': [_fake_product_photo(), _fake_product_photo(), _fake_product_photo()],
+        })
+    job = AnalysisJob.objects.filter(user=user).first()
+    assert len(job.product_reference_image_paths) == 2  # truncado al limite del plan
+
+
+def test_analyze_submit_rejects_invalid_photo_in_batch(user, free_plan):
+    free_plan.allows_sample_generation = True
+    free_plan.save(update_fields=['allows_sample_generation'])
+    c = Client()
+    c.force_login(user)
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    bad_file = SimpleUploadedFile('producto.png', b'no es una imagen real', content_type='image/png')
+    with patch('core.brand_dna.views.save_upload'), \
+         patch('core.brand_dna.views.django_rq.enqueue'):
+        response = c.post('/analizar/', {
+            'business_name': 'Mi Negocio', 'business_description': 'Vendemos cosas',
+            'product_reference_photo': [_fake_product_photo(), bad_file],
+        })
+    assert b'no es una imagen v' in response.content or response.context.get('error')
+    assert not AnalysisJob.objects.filter(user=user).exists()
+
+
+def test_new_analysis_passes_max_product_reference_photos_to_context(user, free_plan):
+    free_plan.allows_sample_generation = True
+    free_plan.max_product_reference_photos = 9
+    free_plan.save(update_fields=['allows_sample_generation', 'max_product_reference_photos'])
+    c = Client()
+    c.force_login(user)
+    response = c.get('/nuevo-analisis/')
+    assert response.context['max_product_reference_photos'] == 9
 
 
 def test_analyze_submit_without_url_with_description(user):

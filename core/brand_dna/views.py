@@ -87,7 +87,9 @@ def new_analysis(request):
         return redirect('login')
     from core.brand_dna.rate_limits import get_user_plan
     context = _screenshots_context()
-    context['allows_sample_generation'] = get_user_plan(request.user).allows_sample_generation
+    plan = get_user_plan(request.user)
+    context['allows_sample_generation'] = plan.allows_sample_generation
+    context['max_product_reference_photos'] = plan.max_product_reference_photos
     return render(request, 'brand_dna/new_analysis.html', context)
 
 
@@ -164,7 +166,6 @@ def analyze_submit(request):
     # nunca se encola y bloquea reintentos legitimos via el guard de arriba.
     job_id = uuid.uuid4()
     logo_path = ''
-    product_reference_path = ''
 
     if 'logo' in request.FILES:
         logo_file = request.FILES['logo']
@@ -181,20 +182,22 @@ def analyze_submit(request):
                 'error': 'No pudimos subir tu logo. Intenta de nuevo en unos minutos.',
             })
 
-    if 'product_reference_photo' in request.FILES:
-        photo_file = request.FILES['product_reference_photo']
+    product_reference_paths = []
+    max_product_photos = get_user_plan(request.user).max_product_reference_photos
+    for photo_file in request.FILES.getlist('product_reference_photo')[:max_product_photos]:
         photo_bytes = photo_file.read()
         if not _validate_image_bytes(photo_bytes):
-            return render(request, 'brand_dna/new_analysis.html', {'error': 'La foto del producto no es una imagen válida.'})
+            return render(request, 'brand_dna/new_analysis.html', {'error': 'Una de tus fotos de producto no es una imagen válida.'})
         ext = _safe_extension(photo_file.name)
-        product_reference_path = f'uploads/product_ref_{job_id}.{ext}'
+        photo_path = f'uploads/product_ref_{job_id}_{len(product_reference_paths)}.{ext}'
         try:
-            save_upload(photo_bytes, product_reference_path)
+            save_upload(photo_bytes, photo_path)
         except Exception:
-            logger.exception('Fallo al subir la foto de producto a GCS (job_id=%s)', job_id)
+            logger.exception('Fallo al subir una foto de producto a GCS (job_id=%s)', job_id)
             return render(request, 'brand_dna/new_analysis.html', {
-                'error': 'No pudimos subir tu foto de producto. Intenta de nuevo en unos minutos.',
+                'error': 'No pudimos subir una de tus fotos de producto. Intenta de nuevo en unos minutos.',
             })
+        product_reference_paths.append(photo_path)
 
     job = AnalysisJob.objects.create(
         id=job_id,
@@ -204,7 +207,7 @@ def analyze_submit(request):
         user=request.user,
         generation_mode=requested_mode,
         logo_file_path=logo_path,
-        product_reference_image_paths=[product_reference_path] if product_reference_path else [],
+        product_reference_image_paths=product_reference_paths,
     )
 
     from core.brand_dna.tasks import analyze_brand_task
