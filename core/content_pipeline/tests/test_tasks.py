@@ -883,6 +883,34 @@ def test_backfill_image_task_uses_reel_for_reel_format(calendar_with_dna):
     assert post.image_url == 'https://storage.test/poster.png'
 
 
+def test_backfill_image_task_reel_skips_veo_for_trial_content(calendar_with_dna_trialing):
+    # Decision de Anuar 2026-08-17: plan gratis/Tester/Admin no debe tocar Veo
+    # en el reel del calendario completo -- solo el plan pagado real.
+    post = _make_post(calendar_with_dna_trialing, 1, image_url='', format='reel')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel:
+        MockScript.return_value.generate.return_value = {'hook_text': 'H', 'scene_prompts': ['a', 'b', 'c']}
+        MockReel.return_value.generate.return_value = ('https://storage.test/reel.mp4', 'https://storage.test/poster.png')
+        from core.content_pipeline.tasks import backfill_image_task
+        backfill_image_task(str(post.id))
+
+    assert MockReel.return_value.generate.call_args.kwargs['skip_veo'] is True
+
+
+def test_backfill_image_task_reel_uses_veo_for_paid_content(calendar_with_dna):
+    post = _make_post(calendar_with_dna, 1, image_url='', format='reel')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel:
+        MockScript.return_value.generate.return_value = {'hook_text': 'H', 'scene_prompts': ['a', 'b', 'c']}
+        MockReel.return_value.generate.return_value = ('https://storage.test/reel.mp4', 'https://storage.test/poster.png')
+        from core.content_pipeline.tasks import backfill_image_task
+        backfill_image_task(str(post.id))
+
+    assert MockReel.return_value.generate.call_args.kwargs['skip_veo'] is False
+
+
 def test_backfill_image_task_falls_back_to_image_when_reel_generation_fails(calendar_with_dna):
     post = _make_post(calendar_with_dna, 1, image_url='', format='reel')
     with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \

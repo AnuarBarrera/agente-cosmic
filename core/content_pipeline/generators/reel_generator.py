@@ -578,8 +578,8 @@ class ReelGenerator:
 
     def _generate_clips_with_branding(self, scene_prompts: list[str], hook_text: str,
                                        highlight_word: str, tag_cta: str, primary_color: str,
-                                       filename_prefix: str) -> tuple[list[bytes], bool]:
-        clips = self._generate_video_clips(scene_prompts)
+                                       filename_prefix: str, skip_veo: bool = False) -> tuple[list[bytes], bool]:
+        clips = self._generate_video_clips(scene_prompts, skip_veo=skip_veo)
         if len(clips) < 3:
             return clips, False
         return self._wrap_with_branding(clips, hook_text, highlight_word, tag_cta, primary_color, filename_prefix)
@@ -622,26 +622,34 @@ class ReelGenerator:
         contraportada_normalized = self._normalize_branded_segment(contraportada, width, height, fps)
         return [portada_normalized] + clips + [contraportada_normalized], True
 
-    def _generate_video_clips(self, scene_prompts: list[str]) -> list[bytes]:
-        # scene_prompts[0] va a Veo (video real, _VEO_CLIP_DURATION_SECONDS=8s).
+    def _generate_video_clips(self, scene_prompts: list[str], skip_veo: bool = False) -> list[bytes]:
+        # scene_prompts[0] va a Veo (video real, _VEO_CLIP_DURATION_SECONDS=8s),
+        # salvo que skip_veo=True (plan gratis/Tester/Admin, ver _is_paid_content
+        # en tasks.py) -- en ese caso se salta Veo por completo y la escena 0
+        # tambien se genera via Imagen+zoompan, igual que el camino de fallback
+        # que ya existe cuando Veo falla. Decision de Anuar 2026-08-17: el
+        # resultado visual sin Veo ya se probo manualmente y se acepto.
         # scene_prompts[1:] (5 shots cortos) se generan como imagen fija (Imagen) +
         # animacion zoompan de ffmpeg, cada uno de _IMAGE_SHOT_DURATION_SECONDS=2s —
         # ritmo de corte rapido tipo publicidad, costo marginal (Imagen $0.04/imagen).
         # Ver docs/superpowers/specs/2026-07-15-reels-short-image-shots-design.md
         clips = []
 
-        veo_clip = self._generate_single_clip(scene_prompts[0])
-        if veo_clip is None:
-            veo_clip = self._generate_single_clip(scene_prompts[0])  # 1 reintento
+        veo_clip = None
+        if not skip_veo:
+            veo_clip = self._generate_single_clip(scene_prompts[0])
+            if veo_clip is None:
+                veo_clip = self._generate_single_clip(scene_prompts[0])  # 1 reintento
 
         if veo_clip is not None:
             clips.append(veo_clip)
             width, height, fps = self._probe_clip_dimensions(veo_clip)
         else:
-            logger.warning(
-                f"Clip de Veo fallido tras reintento, escena 0 tambien se genera via "
-                f"Imagen: {scene_prompts[0][:80]}"
-            )
+            if not skip_veo:
+                logger.warning(
+                    f"Clip de Veo fallido tras reintento, escena 0 tambien se genera via "
+                    f"Imagen: {scene_prompts[0][:80]}"
+                )
             width, height, fps = _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS
             still_clip = self._generate_still_scene_clip(
                 scene_prompts[0], width, height, fps, duration=_VEO_CLIP_DURATION_SECONDS,
@@ -1165,13 +1173,14 @@ class ReelGenerator:
             with open(frame_path, 'rb') as f:
                 return f.read()
 
-    def generate(self, script: dict, colors: list[str], filename_prefix: str) -> tuple[str, str]:
+    def generate(self, script: dict, colors: list[str], filename_prefix: str,
+                 skip_veo: bool = False) -> tuple[str, str]:
         try:
             colors = colors or [random.choice(_FALLBACK_COLOR_POOL)]
             primary_color = colors[0]
             clips, has_branding = self._generate_clips_with_branding(
                 script['scene_prompts'], script['hook_text'], script['highlight_word'],
-                script['tag_cta'], primary_color, filename_prefix,
+                script['tag_cta'], primary_color, filename_prefix, skip_veo=skip_veo,
             )
             if len(clips) < 3:
                 logger.warning(f"Reel abortado: solo {len(clips)}/3 clips de Veo generados")

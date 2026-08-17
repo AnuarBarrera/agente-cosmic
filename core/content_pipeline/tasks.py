@@ -27,14 +27,14 @@ logger = logging.getLogger(__name__)
 
 def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptGenerator, reel_gen: ReelGenerator,
                           fmt: str, filename: str, brand_dna=None, post_data: dict = None,
-                          max_qc_retries: int = 2, **kwargs) -> tuple[str, list[str], str]:
+                          max_qc_retries: int = 2, skip_veo: bool = False, **kwargs) -> tuple[str, list[str], str]:
     """Genera el/los medio(s) de un post segun su formato. Retorna
     (image_url, image_urls, video_url) — image_url es siempre la portada
     (slide 1 del carrusel, poster frame del reel) para retrocompatibilidad."""
     if fmt == ContentPost.FORMAT_REEL:
         script = reel_script_gen.generate(post_data, brand_dna)
         video_url, poster_url = reel_gen.generate(
-            script=script, colors=kwargs.get('colors', []), filename_prefix=filename,
+            script=script, colors=kwargs.get('colors', []), filename_prefix=filename, skip_veo=skip_veo,
         )
         if not video_url:
             url = image_gen.generate(filename=filename, max_qc_retries=max_qc_retries, **kwargs)
@@ -248,6 +248,11 @@ def _generate_missing_image(post: ContentPost) -> None:
             business_url=brand_dna.business_url,
             brand_dna=brand_dna,
             post_data={'caption': post.caption},
+            # Decision de Anuar 2026-08-17: plan gratis/Tester/Admin no debe
+            # tocar Veo en el reel -- solo nano banana/Imagen + zoompan (ya
+            # probado manualmente y aceptado). Solo el plan pagado real usa
+            # Veo, misma condicion que use_gemini_api.
+            skip_veo=not use_gemini_api,
         )
         post.save(update_fields=['image_url', 'image_urls', 'video_url'])
     except Exception as img_err:

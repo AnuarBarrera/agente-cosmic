@@ -352,6 +352,37 @@ class TestGenerateVideoClips:
         GOOGLE_CLOUD_LOCATION='us-central1',
         VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
     )
+    def test_skip_veo_never_calls_veo_generates_hero_via_imagen_zoompan(self):
+        from core.content_pipeline.generators.reel_generator import (
+            ReelGenerator, _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS,
+            _VEO_CLIP_DURATION_SECONDS, _IMAGE_SHOT_DURATION_SECONDS,
+        )
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_single_clip') as mock_veo, \
+             patch.object(gen, '_generate_scene_still', return_value=b'still-bytes'), \
+             patch.object(gen, '_validate_scene_still', return_value=True), \
+             patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
+            clips = gen._generate_video_clips(
+                ['scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5', 'scene 6'],
+                skip_veo=True,
+            )
+
+        mock_veo.assert_not_called()
+        assert clips == [b'animated-clip'] * 6
+        assert mock_animate.call_args_list[0] == call(
+            b'still-bytes', _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS,
+            duration=_VEO_CLIP_DURATION_SECONDS,
+        )
+        assert mock_animate.call_args_list[1] == call(
+            b'still-bytes', _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS,
+            duration=_IMAGE_SHOT_DURATION_SECONDS,
+        )
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
+    )
     def test_falls_back_to_imagen_when_veo_scene_fails_completely(self):
         from core.content_pipeline.generators.reel_generator import (
             ReelGenerator, _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS,
@@ -1120,6 +1151,24 @@ class TestGenerateClipsWithBranding:
             call(b'contra-raw', 720, 1280, 24.0),
         ]
 
+    def test_threads_skip_veo_to_generate_video_clips(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_video_clips',
+                           return_value=[b'v', b's1', b's2', b's3', b's4', b's5']) as mock_clips, \
+             patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
+             patch.object(gen, '_choose_reel_template', return_value='panel-wipe'), \
+             patch('core.content_pipeline.generators.reel_generator.choose_font_preset',
+                   return_value={'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins'}), \
+             patch.object(gen, '_generate_branded_segment', side_effect=[b'portada-raw', b'contra-raw']), \
+             patch.object(gen, '_normalize_branded_segment', side_effect=[b'portada-norm', b'contra-norm']):
+            gen._generate_clips_with_branding(
+                ['scene 1', 'scene 2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
+                skip_veo=True,
+            )
+
+        mock_clips.assert_called_once_with(['scene 1', 'scene 2'], skip_veo=True)
+
     def test_falls_back_when_portada_fails_completely(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
@@ -1711,7 +1760,7 @@ class TestGenerate:
         assert poster_url == 'https://storage.test/poster.png'
         mock_clips.assert_called_once_with(
             _FAKE_SCRIPT['scene_prompts'], _FAKE_SCRIPT['hook_text'], _FAKE_SCRIPT['highlight_word'],
-            _FAKE_SCRIPT['tag_cta'], '#1a1a2e', 'job1-day1',
+            _FAKE_SCRIPT['tag_cta'], '#1a1a2e', 'job1-day1', skip_veo=False,
         )
         mock_up_video.assert_called_once_with(b'final-mp4', 'job1-day1')
         mock_up_poster.assert_called_once_with(b'poster-png', 'job1-day1-poster')
@@ -1719,6 +1768,25 @@ class TestGenerate:
             [b'c1', b'c2', b'c3'], b'music', b'narration', _FAKE_SCRIPT, ['#1a1a2e'],
             [{'text': 'Hola.', 'start': 0.0, 'end': 1.0}],
             skip_hook_cta_overlay=False,
+        )
+
+    def test_threads_skip_veo_to_generate_clips_with_branding(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2', b'c3'], False)) as mock_clips, \
+             patch.object(gen, '_generate_music', return_value=b'music'), \
+             patch.object(gen, '_generate_narration', return_value=b'narration'), \
+             patch('core.content_pipeline.generators.reel_generator.SubtitleGenerator') as mock_sub_gen, \
+             patch.object(gen, '_assemble_reel', return_value=b'final-mp4'), \
+             patch.object(gen, '_extract_poster_frame', return_value=b'poster-png'), \
+             patch.object(gen, '_upload_video_to_storage', return_value='https://storage.test/reel.mp4'), \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/poster.png'):
+            mock_sub_gen.return_value.generate.return_value = []
+            gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1', skip_veo=True)
+
+        mock_clips.assert_called_once_with(
+            _FAKE_SCRIPT['scene_prompts'], _FAKE_SCRIPT['hook_text'], _FAKE_SCRIPT['highlight_word'],
+            _FAKE_SCRIPT['tag_cta'], '#1a1a2e', 'job1-day1', skip_veo=True,
         )
 
     def test_extracts_poster_later_when_branding_present(self):
