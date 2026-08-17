@@ -30,6 +30,9 @@
     .section-title { font-size: 1rem; color: #e94560; margin: 28px 0 16px; font-weight: 600; }
     .optional-badge { font-size: 0.75rem; background: #333; color: #aaa; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
     input[type="file"] { width: 100%; padding: 10px; background: #0d0d1a; border: 1px dashed #444; border-radius: 8px; color: #aaa; }
+    #photoPrecheckStatus.checking { color: #aaa; }
+    #photoPrecheckStatus.ok { color: #2ecc71; }
+    #photoPrecheckStatus.warning { color: #e74c3c; }
     .btn { width: 100%; padding: 16px; background: #e94560; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; font-weight: 600; cursor: pointer; margin-top: 12px; display: flex; align-items: center; justify-content: center; gap: 10px; transition: background 0.2s; }
     .btn:hover { background: #c73652; }
     .btn:disabled { background: #8a2a3c; cursor: not-allowed; }
@@ -121,6 +124,7 @@
       <div class="form-group" id="productPhotoGroup">
         <label>Foto real del producto <span class="optional-badge">opcional</span></label>
         <input type="file" name="product_reference_photo" accept="image/*" id="productPhotoInput">
+        <small id="photoPrecheckStatus" style="display:none;margin-top:6px;font-size:0.85rem;"></small>
       </div>
       {% endif %}
 
@@ -165,6 +169,69 @@
 
     function compressAll(files) {
       return Promise.all(Array.from(files).map(compressImage));
+    }
+
+    var photoPrecheckOk = true;
+
+    function setPrecheckStatus(cls, text) {
+      var el = document.getElementById('photoPrecheckStatus');
+      if (!el) return;
+      el.className = cls;
+      el.textContent = text;
+      el.style.display = text ? 'block' : 'none';
+    }
+
+    function updateSubmitButtonForPrecheck() {
+      var btn = document.getElementById('submitBtn');
+      btn.disabled = !photoPrecheckOk;
+    }
+
+    var productPhotoInputEl = document.getElementById('productPhotoInput');
+    if (productPhotoInputEl) {
+      productPhotoInputEl.addEventListener('change', function() {
+        photoPrecheckOk = true;
+        updateSubmitButtonForPrecheck();
+        if (!this.files.length) {
+          setPrecheckStatus('', '');
+          return;
+        }
+        setPrecheckStatus('checking', 'Analizando tu foto...');
+        var self = this;
+        compressImage(this.files[0]).then(function(compressed) {
+          var fd = new FormData();
+          fd.append('csrfmiddlewaretoken', document.querySelector('#analyzeForm [name="csrfmiddlewaretoken"]').value);
+          fd.append('product_reference_photo', compressed);
+          var xhr = new XMLHttpRequest();
+          xhr.open('POST', '{% url "product_photo_precheck_api" %}');
+          xhr.onload = function() {
+            if (xhr.status !== 200) {
+              setPrecheckStatus('', '');
+              photoPrecheckOk = true;
+              updateSubmitButtonForPrecheck();
+              return;
+            }
+            var data;
+            try { data = JSON.parse(xhr.responseText); } catch (e) { data = {ok: true, skipped: true}; }
+            if (data.ok === false) {
+              photoPrecheckOk = false;
+              setPrecheckStatus('warning', '⚠ ' + (data.reason || 'Esta foto no se puede usar.'));
+            } else if (data.skipped) {
+              photoPrecheckOk = true;
+              setPrecheckStatus('', '');
+            } else {
+              photoPrecheckOk = true;
+              setPrecheckStatus('ok', '✓ Foto lista para usar');
+            }
+            updateSubmitButtonForPrecheck();
+          };
+          xhr.onerror = function() {
+            photoPrecheckOk = true;
+            setPrecheckStatus('', '');
+            updateSubmitButtonForPrecheck();
+          };
+          xhr.send(fd);
+        });
+      });
     }
 
     document.getElementById('analyzeForm').addEventListener('submit', function(e) {
