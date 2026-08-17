@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 from django.test import Client, override_settings
 from django.utils import timezone
 from datetime import timedelta
-from core.brand_dna.models import AnalysisJob, BrandDNA
+from core.brand_dna.models import AnalysisJob, BrandDNA, ProductPhotoPrecheckAttempt
 from core.content_pipeline.models import ContentCalendar, ContentPost
 
 pytestmark = pytest.mark.django_db
@@ -1152,5 +1152,84 @@ class TestReanalyzeBrandFieldLocation:
             mock_client.return_value.models.generate_content.return_value = mock_resp
             _reanalyze_brand_field(brand_dna, MagicMock(), 'description', 'mas formal')
         mock_client.assert_called_once_with(vertexai=True, project='agente-cosmic', location='global')
+
+
+def test_precheck_api_requires_login():
+    c = Client()
+    response = c.post('/api/brand-dna/product-photo-precheck/', {
+        'product_reference_photo': _fake_product_photo(),
+    })
+    assert response.status_code == 302
+
+
+def test_precheck_api_rejects_invalid_image(user):
+    c = Client()
+    c.force_login(user)
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    bad_file = SimpleUploadedFile('producto.png', b'no es una imagen real', content_type='image/png')
+    with patch('core.brand_dna.views.ProductPhotoCopyrightPrecheck') as MockPrecheck:
+        response = c.post('/api/brand-dna/product-photo-precheck/', {
+            'product_reference_photo': bad_file,
+        })
+    data = json.loads(response.content)
+    assert data['ok'] is False
+    MockPrecheck.assert_not_called()
+    assert not ProductPhotoPrecheckAttempt.objects.filter(user=user).exists()
+
+
+def test_precheck_api_success_registers_attempt(user, free_plan):
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.can_precheck_photo', return_value=(True, 9)), \
+         patch('core.brand_dna.views.ProductPhotoCopyrightPrecheck') as MockPrecheck:
+        MockPrecheck.return_value.check.return_value = {'ok': True}
+        response = c.post('/api/brand-dna/product-photo-precheck/', {
+            'product_reference_photo': _fake_product_photo(),
+        })
+    data = json.loads(response.content)
+    assert data == {'ok': True}
+    assert ProductPhotoPrecheckAttempt.objects.filter(user=user).count() == 1
+
+
+def test_precheck_api_rejection_registers_attempt(user, free_plan):
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.can_precheck_photo', return_value=(True, 9)), \
+         patch('core.brand_dna.views.ProductPhotoCopyrightPrecheck') as MockPrecheck:
+        MockPrecheck.return_value.check.return_value = {'ok': False, 'reason': 'marca detectada'}
+        response = c.post('/api/brand-dna/product-photo-precheck/', {
+            'product_reference_photo': _fake_product_photo(),
+        })
+    data = json.loads(response.content)
+    assert data == {'ok': False, 'reason': 'marca detectada'}
+    assert ProductPhotoPrecheckAttempt.objects.filter(user=user).count() == 1
+
+
+def test_precheck_api_exception_does_not_register_attempt(user, free_plan):
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.can_precheck_photo', return_value=(True, 9)), \
+         patch('core.brand_dna.views.ProductPhotoCopyrightPrecheck') as MockPrecheck:
+        MockPrecheck.return_value.check.return_value = {'ok': True, 'skipped': True}
+        response = c.post('/api/brand-dna/product-photo-precheck/', {
+            'product_reference_photo': _fake_product_photo(),
+        })
+    data = json.loads(response.content)
+    assert data == {'ok': True, 'skipped': True}
+    assert not ProductPhotoPrecheckAttempt.objects.filter(user=user).exists()
+
+
+def test_precheck_api_quota_exceeded_skips_without_calling_gemini(user, free_plan):
+    c = Client()
+    c.force_login(user)
+    with patch('core.brand_dna.views.can_precheck_photo', return_value=(False, 0)), \
+         patch('core.brand_dna.views.ProductPhotoCopyrightPrecheck') as MockPrecheck:
+        response = c.post('/api/brand-dna/product-photo-precheck/', {
+            'product_reference_photo': _fake_product_photo(),
+        })
+    data = json.loads(response.content)
+    assert data == {'ok': True, 'skipped': True}
+    MockPrecheck.return_value.check.assert_not_called()
+    assert not ProductPhotoPrecheckAttempt.objects.filter(user=user).exists()
 
 

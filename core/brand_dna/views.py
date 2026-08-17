@@ -18,7 +18,9 @@ from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, FileResponse, HttpResponse, Http404
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST, require_GET
-from core.brand_dna.models import AnalysisJob, BrandDNA
+from core.brand_dna.models import AnalysisJob, BrandDNA, ProductPhotoPrecheckAttempt
+from core.brand_dna.rate_limits import can_precheck_photo
+from core.brand_dna.extractors.product_photo_copyright_precheck import ProductPhotoCopyrightPrecheck
 from core.shared.metrics import POST_ACTIONS
 from core.shared.gcs_uploads import save_upload
 
@@ -209,6 +211,33 @@ def analyze_submit(request):
     django_rq.enqueue(analyze_brand_task, str(job.id))
 
     return redirect('dashboard')
+
+
+@login_required
+@require_POST
+def product_photo_precheck_api(request):
+    """Precheck de riesgo de marca/copyright ANTES de que el usuario envie
+    el formulario completo -- se llama desde new_analysis.html en el evento
+    change del input de foto. No sube nada a GCS; solo valida en memoria.
+    Fail-open (ok:true, skipped:true) ante excepcion o cupo diario agotado --
+    nano banana sigue siendo el filtro real al final del pipeline."""
+    if 'product_reference_photo' not in request.FILES:
+        return JsonResponse({'ok': False, 'reason': 'No se recibió ninguna foto.'})
+
+    photo_bytes = request.FILES['product_reference_photo'].read()
+    if not _validate_image_bytes(photo_bytes):
+        return JsonResponse({'ok': False, 'reason': 'Esa imagen no se pudo abrir, intenta con otra.'})
+
+    allowed, _remaining = can_precheck_photo(request.user)
+    if not allowed:
+        return JsonResponse({'ok': True, 'skipped': True})
+
+    from core.content_pipeline.generators.image_generator import _detect_mime
+    mime_type = _detect_mime(photo_bytes)
+    result = ProductPhotoCopyrightPrecheck().check(photo_bytes, mime_type)
+    if not result.get('skipped'):
+        ProductPhotoPrecheckAttempt.objects.create(user=request.user)
+    return JsonResponse(result)
 
 
 @login_required
