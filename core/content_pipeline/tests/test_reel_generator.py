@@ -510,7 +510,7 @@ class TestGenerateVideoClipsFromPhoto:
              patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
              patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
             clips = gen._generate_video_clips_from_photo(
-                image_gen, b'photo-bytes', 'image/jpeg',
+                image_gen, [b'photo-bytes'], ['image/jpeg'],
                 ['scene 0', 'scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5'],
                 ['#1a1a2e'], max_qc_retries=1,
             )
@@ -550,7 +550,7 @@ class TestGenerateVideoClipsFromPhoto:
              patch.object(gen, '_generate_still_scene_clip', return_value=b'scratch-clip') as mock_scratch, \
              patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip'):
             clips = gen._generate_video_clips_from_photo(
-                image_gen, b'photo-bytes', 'image/jpeg',
+                image_gen, [b'photo-bytes'], ['image/jpeg'],
                 ['scene 0', 'scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5'],
                 ['#1a1a2e'], max_qc_retries=1,
             )
@@ -582,7 +582,7 @@ class TestGenerateVideoClipsFromPhoto:
              patch.object(gen, '_generate_single_clip', return_value=None) as mock_veo, \
              patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
             clips = gen._generate_video_clips_from_photo(
-                image_gen, b'photo-bytes', 'image/jpeg',
+                image_gen, [b'photo-bytes'], ['image/jpeg'],
                 ['scene 0', 'scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5'],
                 ['#1a1a2e'], max_qc_retries=1,
             )
@@ -609,13 +609,60 @@ class TestGenerateVideoClipsFromPhoto:
              patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
              patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
             clips = gen._generate_video_clips_from_photo(
-                image_gen, b'photo-bytes', 'image/jpeg',
+                image_gen, [b'photo-bytes'], ['image/jpeg'],
                 ['scene 0', 'scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5'],
                 ['#1a1a2e'], max_qc_retries=1,
             )
 
         assert len(clips) == 5  # veo-clip + 4 shots (uno se omitio)
         assert mock_animate.call_count == 4
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
+    )
+    def test_distributes_three_photos_two_shots_each(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        image_gen = ImageGenerator(bucket_name='test-bucket')
+        with patch.object(image_gen, '_generate_validated_photo_edit',
+                           side_effect=[b'hero', b's1', b's2', b's3', b's4', b's5']) as mock_edit, \
+             patch.object(gen, '_generate_single_clip', return_value=b'veo-clip'), \
+             patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
+             patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip'):
+            gen._generate_video_clips_from_photo(
+                image_gen, [b'photo-A', b'photo-B', b'photo-C'], ['image/jpeg'] * 3,
+                ['scene 0', 'scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5'],
+                ['#1a1a2e'], max_qc_retries=1,
+            )
+
+        used_photo_bytes = [call_args.args[1].inline_data.data for call_args in mock_edit.call_args_list]
+        assert used_photo_bytes == [b'photo-A', b'photo-A', b'photo-B', b'photo-B', b'photo-C', b'photo-C']
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_VIDEO_MODEL='veo-3.0-fast-generate-001',
+    )
+    def test_skip_veo_with_real_photos_never_calls_veo(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        image_gen = ImageGenerator(bucket_name='test-bucket')
+        with patch.object(image_gen, '_generate_validated_photo_edit',
+                           side_effect=[b'hero-img', b's1', b's2', b's3', b's4', b's5']), \
+             patch.object(gen, '_generate_single_clip') as mock_veo, \
+             patch.object(gen, '_animate_still_to_clip', return_value=b'animated-clip') as mock_animate:
+            clips = gen._generate_video_clips_from_photo(
+                image_gen, [b'photo-bytes'], ['image/jpeg'],
+                ['scene 0', 'scene 1', 'scene 2', 'scene 3', 'scene 4', 'scene 5'],
+                ['#1a1a2e'], max_qc_retries=1, skip_veo=True,
+            )
+        mock_veo.assert_not_called()
+        assert len(clips) == 6
+        assert mock_animate.call_args_list[0].args[0] == b'hero-img'
 
 
 class TestGenerateFromProductPhotoReel:
@@ -645,7 +692,7 @@ class TestGenerateFromProductPhotoReel:
         assert video_url == 'https://storage.test/reel.mp4'
         assert poster_url == 'https://storage.test/poster.png'
         mock_clips.assert_called_once_with(
-            image_gen, b'photo-bytes', 'image/jpeg', script['scene_prompts'], ['#1a1a2e'], 1,
+            image_gen, [b'photo-bytes'], ['image/jpeg'], script['scene_prompts'], ['#1a1a2e'], 1,
         )
         mock_wrap.assert_called_once_with(
             [b'c0', b'c1', b'c2', b'c3', b'c4', b'c5'], 'Descubre algo nuevo', 'nuevo', 'Compra ahora',
@@ -1222,6 +1269,31 @@ class TestGenerateClipsWithBranding:
         assert has_branding is True
         assert clips == [b'portada-norm', b'v', b's1', b's2', b'contra-norm']
 
+    def test_routes_to_photo_clips_when_photos_provided(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        image_gen_stub = object()
+        with patch.object(gen, '_generate_video_clips_from_photo',
+                           return_value=[b'v', b's1', b's2', b's3', b's4', b's5']) as mock_photo_clips, \
+             patch.object(gen, '_generate_video_clips') as mock_scratch_clips, \
+             patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
+             patch.object(gen, '_choose_reel_template', return_value='panel-wipe'), \
+             patch('core.content_pipeline.generators.reel_generator.choose_font_preset',
+                   return_value={'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins'}), \
+             patch.object(gen, '_generate_branded_segment', side_effect=[b'portada-raw', b'contra-raw']), \
+             patch.object(gen, '_normalize_branded_segment', side_effect=[b'portada-norm', b'contra-norm']):
+            gen._generate_clips_with_branding(
+                ['scene 1', 'scene 2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
+                image_gen=image_gen_stub, photos=[b'photo-bytes'], mime_types=['image/jpeg'],
+                colors=['#1a1a2e', '#ffffff'],
+            )
+
+        mock_photo_clips.assert_called_once_with(
+            image_gen_stub, [b'photo-bytes'], ['image/jpeg'], ['scene 1', 'scene 2'],
+            ['#1a1a2e', '#ffffff'], skip_veo=False,
+        )
+        mock_scratch_clips.assert_not_called()
+
 
 class TestNormalizeBrandedSegment:
     def test_builds_scale_command_with_exact_dimensions(self):
@@ -1761,6 +1833,7 @@ class TestGenerate:
         mock_clips.assert_called_once_with(
             _FAKE_SCRIPT['scene_prompts'], _FAKE_SCRIPT['hook_text'], _FAKE_SCRIPT['highlight_word'],
             _FAKE_SCRIPT['tag_cta'], '#1a1a2e', 'job1-day1', skip_veo=False,
+            image_gen=None, photos=None, mime_types=None, colors=['#1a1a2e'],
         )
         mock_up_video.assert_called_once_with(b'final-mp4', 'job1-day1')
         mock_up_poster.assert_called_once_with(b'poster-png', 'job1-day1-poster')
@@ -1787,6 +1860,7 @@ class TestGenerate:
         mock_clips.assert_called_once_with(
             _FAKE_SCRIPT['scene_prompts'], _FAKE_SCRIPT['hook_text'], _FAKE_SCRIPT['highlight_word'],
             _FAKE_SCRIPT['tag_cta'], '#1a1a2e', 'job1-day1', skip_veo=True,
+            image_gen=None, photos=None, mime_types=None, colors=['#1a1a2e'],
         )
 
     def test_extracts_poster_later_when_branding_present(self):

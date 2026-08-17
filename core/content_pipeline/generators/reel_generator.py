@@ -578,8 +578,15 @@ class ReelGenerator:
 
     def _generate_clips_with_branding(self, scene_prompts: list[str], hook_text: str,
                                        highlight_word: str, tag_cta: str, primary_color: str,
-                                       filename_prefix: str, skip_veo: bool = False) -> tuple[list[bytes], bool]:
-        clips = self._generate_video_clips(scene_prompts, skip_veo=skip_veo)
+                                       filename_prefix: str, skip_veo: bool = False,
+                                       image_gen=None, photos: list[bytes] = None,
+                                       mime_types: list[str] = None, colors: list[str] = None) -> tuple[list[bytes], bool]:
+        if photos:
+            clips = self._generate_video_clips_from_photo(
+                image_gen, photos, mime_types, scene_prompts, colors or [primary_color], skip_veo=skip_veo,
+            )
+        else:
+            clips = self._generate_video_clips(scene_prompts, skip_veo=skip_veo)
         if len(clips) < 3:
             return clips, False
         return self._wrap_with_branding(clips, hook_text, highlight_word, tag_cta, primary_color, filename_prefix)
@@ -687,25 +694,40 @@ class ReelGenerator:
             f"DSLR camera quality, shallow depth of field, photorealistic. Vertical 9:16 format."
         )
 
-    def _generate_video_clips_from_photo(self, image_gen, photo_bytes: bytes, mime_type: str,
+    def _generate_video_clips_from_photo(self, image_gen, photos: list[bytes], mime_types: list[str],
                                            scene_prompts: list[str], colors: list[str],
-                                           max_qc_retries: int = 1) -> list[bytes]:
-        photo_part = types.Part.from_bytes(data=photo_bytes, mime_type=mime_type)
+                                           max_qc_retries: int = 1, skip_veo: bool = False) -> list[bytes]:
+        photo_parts = [
+            types.Part.from_bytes(data=photo_bytes, mime_type=mime_type)
+            for photo_bytes, mime_type in zip(photos, mime_types)
+        ]
+
+        def _photo_part_for_shot(i: int):
+            # Distribucion "2 shots por foto": con 1 sola foto (muestra
+            # individual, generate_from_product_photo) todos los shots usan
+            # la misma -- identico al comportamiento de hoy. Con 3 fotos
+            # (calendario completo con pool), shots 0-1 usan la primera,
+            # 2-3 la segunda, 4-5 la tercera.
+            return photo_parts[(i // 2) % len(photo_parts)]
+
         clips = []
 
         hero_prompt = self._build_photo_edit_prompt(scene_prompts[0], colors)
         hero_image = image_gen._generate_validated_photo_edit(
-            hero_prompt, photo_part, max_qc_retries=max_qc_retries, aspect_ratio='9:16',
+            hero_prompt, _photo_part_for_shot(0), max_qc_retries=max_qc_retries, aspect_ratio='9:16',
         )
         if hero_image is not None:
-            veo_clip = self._generate_single_clip(scene_prompts[0], image_bytes=hero_image)
-            if veo_clip is None:
-                veo_clip = self._generate_single_clip(scene_prompts[0], image_bytes=hero_image)  # 1 reintento
+            veo_clip = None
+            if not skip_veo:
+                veo_clip = self._generate_single_clip(scene_prompts[0], image_bytes=hero_image)
+                if veo_clip is None:
+                    veo_clip = self._generate_single_clip(scene_prompts[0], image_bytes=hero_image)  # 1 reintento
             if veo_clip is not None:
                 clips.append(veo_clip)
                 width, height, fps = self._probe_clip_dimensions(veo_clip)
             else:
-                logger.warning("Veo fallo animando la imagen real del producto, se usa zoompan sobre esa misma imagen")
+                if not skip_veo:
+                    logger.warning("Veo fallo animando la imagen real del producto, se usa zoompan sobre esa misma imagen")
                 width, height, fps = _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS
                 clips.append(self._animate_still_to_clip(hero_image, width, height, fps, duration=_VEO_CLIP_DURATION_SECONDS))
         else:
@@ -715,10 +737,10 @@ class ReelGenerator:
             if still_clip is not None:
                 clips.append(still_clip)
 
-        for prompt in scene_prompts[1:]:
+        for i, prompt in enumerate(scene_prompts[1:], start=1):
             shot_prompt = self._build_photo_edit_prompt(prompt, colors)
             shot_image = image_gen._generate_validated_photo_edit(
-                shot_prompt, photo_part, max_qc_retries=max_qc_retries, aspect_ratio='9:16',
+                shot_prompt, _photo_part_for_shot(i), max_qc_retries=max_qc_retries, aspect_ratio='9:16',
             )
             if shot_image is not None:
                 clips.append(self._animate_still_to_clip(shot_image, width, height, fps, duration=_IMAGE_SHOT_DURATION_SECONDS))
@@ -1174,13 +1196,15 @@ class ReelGenerator:
                 return f.read()
 
     def generate(self, script: dict, colors: list[str], filename_prefix: str,
-                 skip_veo: bool = False) -> tuple[str, str]:
+                 skip_veo: bool = False, image_gen=None, photos: list[bytes] = None,
+                 mime_types: list[str] = None) -> tuple[str, str]:
         try:
             colors = colors or [random.choice(_FALLBACK_COLOR_POOL)]
             primary_color = colors[0]
             clips, has_branding = self._generate_clips_with_branding(
                 script['scene_prompts'], script['hook_text'], script['highlight_word'],
                 script['tag_cta'], primary_color, filename_prefix, skip_veo=skip_veo,
+                image_gen=image_gen, photos=photos, mime_types=mime_types, colors=colors,
             )
             if len(clips) < 3:
                 logger.warning(f"Reel abortado: solo {len(clips)}/3 clips de Veo generados")
@@ -1225,7 +1249,7 @@ class ReelGenerator:
             colors = colors or [random.choice(_FALLBACK_COLOR_POOL)]
             primary_color = colors[0]
             clips = self._generate_video_clips_from_photo(
-                image_gen, photo_bytes, mime_type, script['scene_prompts'], colors, max_qc_retries,
+                image_gen, [photo_bytes], [mime_type], script['scene_prompts'], colors, max_qc_retries,
             )
             if len(clips) < 3:
                 logger.warning(f"Reel con foto abortado: solo {len(clips)}/3 clips generados")
