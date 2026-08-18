@@ -173,6 +173,7 @@ def generate_sample_task(job_id: str) -> None:
             video_url, image_url = reel_gen.generate_from_product_photo(
                 image_gen, photo_bytes, _detect_mime(photo_bytes), script,
                 brand_dna.primary_colors, f"{job_id}-sample",
+                skip_veo=not settings.REEL_VEO_ENABLED,
             )
             if not video_url:
                 # Mismo fallback que ya usa _generate_post_media para el reel SIN
@@ -202,6 +203,7 @@ def generate_sample_task(job_id: str) -> None:
                 business_url=brand_dna.business_url,
                 brand_dna=brand_dna,
                 post_data=post_data,
+                skip_veo=not settings.REEL_VEO_ENABLED,
             )
 
         ContentPost.objects.create(
@@ -301,11 +303,12 @@ def _generate_missing_image(post: ContentPost) -> None:
             business_url=brand_dna.business_url,
             brand_dna=brand_dna,
             post_data={'caption': post.caption},
-            # Decision de Anuar 2026-08-17: plan gratis/Tester/Admin no debe
-            # tocar Veo en el reel -- solo nano banana/Imagen + zoompan (ya
-            # probado manualmente y aceptado). Solo el plan pagado real usa
-            # Veo, misma condicion que use_gemini_api.
-            skip_veo=not use_gemini_api,
+            # Decision de Anuar 2026-08-18: Veo se apaga en TODO el sistema
+            # (calendario gratis y pagado), via el interruptor unico
+            # settings.REEL_VEO_ENABLED -- desacoplado de use_gemini_api, que
+            # sigue decidiendo unicamente la superficie de facturacion de
+            # imagen (Vertex vs Gemini API), sin relacion con Veo.
+            skip_veo=not settings.REEL_VEO_ENABLED,
             photos=photos,
             mime_types=mime_types,
         )

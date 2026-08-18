@@ -170,6 +170,14 @@ VERTEX_VIDEO_MODEL = 'veo-3.1-fast-generate-001'
 VERTEX_MUSIC_MODEL = 'lyria-3-clip-preview'
 VERTEX_TTS_MODEL = 'publishers/google/models/gemini-2.5-flash-tts'
 REEL_TEXT_OVERLAY_ENGINE = get_env('REEL_TEXT_OVERLAY_ENGINE', default='drawtext')
+# Interruptor unico para Veo en todo el pipeline de reels (calendario pagado +
+# muestra de prospeccion, con o sin foto real de producto). Decision de Anuar
+# 2026-08-18: el camino Imagen+zoompan ya se probo y se acepto (skip_veo del
+# plan gratis, 2026-08-17), y mantiene el costo dentro del rango permitido de
+# inversion (Veo 3 Fast Video fue el SKU mas caro del periodo analizado en
+# BigQuery, ver consolidado.md). El codigo de Veo se queda intacto para poder
+# reactivarlo cambiando solo esta variable de entorno, sin tocar codigo.
+REEL_VEO_ENABLED = get_env('REEL_VEO_ENABLED', default='False', cast=bool)
 # GOOGLE_APPLICATION_CREDENTIALS se inyecta vía docker-compose (volumen ADC)
 
 # Google OAuth (para Sign in with Google)

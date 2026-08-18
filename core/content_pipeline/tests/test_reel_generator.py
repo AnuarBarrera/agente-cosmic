@@ -693,6 +693,7 @@ class TestGenerateFromProductPhotoReel:
         assert poster_url == 'https://storage.test/poster.png'
         mock_clips.assert_called_once_with(
             image_gen, [b'photo-bytes'], ['image/jpeg'], script['scene_prompts'], ['#1a1a2e'], 1,
+            skip_veo=False,
         )
         mock_wrap.assert_called_once_with(
             [b'c0', b'c1', b'c2', b'c3', b'c4', b'c5'], 'Descubre algo nuevo', 'nuevo', 'Compra ahora',
@@ -703,6 +704,31 @@ class TestGenerateFromProductPhotoReel:
             [b'p', b'c0', b'c1', b'c2', b'c3', b'c4', b'c5', b'c'], b'music', None, script, ['#1a1a2e'], [],
             skip_hook_cta_overlay=True,
         )
+
+    def test_passes_skip_veo_through_to_generate_video_clips_from_photo(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        image_gen = ImageGenerator(bucket_name='test-bucket')
+        script = {
+            'hook_text': 'H', 'highlight_word': 'h', 'tag_cta': 'CTA',
+            'narration_script': 'N', 'scene_prompts': ['s0', 's1', 's2', 's3', 's4', 's5'],
+            'music_mood': 'M',
+        }
+        with patch.object(gen, '_generate_video_clips_from_photo', return_value=[b'c0', b'c1', b'c2', b'c3', b'c4', b'c5']) as mock_clips, \
+             patch.object(gen, '_wrap_with_branding', return_value=([b'p', b'c0', b'c1', b'c2', b'c3', b'c4', b'c5', b'c'], True)), \
+             patch.object(gen, '_generate_music', return_value=None), \
+             patch.object(gen, '_generate_narration', return_value=None), \
+             patch.object(gen, '_assemble_reel', return_value=b'final-mp4'), \
+             patch.object(gen, '_extract_poster_frame', return_value=b'poster-png'), \
+             patch.object(gen, '_upload_video_to_storage', return_value='https://storage.test/reel.mp4'), \
+             patch.object(gen, '_upload_to_storage', return_value='https://storage.test/poster.png'):
+            gen.generate_from_product_photo(
+                image_gen, b'photo-bytes', 'image/jpeg', script, ['#1a1a2e'], 'job1-sample',
+                max_qc_retries=1, skip_veo=True,
+            )
+
+        assert mock_clips.call_args.kwargs['skip_veo'] is True
 
     def test_returns_empty_strings_when_fewer_than_3_clips(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator

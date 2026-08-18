@@ -1239,17 +1239,20 @@ class ReelGenerator:
 
     def generate_from_product_photo(self, image_gen, photo_bytes: bytes, mime_type: str,
                                       script: dict, colors: list[str], filename_prefix: str,
-                                      max_qc_retries: int = 1) -> tuple[str, str]:
+                                      max_qc_retries: int = 1, skip_veo: bool = False) -> tuple[str, str]:
         """Mismo shape que generate() -- portada/hero/shots/contraportada,
         misma duracion total (24s) -- pero las 6 imagenes salen de nano
         banana editando la foto real del producto en vez de generarse desde
-        cero, y el clip heroe se anima con Veo en modo imagen-a-video en vez
-        de texto-a-video. Decision de Anuar 2026-08-16."""
+        cero. Con skip_veo=False el clip heroe se anima con Veo en modo
+        imagen-a-video; con skip_veo=True (default de settings.REEL_VEO_ENABLED
+        desde 2026-08-18) se anima con zoompan sobre esa misma imagen, igual
+        que el resto de los shots. Decision de Anuar 2026-08-16."""
         try:
             colors = colors or [random.choice(_FALLBACK_COLOR_POOL)]
             primary_color = colors[0]
             clips = self._generate_video_clips_from_photo(
                 image_gen, [photo_bytes], [mime_type], script['scene_prompts'], colors, max_qc_retries,
+                skip_veo=skip_veo,
             )
             if len(clips) < 3:
                 logger.warning(f"Reel con foto abortado: solo {len(clips)}/3 clips generados")

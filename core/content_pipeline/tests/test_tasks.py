@@ -366,6 +366,9 @@ def test_generate_sample_task_uses_product_photo_for_reel_when_present(job_with_
     assert call_args.args[0] is MockImage.return_value
     assert call_args.args[1] == png_bytes
     assert call_args.args[2] == 'image/png'  # mime real por magic bytes
+    # settings.REEL_VEO_ENABLED default False -- Veo apagado tambien en la
+    # muestra de prospeccion con foto (decision de Anuar 2026-08-18).
+    assert call_args.kwargs['skip_veo'] is True
     post = ContentPost.objects.get(calendar__brand_dna__job=job_with_dna_sample_reel_and_photo)
     assert post.video_url == 'https://storage.test/reel.mp4'
     assert post.image_url == 'https://storage.test/poster.png'
@@ -494,6 +497,9 @@ def test_generate_sample_task_creates_single_post_calendar_for_reel(job_with_dna
     assert post.video_url == 'https://storage.test/reel.mp4'
     MockEmail.return_value.send_initial.assert_not_called()
     mock_schedule.assert_not_called()
+    # settings.REEL_VEO_ENABLED default False -- Veo apagado tambien en la
+    # muestra de prospeccion sin foto (decision de Anuar 2026-08-18).
+    assert MockReel.return_value.generate.call_args.kwargs['skip_veo'] is True
 
 
 @override_settings(
@@ -995,8 +1001,8 @@ def test_backfill_image_task_uses_reel_for_reel_format(calendar_with_dna):
 
 
 def test_backfill_image_task_reel_skips_veo_for_trial_content(calendar_with_dna_trialing):
-    # Decision de Anuar 2026-08-17: plan gratis/Tester/Admin no debe tocar Veo
-    # en el reel del calendario completo -- solo el plan pagado real.
+    # settings.REEL_VEO_ENABLED default False -- Veo apagado en todo el
+    # sistema (decision de Anuar 2026-08-18), sin importar el plan.
     post = _make_post(calendar_with_dna_trialing, 1, image_url='', format='reel')
     with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
          patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
@@ -1009,7 +1015,26 @@ def test_backfill_image_task_reel_skips_veo_for_trial_content(calendar_with_dna_
     assert MockReel.return_value.generate.call_args.kwargs['skip_veo'] is True
 
 
-def test_backfill_image_task_reel_uses_veo_for_paid_content(calendar_with_dna):
+def test_backfill_image_task_reel_skips_veo_for_paid_content_by_default(calendar_with_dna):
+    # Decision de Anuar 2026-08-18: Veo se apaga en TODO el sistema (incluido
+    # el plan pagado), desacoplado de use_gemini_api (que sigue decidiendo
+    # solo la superficie de facturacion de imagen, Vertex vs Gemini API).
+    post = _make_post(calendar_with_dna, 1, image_url='', format='reel')
+    with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
+         patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
+         patch('core.content_pipeline.tasks.ReelGenerator') as MockReel:
+        MockScript.return_value.generate.return_value = {'hook_text': 'H', 'scene_prompts': ['a', 'b', 'c']}
+        MockReel.return_value.generate.return_value = ('https://storage.test/reel.mp4', 'https://storage.test/poster.png')
+        from core.content_pipeline.tasks import backfill_image_task
+        backfill_image_task(str(post.id))
+
+    assert MockReel.return_value.generate.call_args.kwargs['skip_veo'] is True
+
+
+@override_settings(REEL_VEO_ENABLED=True)
+def test_backfill_image_task_reel_uses_veo_when_flag_enabled(calendar_with_dna):
+    # settings.REEL_VEO_ENABLED es el unico interruptor -- si se reactiva,
+    # el plan pagado real vuelve a usar Veo.
     post = _make_post(calendar_with_dna, 1, image_url='', format='reel')
     with patch('core.content_pipeline.tasks.ImageGenerator') as MockImage, \
          patch('core.content_pipeline.tasks.ReelScriptGenerator') as MockScript, \
