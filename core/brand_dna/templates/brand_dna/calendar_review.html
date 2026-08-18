@@ -504,6 +504,20 @@
   function showPhotoUploadStep() {
     document.getElementById('photoModalStep1').style.display = 'none';
     document.getElementById('photoModalStep2').style.display = 'block';
+    updateModalContinueButtonState();
+  }
+
+  function updateModalContinueButtonState() {
+    // El boton de pago debe quedar deshabilitado mientras haya fotos aun
+    // validandose (precheck de copyright en curso) -- no tiene sentido
+    // mandar al usuario a pagar con fotos que todavia no terminaron de
+    // validarse. Sin fotos seleccionadas (o todas ya resueltas) el boton
+    // se habilita, igual que "saltar" la carga.
+    var btn = document.getElementById('modalContinueBtn');
+    if (!btn) return;
+    var stillChecking = modalSelectedPhotos.some(function(p) { return p.status === 'checking'; });
+    btn.disabled = stillChecking;
+    btn.textContent = stillChecking ? 'Validando fotos...' : 'Continuar al pago →';
   }
 
   function goToPayment() {
@@ -558,6 +572,7 @@
         modalSelectedPhotos = modalSelectedPhotos.filter(function(p) { return p.id !== photo.id; });
         renderModalPhotoThumbnails();
         renderModalPhotoCounter();
+        updateModalContinueButtonState();
       });
       wrap.appendChild(removeBtn);
       container.appendChild(wrap);
@@ -589,6 +604,7 @@
         modalSelectedPhotos.push({id: photoId, file: file, status: 'checking'});
         renderModalPhotoThumbnails();
         renderModalPhotoCounter();
+        updateModalContinueButtonState();
 
         compressImage(file).then(function(compressed) {
           var fd = new FormData();
@@ -602,6 +618,7 @@
             if (xhr.status !== 200) {
               entry.status = 'skipped';
               renderModalPhotoThumbnails();
+              updateModalContinueButtonState();
               return;
             }
             var data;
@@ -617,10 +634,12 @@
               entry.status = 'ok';
               renderModalPhotoThumbnails();
             }
+            updateModalContinueButtonState();
           };
           xhr.onerror = function() {
             var entry = modalSelectedPhotos.find(function(p) { return p.id === photoId; });
             if (entry) { entry.status = 'skipped'; renderModalPhotoThumbnails(); }
+            updateModalContinueButtonState();
           };
           xhr.send(fd);
         });
@@ -630,7 +649,10 @@
 
   function uploadPhotosAndContinue() {
     var btn = document.getElementById('modalContinueBtn');
-    var validPhotos = modalSelectedPhotos.filter(function(p) { return p.status !== 'rejected'; }).map(function(p) { return p.file; });
+    // Solo fotos ya resueltas por el precheck (ok/skipped) -- 'checking' nunca
+    // deberia llegar aqui porque el boton esta deshabilitado mientras tanto
+    // (updateModalContinueButtonState), pero se filtra explicito por defensa.
+    var validPhotos = modalSelectedPhotos.filter(function(p) { return p.status === 'ok' || p.status === 'skipped'; }).map(function(p) { return p.file; });
     if (!validPhotos.length) { goToPayment(); return; }
 
     btn.disabled = true;
