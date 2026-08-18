@@ -244,6 +244,57 @@ def product_photo_precheck_api(request):
 
 
 @login_required
+@require_POST
+def add_product_photos_api(request, job_id):
+    """Agrega fotos nuevas al pool de un AnalysisJob YA EXISTENTE (a diferencia
+    de analyze_submit, que solo sube fotos al CREAR el job) -- usado desde
+    calendar_review.html antes de cada pago (primero o recurrente), para que
+    un usuario que no subio fotos al registrarse (o que saco productos
+    nuevos) pueda meterlas al pool sin volver a registrarse. Decision de
+    Anuar 2026-08-18: AGREGA al pool existente, nunca lo reemplaza -- mismo
+    validacion que analyze_submit (_validate_image_bytes, save_upload), el
+    precheck de copyright ya se llamo desde el frontend antes de este POST
+    (product_photo_precheck_api, sin cambios). generate_next_month/
+    _next_reference_photos no necesitan ningun cambio: ya leen el pool en
+    tiempo real cada vez que generan un post, asi que las fotos agregadas
+    aqui se usan automaticamente en la proxima generacion."""
+    from core.brand_dna.rate_limits import get_user_plan
+    job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
+    plan = get_user_plan(request.user)
+    existing = job.product_reference_image_paths
+    room = max(0, plan.max_product_reference_photos - len(existing))
+
+    incoming_files = request.FILES.getlist('product_reference_photo')[:room]
+    if not incoming_files:
+        return JsonResponse({'ok': True, 'added': 0, 'remaining': room})
+
+    photos_bytes = []
+    for photo_file in incoming_files:
+        photo_bytes = photo_file.read()
+        if not _validate_image_bytes(photo_bytes):
+            return JsonResponse({'ok': False, 'error': 'Una de tus fotos de producto no es una imagen válida.'}, status=400)
+        photos_bytes.append((photo_bytes, photo_file.name))
+
+    new_paths = []
+    for i, (photo_bytes, filename) in enumerate(photos_bytes):
+        ext = _safe_extension(filename)
+        photo_path = f'uploads/product_ref_{job_id}_{len(existing) + i}.{ext}'
+        try:
+            save_upload(photo_bytes, photo_path)
+        except Exception:
+            logger.exception('Fallo al subir una foto de producto a GCS (job_id=%s)', job_id)
+            return JsonResponse({'ok': False, 'error': 'No pudimos subir una de tus fotos de producto. Intenta de nuevo en unos minutos.'}, status=502)
+        new_paths.append(photo_path)
+
+    job.product_reference_image_paths = existing + new_paths
+    job.save(update_fields=['product_reference_image_paths'])
+    return JsonResponse({
+        'ok': True, 'added': len(new_paths),
+        'remaining': max(0, plan.max_product_reference_photos - len(job.product_reference_image_paths)),
+    })
+
+
+@login_required
 def results(request, job_id):
     job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
     brand_dna = getattr(job, 'brand_dna', None)
@@ -325,6 +376,7 @@ def calendar_review_view(request, job_id):
     payment_url = ''
     if payment_needed or early_cta:
         payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={job.user.tenant_id}"
+    photos_remaining = max(0, plan.max_product_reference_photos - len(job.product_reference_image_paths))
 
     from core.brand_dna.rate_limits import can_create_calendar
     can_create, _ = can_create_calendar(request.user)
@@ -388,6 +440,8 @@ def calendar_review_view(request, job_id):
         'payment_needed': payment_needed,
         'early_cta': early_cta,
         'payment_url': payment_url,
+        'photos_remaining': photos_remaining,
+        'max_product_reference_photos': plan.max_product_reference_photos,
     })
 
 

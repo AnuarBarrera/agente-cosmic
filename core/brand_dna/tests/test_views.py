@@ -1163,6 +1163,147 @@ def test_calendar_review_no_early_cta_while_trial_still_generating(client, user,
     assert response.context['early_cta'] is False
 
 
+def test_calendar_review_photos_remaining_with_empty_pool(client, user, job_with_calendar, free_plan):
+    free_plan.max_product_reference_photos = 7
+    free_plan.save(update_fields=['max_product_reference_photos'])
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert response.context['photos_remaining'] == 7
+
+
+def test_calendar_review_photos_remaining_subtracts_existing_pool(client, user, job_with_calendar_and_product_photo, free_plan):
+    free_plan.max_product_reference_photos = 7
+    free_plan.save(update_fields=['max_product_reference_photos'])
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar_and_product_photo.id}/')
+    assert response.context['photos_remaining'] == 6  # 7 - 1 foto ya en el pool
+
+
+def test_calendar_review_early_cta_shows_photo_modal_button_when_room(client, user, job_with_calendar, settings):
+    settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
+    user.tenant.subscription.status = 'trialing'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert b'onclick="openPhotoModal(' in response.content
+
+
+def test_calendar_review_early_cta_links_directly_when_pool_full(client, user, job_with_calendar, free_plan, settings):
+    settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
+    free_plan.max_product_reference_photos = 7
+    free_plan.save(update_fields=['max_product_reference_photos'])
+    job_with_calendar.product_reference_image_paths = [f'uploads/p{i}.jpg' for i in range(7)]
+    job_with_calendar.save(update_fields=['product_reference_image_paths'])
+    user.tenant.subscription.status = 'trialing'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert response.context['photos_remaining'] == 0
+    assert b'onclick="openPhotoModal(' not in response.content
+    assert f'https://buy.stripe.com/test123?client_reference_id={user.tenant_id}'.encode() in response.content
+
+
+def test_add_product_photos_requires_login(client, job_with_calendar):
+    response = client.post(f'/api/brand-dna/{job_with_calendar.id}/add-product-photos/', {
+        'product_reference_photo': _fake_product_photo(),
+    })
+    assert response.status_code == 302
+    assert '/auth/login/' in response.url
+
+
+def test_add_product_photos_rejects_other_users_job(client, job_with_calendar, django_user_model, free_plan):
+    from core.tenant_management.models import TenantModel, Subscription
+    other = django_user_model.objects.create_user(username='other@test.com', email='other@test.com', password='pass1234')
+    tenant = TenantModel.objects.create(name=other.email, status='active')
+    Subscription.objects.create(tenant=tenant, plan=free_plan)
+    other.tenant = tenant
+    other.save(update_fields=['tenant'])
+    client.force_login(other)
+    response = client.post(f'/api/brand-dna/{job_with_calendar.id}/add-product-photos/', {
+        'product_reference_photo': _fake_product_photo(),
+    })
+    assert response.status_code == 404
+
+
+def test_add_product_photos_appends_to_empty_pool(client, user, job_with_calendar, free_plan):
+    free_plan.max_product_reference_photos = 7
+    free_plan.save(update_fields=['max_product_reference_photos'])
+    client.force_login(user)
+    with patch('core.brand_dna.views.save_upload') as mock_save:
+        response = client.post(f'/api/brand-dna/{job_with_calendar.id}/add-product-photos/', {
+            'product_reference_photo': [_fake_product_photo(), _fake_product_photo()],
+        })
+    assert response.status_code == 200
+    data = response.json()
+    assert data == {'ok': True, 'added': 2, 'remaining': 5}
+    job_with_calendar.refresh_from_db()
+    assert len(job_with_calendar.product_reference_image_paths) == 2
+    assert mock_save.call_count == 2
+
+
+def test_add_product_photos_appends_without_replacing_existing_pool(client, user, job_with_calendar_and_product_photo, free_plan):
+    free_plan.max_product_reference_photos = 7
+    free_plan.save(update_fields=['max_product_reference_photos'])
+    client.force_login(user)
+    with patch('core.brand_dna.views.save_upload'):
+        response = client.post(f'/api/brand-dna/{job_with_calendar_and_product_photo.id}/add-product-photos/', {
+            'product_reference_photo': _fake_product_photo(),
+        })
+    assert response.status_code == 200
+    job_with_calendar_and_product_photo.refresh_from_db()
+    paths = job_with_calendar_and_product_photo.product_reference_image_paths
+    assert len(paths) == 2
+    assert paths[0] == 'uploads/product_ref_test.jpg'  # la foto original sigue ahi, sin reemplazarse
+
+
+def test_add_product_photos_truncates_to_remaining_room(client, user, job_with_calendar, free_plan):
+    free_plan.max_product_reference_photos = 2
+    free_plan.save(update_fields=['max_product_reference_photos'])
+    client.force_login(user)
+    with patch('core.brand_dna.views.save_upload'):
+        response = client.post(f'/api/brand-dna/{job_with_calendar.id}/add-product-photos/', {
+            'product_reference_photo': [_fake_product_photo(), _fake_product_photo(), _fake_product_photo()],
+        })
+    data = response.json()
+    assert data['added'] == 2
+    assert data['remaining'] == 0
+    job_with_calendar.refresh_from_db()
+    assert len(job_with_calendar.product_reference_image_paths) == 2
+
+
+def test_add_product_photos_noop_when_pool_already_full(client, user, job_with_calendar, free_plan):
+    free_plan.max_product_reference_photos = 1
+    free_plan.save(update_fields=['max_product_reference_photos'])
+    job_with_calendar.product_reference_image_paths = ['uploads/existing.jpg']
+    job_with_calendar.save(update_fields=['product_reference_image_paths'])
+    client.force_login(user)
+    with patch('core.brand_dna.views.save_upload') as mock_save:
+        response = client.post(f'/api/brand-dna/{job_with_calendar.id}/add-product-photos/', {
+            'product_reference_photo': _fake_product_photo(),
+        })
+    assert response.status_code == 200
+    assert response.json() == {'ok': True, 'added': 0, 'remaining': 0}
+    mock_save.assert_not_called()
+    job_with_calendar.refresh_from_db()
+    assert job_with_calendar.product_reference_image_paths == ['uploads/existing.jpg']
+
+
+def test_add_product_photos_rejects_invalid_image_without_saving_any(client, user, job_with_calendar, free_plan):
+    free_plan.max_product_reference_photos = 7
+    free_plan.save(update_fields=['max_product_reference_photos'])
+    client.force_login(user)
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    bad_file = SimpleUploadedFile('producto.png', b'no es una imagen real', content_type='image/png')
+    with patch('core.brand_dna.views.save_upload') as mock_save:
+        response = client.post(f'/api/brand-dna/{job_with_calendar.id}/add-product-photos/', {
+            'product_reference_photo': [_fake_product_photo(), bad_file],
+        })
+    assert response.status_code == 400
+    mock_save.assert_not_called()
+    job_with_calendar.refresh_from_db()
+    assert job_with_calendar.product_reference_image_paths == []
+
+
 def test_dashboard_hides_early_cta_while_job_processing(client, user, settings):
     settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
     user.tenant.subscription.status = 'trialing'

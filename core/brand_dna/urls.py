@@ -11,6 +11,7 @@ urlpatterns = [
     path('resultados/<uuid:job_id>/', views.results, name='results'),
     path('api/brand-dna/status/<uuid:job_id>/', views.status_api, name='status_api'),
     path('api/brand-dna/product-photo-precheck/', views.product_photo_precheck_api, name='product_photo_precheck_api'),
+    path('api/brand-dna/<uuid:job_id>/add-product-photos/', views.add_product_photos_api, name='add_product_photos_api'),
 
     # Auth
     path('auth/login/', auth_views.login_view, name='login'),
