@@ -71,4 +71,18 @@ def test_user_last_reactivation_email_at_defaults_to_none():
     assert user.last_reactivation_email_at is None
 
 
+def test_plan_stripe_payment_link_url_defaults_empty():
+    plan = Plan.objects.create(name='Plan Test Payment Link')
+    assert plan.stripe_payment_link_url == ''
+
+
+def test_plan_stripe_payment_link_url_accepts_value():
+    plan = Plan.objects.create(
+        name='Plan Test Payment Link 2',
+        stripe_payment_link_url='https://buy.stripe.com/founder123',
+    )
+    plan.refresh_from_db()
+    assert plan.stripe_payment_link_url == 'https://buy.stripe.com/founder123'
+
+
 

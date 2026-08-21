@@ -48,6 +48,10 @@ class Plan(models.Model):
     # formulario de analisis, en vez del calendario completo de 7 dias —
     # pensado para prospeccion. Activado hoy solo en el Plan Admin.
     allows_sample_generation = models.BooleanField(default=False)
+    # Payment Link de Stripe propio de este plan -- vacio (default) cae al
+    # link global settings.STRIPE_PAYMENT_LINK_URL, retrocompatible. Ver
+    # core/brand_dna/rate_limits.py:get_payment_url.
+    stripe_payment_link_url = models.CharField(max_length=255, blank=True, default='')
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
