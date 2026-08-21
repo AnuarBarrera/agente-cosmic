@@ -50,6 +50,17 @@ def can_edit(post, user) -> tuple[bool, int]:
     return remaining > 0, remaining
 
 
+def get_payment_url(user) -> str:
+    """Payment Link de Stripe del plan actual del usuario, con
+    client_reference_id ya adjunto. plan.stripe_payment_link_url vacio
+    (default) cae al link global settings.STRIPE_PAYMENT_LINK_URL --
+    retrocompatible, ningun plan existente necesita configurarse."""
+    from django.conf import settings
+    plan = get_user_plan(user)
+    base_url = plan.stripe_payment_link_url or settings.STRIPE_PAYMENT_LINK_URL
+    return f"{base_url}?client_reference_id={user.tenant_id}"
+
+
 def can_precheck_photo(user) -> tuple[bool, int]:
     """Límite diario de llamadas reales al precheck de copyright/marca de
     foto de producto (ver ProductPhotoPrecheckAttempt). Ventana móvil de 24h,

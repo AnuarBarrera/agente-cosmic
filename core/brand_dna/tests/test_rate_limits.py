@@ -261,3 +261,41 @@ class TestCanPrecheckPhoto(TestCase):
         allowed, remaining = can_precheck_photo(user)
         assert allowed is True
         assert remaining == 10
+
+
+# ==== Tests for get_payment_url (Task 2) ====
+from django.test import override_settings
+import pytest
+
+
+def _user_with_plan(plan):
+    user = User.objects.create_user(
+        username=f'{plan.name}@test.com', email=f'{plan.name}@test.com', password=_TEST_PWD,
+    )
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    Subscription.objects.create(tenant=tenant, plan=plan)
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+    return user
+
+
+@pytest.mark.django_db
+@override_settings(STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/global123')
+def test_get_payment_url_falls_back_to_global_link_when_plan_has_none():
+    from core.brand_dna.rate_limits import get_payment_url
+    plan = Plan.objects.create(name='Plan Sin Link')
+    user = _user_with_plan(plan)
+    url = get_payment_url(user)
+    assert url == f'https://buy.stripe.com/global123?client_reference_id={user.tenant_id}'
+
+
+@pytest.mark.django_db
+@override_settings(STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/global123')
+def test_get_payment_url_uses_plan_specific_link_when_set():
+    from core.brand_dna.rate_limits import get_payment_url
+    plan = Plan.objects.create(
+        name='Plan Con Link', stripe_payment_link_url='https://buy.stripe.com/founder123',
+    )
+    user = _user_with_plan(plan)
+    url = get_payment_url(user)
+    assert url == f'https://buy.stripe.com/founder123?client_reference_id={user.tenant_id}'
