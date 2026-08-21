@@ -355,7 +355,7 @@ def status_api(request, job_id):
 
 @login_required
 def calendar_review_view(request, job_id):
-    from core.brand_dna.rate_limits import get_user_plan
+    from core.brand_dna.rate_limits import get_user_plan, get_payment_url
     job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
     brand_dna = getattr(job, 'brand_dna', None)
     calendar = getattr(brand_dna, 'calendar', None) if brand_dna else None
@@ -375,7 +375,7 @@ def calendar_review_view(request, job_id):
     )
     payment_url = ''
     if payment_needed or early_cta:
-        payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={job.user.tenant_id}"
+        payment_url = get_payment_url(job.user)
     photos_remaining = max(0, plan.max_product_reference_photos - len(job.product_reference_image_paths))
 
     from core.brand_dna.rate_limits import can_create_calendar

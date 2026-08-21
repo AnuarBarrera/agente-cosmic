@@ -897,6 +897,28 @@ def test_calendar_review_omits_reel_upload_tip_when_no_reel_posts(client, user, 
     assert 'no lo subas como publicación normal del feed' not in response.content.decode('utf-8')
 
 
+def test_calendar_review_uses_plan_specific_payment_link(client, user, job_with_calendar, free_plan, settings):
+    settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/global123'
+    free_plan.stripe_payment_link_url = 'https://buy.stripe.com/founder123'
+    free_plan.save(update_fields=['stripe_payment_link_url'])
+    user.tenant.subscription.status = 'trial_expired'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+    assert response.context['payment_url'] == f'https://buy.stripe.com/founder123?client_reference_id={user.tenant_id}'
+
+
+def test_dashboard_uses_plan_specific_payment_link(client, user, free_plan, settings):
+    settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/global123'
+    free_plan.stripe_payment_link_url = 'https://buy.stripe.com/founder123'
+    free_plan.save(update_fields=['stripe_payment_link_url'])
+    user.tenant.subscription.status = 'trialing'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+    response = client.get('/dashboard/')
+    assert f'https://buy.stripe.com/founder123?client_reference_id={user.tenant_id}'.encode() in response.content
+
+
 def test_calendar_review_orders_weeks_ascending_by_date(client, user, job_with_calendar):
     calendar = job_with_calendar.brand_dna.calendar
     for i in range(8, 15):

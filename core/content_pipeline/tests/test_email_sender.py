@@ -242,6 +242,60 @@ def test_send_month_expired_email_calls_django_send(full_setup):
     assert 'suscripción' not in html.lower()
 
 
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/global123')
+def test_send_trial_expired_uses_plan_specific_payment_link(full_setup):
+    from core.content_pipeline.email_sender import EmailSender
+    from core.tenant_management.models import TenantModel, Subscription, Plan
+    job, dna, calendar, posts = full_setup
+    plan = Plan.objects.create(
+        name='Plan Founder Email Test', max_calendars_per_week=2, max_post_regenerations=2,
+        max_post_edits=2, price=0, stripe_payment_link_url='https://buy.stripe.com/founder123',
+    )
+    from django.contrib.auth import get_user_model
+    UserModel = get_user_model()
+    user = UserModel.objects.create_user(username=job.email, email=job.email, password='pass1234')
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    Subscription.objects.create(tenant=tenant, plan=plan, status='trial_expired')
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+    job.user = user
+    job.save(update_fields=['user'])
+
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        sender = EmailSender()
+        sender.send_trial_expired(job=job, brand_dna=dna)
+
+    html = mock_send.call_args[1]['html_message']
+    assert f'https://buy.stripe.com/founder123?client_reference_id={tenant.id}' in html
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', STRIPE_PAYMENT_LINK_URL='https://buy.stripe.com/global123')
+def test_send_month_expired_uses_plan_specific_payment_link(full_setup):
+    from core.content_pipeline.email_sender import EmailSender
+    from core.tenant_management.models import TenantModel, Subscription, Plan
+    job, dna, calendar, posts = full_setup
+    plan = Plan.objects.create(
+        name='Plan Founder Email Test 2', max_calendars_per_week=2, max_post_regenerations=2,
+        max_post_edits=2, price=0, stripe_payment_link_url='https://buy.stripe.com/founder123',
+    )
+    from django.contrib.auth import get_user_model
+    UserModel = get_user_model()
+    user = UserModel.objects.create_user(username=job.email, email=job.email, password='pass1234')
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    Subscription.objects.create(tenant=tenant, plan=plan, status='trial_expired')
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+    job.user = user
+    job.save(update_fields=['user'])
+
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        sender = EmailSender()
+        sender.send_month_expired(job=job, brand_dna=dna)
+
+    html = mock_send.call_args[1]['html_message']
+    assert f'https://buy.stripe.com/founder123?client_reference_id={tenant.id}' in html
+
+
 @override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx', COSMIC_BASE_URL='https://cosmic.anuarbarrera.dev')
 def test_send_reactivation_calendar_calls_django_send(full_setup):
     from core.content_pipeline.email_sender import EmailSender

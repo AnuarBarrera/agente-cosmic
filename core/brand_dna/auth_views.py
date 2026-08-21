@@ -479,7 +479,7 @@ def google_callback_view(request):
 def dashboard_view(request):
     from datetime import timedelta
     from django.utils import timezone
-    from core.brand_dna.rate_limits import get_user_plan
+    from core.brand_dna.rate_limits import get_user_plan, get_payment_url
     jobs = list(
         AnalysisJob.objects
         .filter(user=request.user, deleted_at__isnull=True)
@@ -508,7 +508,7 @@ def dashboard_view(request):
     early_cta = bool(subscription and subscription.status == 'trialing' and not has_processing)
     payment_url = ''
     if early_cta:
-        payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={request.user.tenant_id}"
+        payment_url = get_payment_url(request.user)
     return render(request, 'brand_dna/dashboard.html', {
         'jobs': jobs,
         'user': request.user,

@@ -7,6 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 from core.brand_dna.models import AnalysisJob, BrandDNA
 from core.content_pipeline.models import ContentCalendar, ContentPost
+from core.brand_dna.rate_limits import get_payment_url
 from core.shared.metrics import EMAILS_SENT
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,7 @@ class EmailSender:
         logger.info(f"Email dia {locked_post.day_number} enviado a {email}")
 
     def send_trial_expired(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
-        payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={job.user.tenant_id}"
+        payment_url = get_payment_url(job.user)
         html = render_to_string('content_pipeline/email_trial_expired.html', {
             'brand_dna': brand_dna,
             'payment_url': payment_url,
@@ -164,7 +165,7 @@ class EmailSender:
         logger.info(f"Email de cobro fallido enviado a {job.email} para job {job.id}")
 
     def send_month_expired(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
-        payment_url = f"{settings.STRIPE_PAYMENT_LINK_URL}?client_reference_id={job.user.tenant_id}"
+        payment_url = get_payment_url(job.user)
         html = render_to_string('content_pipeline/email_month_expired.html', {
             'brand_dna': brand_dna,
             'payment_url': payment_url,
