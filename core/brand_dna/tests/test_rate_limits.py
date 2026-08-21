@@ -299,3 +299,19 @@ def test_get_payment_url_uses_plan_specific_link_when_set():
     user = _user_with_plan(plan)
     url = get_payment_url(user)
     assert url == f'https://buy.stripe.com/founder123?client_reference_id={user.tenant_id}'
+
+
+@pytest.mark.django_db
+def test_can_create_calendar_excludes_soft_deleted_jobs_from_quota():
+    from core.brand_dna.rate_limits import can_create_calendar
+    from core.brand_dna.models import AnalysisJob
+    plan = Plan.objects.create(name='Plan Quota Test', max_calendars_per_week=1)
+    user = _user_with_plan(plan)
+    job = AnalysisJob.objects.create(email=user.email, business_url='https://tuwebmx.com', user=user)
+    job.deleted_at = timezone.now()
+    job.save(update_fields=['deleted_at'])
+
+    allowed, remaining = can_create_calendar(user)
+
+    assert allowed is True
+    assert remaining == 1

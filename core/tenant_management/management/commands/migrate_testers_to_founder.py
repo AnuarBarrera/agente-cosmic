@@ -69,8 +69,19 @@ class Command(BaseCommand):
             return
 
         for sub in subscriptions:
+            # deleted_at__isnull=True -- HALLAZGO 2026-08-21: un tester puede
+            # haber borrado (soft-delete) su calendario mas reciente antes de
+            # migrar, dejando uno mas viejo activo. Sin este filtro, "el mas
+            # reciente" podia ser un calendario ya borrado -- se conservaba
+            # ese (invisible para el usuario) y se eliminaba de verdad el
+            # unico calendario activo que le quedaba. Los calendarios ya
+            # borrados no se tocan en ningun caso: ni se cuentan como "a
+            # conservar" ni se incluyen en la poda (ya estan fuera de la
+            # vista del usuario, borrarlos de nuevo no aporta nada).
             tenant_jobs = list(
-                AnalysisJob.objects.filter(user__tenant=sub.tenant).order_by('-created_at')
+                AnalysisJob.objects.filter(
+                    user__tenant=sub.tenant, deleted_at__isnull=True,
+                ).order_by('-created_at')
             )
             to_keep = tenant_jobs[0] if tenant_jobs else None
             to_prune = tenant_jobs[1:]

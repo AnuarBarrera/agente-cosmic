@@ -25,7 +25,12 @@ def get_user_plan(user):
 
 def can_create_calendar(user) -> tuple[bool, int]:
     plan = get_user_plan(user)
-    used = AnalysisJob.objects.filter(user=user).count()
+    # deleted_at__isnull=True -- un calendario borrado por el usuario (Zona de
+    # peligro) no debe seguir contando contra su cupo para siempre. HALLAZGO
+    # 2026-08-21: sin este filtro, un tester que borra su unico calendario y
+    # luego se migra a un plan con max_calendars_per_week bajo (ej. Fundador)
+    # queda bloqueado -- "limite alcanzado" con 0 calendarios visibles.
+    used = AnalysisJob.objects.filter(user=user, deleted_at__isnull=True).count()
     remaining = max(0, plan.max_calendars_per_week - used)
     return remaining > 0, remaining
 

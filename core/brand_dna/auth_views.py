@@ -502,7 +502,10 @@ def dashboard_view(request):
         job.week_generating = bool(calendar and calendar.next_week_generating)
         if job.week_generating:
             has_next_week_generating = True
-    used_total = AnalysisJob.objects.filter(user=request.user).count()
+    # deleted_at__isnull=True -- mismo fix que can_create_calendar (rate_limits.py):
+    # un calendario borrado por el usuario no debe contar contra su cupo para
+    # siempre. HALLAZGO 2026-08-21.
+    used_total = AnalysisJob.objects.filter(user=request.user, deleted_at__isnull=True).count()
     plan = get_user_plan(request.user)
     subscription = getattr(getattr(request.user, 'tenant', None), 'subscription', None)
     early_cta = bool(subscription and subscription.status == 'trialing' and not has_processing)

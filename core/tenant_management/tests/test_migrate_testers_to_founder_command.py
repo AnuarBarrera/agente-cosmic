@@ -145,3 +145,41 @@ def test_apply_prunes_via_cascade_deleting_brand_dna_of_pruned_jobs():
     call_command('migrate_testers_to_founder', '--payment-link-url=https://buy.stripe.com/founder123', '--apply')
 
     assert not BrandDNA.objects.filter(job=older_job).exists()
+
+
+def test_apply_ignores_already_deleted_jobs_when_choosing_which_to_keep():
+    # HALLAZGO 2026-08-21: el usuario borro (soft-delete) su calendario mas
+    # reciente antes de la migracion, dejando uno activo mas viejo. Elegir
+    # "el mas reciente" sin filtrar deleted_at habria borrado de verdad el
+    # unico calendario activo y conservado uno ya invisible para el usuario.
+    _plan('User')
+    tester_plan = _plan('Tester')
+    user, sub, jobs = _tester_with_jobs('t7@test.com', 2, tester_plan)
+    most_recent, active_job = jobs[-1], jobs[0]
+    most_recent.deleted_at = timezone.now()
+    most_recent.save(update_fields=['deleted_at'])
+
+    call_command('migrate_testers_to_founder', '--payment-link-url=https://buy.stripe.com/founder123', '--apply')
+
+    remaining_ids = set(AnalysisJob.objects.filter(user=user).values_list('id', flat=True))
+    assert active_job.id in remaining_ids
+    assert AnalysisJob.objects.filter(id=active_job.id, deleted_at__isnull=True).exists()
+
+
+def test_apply_leaves_all_already_deleted_jobs_untouched_when_no_active_ones_exist():
+    # Mismo hallazgo: si TODOS los calendarios del tester ya estaban borrados
+    # antes de migrar (caso real visto en vivo), el comando no debe tocar
+    # ninguno -- no hay "el mas reciente" real que conservar ni que podar.
+    _plan('User')
+    tester_plan = _plan('Tester')
+    user, sub, jobs = _tester_with_jobs('t8@test.com', 2, tester_plan)
+    for job in jobs:
+        job.deleted_at = timezone.now()
+        job.save(update_fields=['deleted_at'])
+
+    call_command('migrate_testers_to_founder', '--payment-link-url=https://buy.stripe.com/founder123', '--apply')
+
+    assert AnalysisJob.objects.filter(user=user).count() == 2
+    sub.refresh_from_db()
+    assert sub.plan.name == 'Fundador'
+    assert sub.status == 'trial_expired'

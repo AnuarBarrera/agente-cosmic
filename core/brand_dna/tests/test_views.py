@@ -1150,6 +1150,15 @@ def test_dashboard_hides_early_cta_when_active(client, user):
     assert b'mes completo' not in response.content
 
 
+def test_dashboard_used_total_excludes_soft_deleted_jobs(client, user):
+    job = AnalysisJob.objects.create(email=user.email, business_url='https://tuwebmx.com', user=user)
+    job.deleted_at = timezone.now()
+    job.save(update_fields=['deleted_at'])
+    client.force_login(user)
+    response = client.get('/dashboard/')
+    assert response.context['used_total'] == 0
+
+
 def test_dashboard_manage_payment_method_button_renamed(client, user):
     user.tenant.subscription.stripe_customer_id = 'cus_test1'
     user.tenant.subscription.save(update_fields=['stripe_customer_id'])
