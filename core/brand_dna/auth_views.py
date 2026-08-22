@@ -521,6 +521,13 @@ def dashboard_view(request):
         'has_next_week_generating': has_next_week_generating,
         'early_cta': early_cta,
         'payment_url': payment_url,
+        # Banner interno "contacta soporte" al alcanzar el limite -- pensado
+        # solo para cuentas internas (Tester/Admin), nunca para planes reales
+        # de negocio (User, Fundador, futuros). HALLAZGO 2026-08-22: antes se
+        # gateaba por el grupo de Django del usuario (legado, no se actualiza
+        # al migrar de plan) -- ahora usa Subscription.plan.name real, la
+        # misma fuente de verdad que get_user_plan().
+        'is_internal_plan': plan.name in ('Tester', 'Admin'),
     })
 
 

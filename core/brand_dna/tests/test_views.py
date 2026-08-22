@@ -1159,6 +1159,36 @@ def test_dashboard_used_total_excludes_soft_deleted_jobs(client, user):
     assert response.context['used_total'] == 0
 
 
+def test_dashboard_hides_internal_limit_banner_for_migrated_founder_plan(client, user, free_plan):
+    # HALLAZGO 2026-08-22: el banner "Limite de calendarios alcanzado" del
+    # dashboard estaba gateado por el grupo de Django del usuario (legado),
+    # no por Subscription.plan real -- un tester migrado al plan Fundador
+    # seguia viendo el banner interno "contacta soporte" porque su grupo de
+    # Django 'tester' nunca se toco al migrar (solo se cambio
+    # Subscription.plan). Debe comportarse igual que el plan User: sin
+    # banner, silenciosamente sin la opcion de generar mas.
+    from django.contrib.auth.models import Group
+    tester_group, _ = Group.objects.get_or_create(name='tester')
+    user.groups.add(tester_group)
+    free_plan.name = 'Fundador'
+    free_plan.max_calendars_per_week = 1
+    free_plan.save(update_fields=['name', 'max_calendars_per_week'])
+    AnalysisJob.objects.create(email=user.email, business_url='https://tuwebmx.com', user=user, status=AnalysisJob.STATUS_DONE)
+    client.force_login(user)
+    response = client.get('/dashboard/')
+    assert 'Límite de calendarios alcanzado'.encode() not in response.content
+
+
+def test_dashboard_shows_internal_limit_banner_for_tester_plan(client, user, free_plan):
+    free_plan.name = 'Tester'
+    free_plan.max_calendars_per_week = 1
+    free_plan.save(update_fields=['name', 'max_calendars_per_week'])
+    AnalysisJob.objects.create(email=user.email, business_url='https://tuwebmx.com', user=user, status=AnalysisJob.STATUS_DONE)
+    client.force_login(user)
+    response = client.get('/dashboard/')
+    assert 'Límite de calendarios alcanzado'.encode() in response.content
+
+
 def test_dashboard_manage_payment_method_button_renamed(client, user):
     user.tenant.subscription.stripe_customer_id = 'cus_test1'
     user.tenant.subscription.save(update_fields=['stripe_customer_id'])
