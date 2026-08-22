@@ -12,9 +12,13 @@ _FALLBACK = {'description': '', 'category': ''}
 
 _PROMPT = (
     "Analiza esta foto de un producto real subida por un negocio.\n\n"
-    "description: 1-2 oraciones describiendo el producto -- tipo, colores, "
-    "materiales, estilo, detalles distintivos. Solo la descripcion, sin "
-    "listas ni formato.\n"
+    "description: 1-2 oraciones describiendo UNICAMENTE lo que se ve en la foto "
+    "-- tipo de prenda/objeto, colores, materiales, corte, detalles distintivos "
+    "(bolsillos, cierres, texturas). Solo la descripcion, sin listas ni formato. "
+    "NO especules sobre el sector, industria, giro del negocio, ni el uso ideal "
+    "o publico objetivo del producto (ej. nunca digas 'ideal para laboratorios' "
+    "o 'perfecto para uso medico') -- eso lo conoce el negocio, no la foto. "
+    "Limitate a lo estrictamente visual.\n"
     "category: el giro/tipo de producto en 1-3 palabras, forma normalizada "
     "en espanol (ej. 'joyeria', 'reposteria', 'ropa', 'muebles')."
 )

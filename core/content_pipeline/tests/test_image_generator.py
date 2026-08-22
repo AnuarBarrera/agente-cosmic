@@ -1936,6 +1936,44 @@ class TestGenerateFromProductPhoto:
         assert background_url == 'https://storage.test/test-product-bg.png'
         assert final_url == background_url
 
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_prompt_anchors_with_real_business_description_over_vision_context(self):
+        # HALLAZGO 2026-08-22 (produccion): vision_context (analisis de la
+        # foto) sesgaba la generacion hacia un sector equivocado -- una bata
+        # de carnicero blanca se interpreto como "ideal para laboratorios",
+        # y la descripcion real del negocio nunca llegaba a este prompt pese
+        # a recibirse como parametro. Ahora se incluye explicitamente y se
+        # marca como fuente de verdad por encima de cualquier suposicion
+        # visual del analisis de la foto.
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-generated-png'
+        mock_gen_client = MagicMock()
+        mock_gen_client.models.generate_content.return_value = MagicMock(
+            candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+        )
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_gen_client), \
+             patch('core.shared.rate_limiter.throttle'), \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True), \
+             patch.object(gen, '_upload_photo_post', return_value=('https://storage.test/bg.png', 'https://storage.test/final.png')):
+            gen.generate_from_product_photo(
+                photo_bytes=b'fake-photo-bytes', mime_type='image/jpeg',
+                caption='Batas tecnicas', colors=['#1a1a2e'], tone='profesional',
+                filename='test-product', description='Especialistas en el sector carnico y alimentario',
+                keywords=['carnico', 'inocuidad'],
+                vision_context='Bata blanca con capucha, ideal para laboratorios o sector medico',
+            )
+
+        call_kwargs = mock_gen_client.models.generate_content.call_args.kwargs
+        prompt_text = ' '.join(str(c) for c in call_kwargs['contents'] if isinstance(c, str))
+        assert 'sector carnico y alimentario' in prompt_text.lower()
+        assert 'source of truth' in prompt_text.lower()
+
 
 class TestRegenerateWithReference:
     @override_settings(
@@ -2084,3 +2122,36 @@ class TestRegenerateWithReference:
             b'fake-regenerated-png', 'Nuevo caption regenerado', ['#e94560'], 'alegre',
             'Joyeria artesanal', ['aretes'], 'https://ejemplo.com', 'test-product-regen',
         )
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
+        GOOGLE_CLOUD_LOCATION_TEXT='global',
+        VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+    )
+    def test_prompt_anchors_with_real_business_description_over_vision_context(self):
+        # Mismo hallazgo que TestGenerateFromProductPhoto -- regenerate_with_reference
+        # tiene el mismo prompt vulnerable al sesgo de vision_context.
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        mock_part = MagicMock()
+        mock_part.inline_data.data = b'fake-regenerated-png'
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = MagicMock(
+            candidates=[MagicMock(content=MagicMock(parts=[mock_part]))]
+        )
+        with patch('core.content_pipeline.generators.image_generator._vertex_client', return_value=mock_client), \
+             patch('core.shared.rate_limiter.throttle'), \
+             patch.object(gen, '_validate_product_photo_generation', return_value=True), \
+             patch.object(gen, '_upload_photo_post', return_value=('https://storage.test/bg.png', 'https://storage.test/final.png')):
+            gen.regenerate_with_reference(
+                current_background_bytes=b'current-background-bytes', feedback='mas colorido',
+                vision_context='Bata blanca con capucha, ideal para laboratorios o sector medico',
+                caption='Batas tecnicas', colors=['#1a1a2e'], tone='profesional',
+                filename='test-product-regen', description='Especialistas en el sector carnico y alimentario',
+                keywords=['carnico', 'inocuidad'],
+            )
+
+        call_kwargs = mock_client.models.generate_content.call_args.kwargs
+        prompt_text = ' '.join(str(c) for c in call_kwargs['contents'] if isinstance(c, str))
+        assert 'sector carnico y alimentario' in prompt_text.lower()
+        assert 'source of truth' in prompt_text.lower()

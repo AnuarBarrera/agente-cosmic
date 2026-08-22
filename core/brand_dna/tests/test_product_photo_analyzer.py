@@ -61,3 +61,14 @@ def test_analyze_truncates_long_category_to_model_max_length():
 
     assert len(result['category']) == 100
     assert result['category'] == long_category.strip()[:100]
+
+
+def test_prompt_forbids_speculating_about_sector_or_intended_use():
+    # HALLAZGO 2026-08-22 (produccion): una bata de carnicero blanca con
+    # capucha se interpreto como "ideal para laboratorios o sector medico"
+    # -- esa especulacion visual contaminaba la generacion de imagen real,
+    # que no tiene forma de saber que el negocio es del sector carnico. El
+    # analizador debe describir solo lo visual, nunca el uso/sector/publico.
+    from core.brand_dna.extractors.product_photo_analyzer import _PROMPT
+    assert 'NO especules' in _PROMPT
+    assert 'sector' in _PROMPT.lower()
