@@ -23,9 +23,31 @@ def _fecha_es(dt) -> str:
     return f"{dt.day} de {_MESES_ES[dt.month - 1]}"
 
 
+def _magic_url(user, destination_path: str) -> str:
+    """URL de auto-login que aterriza en destination_path.
+
+    Dos caminos de degradación distintos, a propósito:
+      - user None (AnalysisJob.user es nullable, on_delete=SET_NULL): caso
+        ESPERADO, se devuelve el link normal en silencio.
+      - excepción al crear el token: fallo genuino, se registra y se devuelve
+        el link normal. El correo NUNCA se bloquea por esto: es el mismo
+        criterio fail-open de ProductPhotoAnalyzer y el precheck de copyright.
+    """
+    full_path = settings.COSMIC_BASE_URL + destination_path
+    if user is None:
+        return full_path
+    try:
+        from core.tenant_management.models import LoginToken
+        tok = LoginToken.objects.create(user=user, redirect_to=destination_path)
+        return settings.COSMIC_BASE_URL + reverse('magic_login', args=[tok.token])
+    except Exception:
+        logger.exception("No se pudo crear LoginToken — se envía link sin auto-login")
+        return full_path
+
+
 class EmailSender:
     def send_initial(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
-        calendar_url = settings.COSMIC_BASE_URL + reverse('calendar_review', args=[job.id])
+        calendar_url = _magic_url(job.user, reverse('calendar_review', args=[job.id]))
         html = render_to_string('content_pipeline/email_initial.html', {
             'brand_dna': brand_dna,
             'calendar_url': calendar_url,
@@ -45,7 +67,7 @@ class EmailSender:
         logger.info(f"Email inicial enviado a {job.email} para job {job.id}")
 
     def send_month_ready(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
-        calendar_url = settings.COSMIC_BASE_URL + reverse('calendar_review', args=[job.id])
+        calendar_url = _magic_url(job.user, reverse('calendar_review', args=[job.id]))
         html = render_to_string('content_pipeline/email_month_ready.html', {
             'brand_dna': brand_dna,
             'calendar_url': calendar_url,
@@ -65,7 +87,7 @@ class EmailSender:
         logger.info(f"Email de mes listo enviado a {job.email} para job {job.id}")
 
     def send_week_ready(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
-        calendar_url = settings.COSMIC_BASE_URL + reverse('calendar_review', args=[job.id])
+        calendar_url = _magic_url(job.user, reverse('calendar_review', args=[job.id]))
         html = render_to_string('content_pipeline/email_week_ready.html', {
             'brand_dna': brand_dna,
             'calendar_url': calendar_url,
@@ -93,8 +115,9 @@ class EmailSender:
             if locked_post is None:
                 logger.info(f"Post {post.id} ya no está pending — se omite envío duplicado")
                 return
-            calendar_review_url = settings.COSMIC_BASE_URL + reverse(
-                'calendar_review', args=[locked_post.calendar.brand_dna.job.id]
+            calendar_review_url = _magic_url(
+                locked_post.calendar.brand_dna.job.user,
+                reverse('calendar_review', args=[locked_post.calendar.brand_dna.job.id]),
             )
             fecha = _fecha_es(locked_post.scheduled_at)
             html = render_to_string('content_pipeline/email_daily.html', {
@@ -143,7 +166,7 @@ class EmailSender:
         logger.info(f"Email de trial expirado enviado a {job.email} para job {job.id}")
 
     def send_payment_failed(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
-        dashboard_url = settings.COSMIC_BASE_URL + reverse('dashboard')
+        dashboard_url = _magic_url(job.user, reverse('dashboard'))
         html = render_to_string('content_pipeline/email_payment_failed.html', {
             'brand_dna': brand_dna,
             'dashboard_url': dashboard_url,
@@ -190,7 +213,7 @@ class EmailSender:
     def send_reactivation_calendar(self, calendar: ContentCalendar) -> None:
         brand_dna = calendar.brand_dna
         job = brand_dna.job
-        calendar_review_url = settings.COSMIC_BASE_URL + reverse('calendar_review', args=[job.id])
+        calendar_review_url = _magic_url(job.user, reverse('calendar_review', args=[job.id]))
         html = render_to_string('content_pipeline/email_reactivation_calendar.html', {
             'brand_dna': brand_dna,
             'calendar_review_url': calendar_review_url,
@@ -209,7 +232,7 @@ class EmailSender:
         logger.info(f"Email de reactivacion (calendario) enviado a {job.email} para calendar {calendar.id}")
 
     def send_reactivation_analysis(self, user) -> None:
-        analysis_url = settings.COSMIC_BASE_URL + reverse('new_analysis')
+        analysis_url = _magic_url(user, reverse('new_analysis'))
         html = render_to_string('content_pipeline/email_reactivation_analysis.html', {
             'analysis_url': analysis_url,
         })
