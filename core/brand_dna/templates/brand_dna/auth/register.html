@@ -15,6 +15,18 @@
     label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 6px; }
     input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #333; background: #0d0d1a; color: #f0f0f0; font-size: 1rem; }
     input:focus { outline: none; border-color: #e94560; }
+    /* Chrome pinta su propio fondo claro con texto negro al autocompletar,
+       ignorando el tema oscuro. background-color no lo sobreescribe: el inset
+       shadow es la unica via fiable. */
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus {
+      -webkit-text-fill-color: #f0f0f0;
+      -webkit-box-shadow: 0 0 0 1000px #0d0d1a inset;
+      box-shadow: 0 0 0 1000px #0d0d1a inset;
+      caret-color: #f0f0f0;
+      transition: background-color 9999s ease-in-out 0s;
+    }
     .hint { font-size: 0.75rem; color: #666; margin-top: 4px; }
     .btn { width: 100%; padding: 14px; background: #e94560; color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 8px; }
     .btn:hover { background: #c73652; }

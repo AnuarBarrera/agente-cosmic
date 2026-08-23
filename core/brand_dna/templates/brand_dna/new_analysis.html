@@ -27,6 +27,18 @@
       background: #0d0d1a; color: #f0f0f0; font-size: 1rem;
     }
     textarea { height: 100px; resize: vertical; }
+    /* Chrome pinta su propio fondo claro con texto negro al autocompletar,
+       ignorando el tema oscuro. background-color no lo sobreescribe: el inset
+       shadow es la unica via fiable. */
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus {
+      -webkit-text-fill-color: #f0f0f0;
+      -webkit-box-shadow: 0 0 0 1000px #0d0d1a inset;
+      box-shadow: 0 0 0 1000px #0d0d1a inset;
+      caret-color: #f0f0f0;
+      transition: background-color 9999s ease-in-out 0s;
+    }
     .section-title { font-size: 1rem; color: #e94560; margin: 28px 0 16px; font-weight: 600; }
     .optional-badge { font-size: 0.75rem; background: #333; color: #aaa; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
     input[type="file"] { width: 100%; padding: 10px; background: #0d0d1a; border: 1px dashed #444; border-radius: 8px; color: #aaa; }
@@ -157,11 +169,11 @@
         <small id="photoPrecheckStatus" style="display:none;margin-top:6px;font-size:0.85rem;"></small>
       </div>
 
-      <p style="text-align:center;color:#888;font-size:0.85rem;margin-top:20px;margin-bottom:4px;">Vamos a crear tu plan de contenido de siete días basado en tu marca.</p>
+      <p style="text-align:center;color:#888;font-size:0.85rem;margin-top:20px;margin-bottom:4px;">Generamos 7 días de contenido listo para publicar, a partir de lo que nos contaste.</p>
 
       <button type="submit" class="btn" id="submitBtn">
         <span class="btn-spinner" id="btnSpinner"></span>
-        <span id="btnText">Analizar mi marca</span>
+        <span id="btnText">Generar mi contenido</span>
       </button>
     </form>
   </div>

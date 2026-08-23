@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/svg+xml" href="{% url 'favicon' %}">
-  <title>{% if job.status == 'done' %}Este es el análisis de tu marca{% else %}Analizando tu marca{% endif %} — Agente Cosmic</title>
+  <title>{% if job.status == 'done' %}Los datos de tu marca{% else %}Preparando tu contenido{% endif %} — Agente Cosmic</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', sans-serif; background: #0d0d1a; color: #f0f0f0; min-height: 100vh; padding-top: 64px; }
@@ -225,7 +225,7 @@
 </nav>
 
 <div class="container">
-  <div class="page-title">{% if job.status == 'done' %}Este es el análisis de tu marca{% else %}Analizando tu marca{% endif %}</div>
+  <div class="page-title">{% if job.status == 'done' %}Los datos de tu marca{% else %}Preparando tu contenido{% endif %}</div>
   <div class="page-sub">{% if brand_dna %}{{ brand_dna.business_name }}{% elif job.business_url %}{{ job.business_url }}{% else %}Analisis manual{% endif %}</div>
 
   {% if job.status == 'done' and brand_dna %}
@@ -377,7 +377,7 @@
       </svg>
     </div>
 
-    <div class="loading-msg" id="loadingMsg">Iniciando análisis...</div>
+    <div class="loading-msg" id="loadingMsg">Comenzando...</div>
     <div class="loading-sub" id="loadingSub">El Agente Cosmic está procesando tu marca</div>
 
     <ul class="stage-list" id="stageList">
@@ -400,7 +400,7 @@
 
   <!-- ── ERROR ── -->
   <div class="error-card" id="errorCard" style="display:none;">
-    <h2>Error en el análisis</h2>
+    <h2>Algo salió mal</h2>
     <p id="errorMessage" style="margin-top:12px; color:#aaa;"></p>
     <a href="{% url 'new_analysis' %}" class="nav-btn nav-btn-primary" style="display:inline-block;margin-top:20px;">Intentar de nuevo</a>
   </div>

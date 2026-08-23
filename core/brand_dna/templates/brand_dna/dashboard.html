@@ -80,12 +80,12 @@
   </nav>
 
   <div class="container">
-    <h1>Mis análisis de marca</h1>
-    <p class="welcome">Cada análisis genera 7 días de contenido listo para publicar — revísalo y descárgalo desde aquí.</p>
+    <h1>Mi contenido</h1>
+    <p class="welcome">Cada marca que registras genera 7 días de contenido listo para publicar — revísalo y descárgalo desde aquí.</p>
 
     {% if has_processing %}
     <div id="processingBanner" style="background:#0d2218;border:1px solid #2d6a4f;border-radius:10px;padding:16px 20px;color:#7ec8a4;font-size:0.9rem;line-height:1.6;margin-bottom:24px;">
-      ☕ <strong style="color:#a8e6c8;">Tu análisis se está generando.</strong> No hace falta que esperes aquí — te avisamos por correo en cuanto esté listo. Puedes seguir el progreso abajo.
+      ☕ <strong style="color:#a8e6c8;">Tu contenido se está generando.</strong> No hace falta que esperes aquí — te avisamos por correo en cuanto esté listo. Puedes seguir el progreso abajo.
     </div>
     {% endif %}
 
@@ -96,7 +96,7 @@
     {% endif %}
 
     {% if used_total < max_calendars %}
-    {% if used_total > 0 %}<a href="{% url 'new_analysis' %}" class="btn-new">+ Nuevo análisis</a>{% endif %}
+    {% if used_total > 0 %}<a href="{% url 'new_analysis' %}" class="btn-new">+ Nueva marca</a>{% endif %}
     <div style="display:inline-flex;align-items:center;gap:8px;padding:8px 16px;background:#1a1a2e;border-radius:8px;margin-bottom:24px;font-size:0.82rem;color:#aaa;margin-left:12px;">
       📅 Calendarios: <strong style="color:#f0f0f0;">{{ used_total }}/{{ max_calendars }}</strong>
     </div>
@@ -136,7 +136,7 @@
         <div class="job-links" style="display:flex;gap:10px;flex-direction:column;align-items:flex-end;">
           {% if job.status == 'done' %}
           <a href="{% url 'calendar_review' job.id %}" class="job-link-primary">Ver mi calendario →</a>
-          <a href="{% url 'results' job.id %}" class="job-link-secondary">Análisis de marca</a>
+          <a href="{% url 'results' job.id %}" class="job-link-secondary">Mi marca</a>
           {% endif %}
         </div>
       </div>
@@ -144,7 +144,7 @@
     {% else %}
       <div class="empty">
         <p>Aún no tienes ningún calendario de contenido. Cuéntanos de tu negocio para generar el primero.</p>
-        <a href="{% url 'new_analysis' %}" class="btn-new">Analizar mi marca</a>
+        <a href="{% url 'new_analysis' %}" class="btn-new">Generar mi contenido</a>
       </div>
     {% endif %}
   </div>
@@ -237,7 +237,7 @@
         // la tarjeta cambia de jerarquía sola al terminar el polling.
         card.querySelector('.job-links').innerHTML =
           '<a href="/calendar/' + jobId + '/" class="job-link-primary">Ver mi calendario →</a>' +
-          '<a href="/resultados/' + jobId + '/" class="job-link-secondary">Análisis de marca</a>';
+          '<a href="/resultados/' + jobId + '/" class="job-link-secondary">Mi marca</a>';
       }
     }
 
