@@ -26,6 +26,7 @@ urlpatterns = [
     path('dashboard/apply-code/', auth_views.apply_code_view, name='apply_code'),
     path('dashboard/delete-account/', auth_views.deactivate_account_view, name='deactivate_account'),
     path('auth/reactivate/<str:token>/', auth_views.reactivate_account_view, name='reactivate_account'),
+    path('auth/entrar/<str:token>/', auth_views.magic_login_view, name='magic_login'),
     path('calendar/<uuid:job_id>/', views.calendar_review_view, name='calendar_review'),
     path('api/post/<uuid:post_id>/action/', views.post_action_api, name='post_action_api'),
     path('api/post/<uuid:post_id>/regen-status/', views.post_regen_status_api, name='post_regen_status_api'),

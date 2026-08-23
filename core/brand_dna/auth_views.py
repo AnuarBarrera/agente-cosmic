@@ -8,12 +8,16 @@ from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.shortcuts import render, redirect
+from django.http import HttpResponse
+from django.urls import reverse
+from django.utils import timezone
+from django.utils.http import urlencode
 from django.utils.html import escape
 from .auth_forms import RegisterForm, LoginForm
 from .models import AnalysisJob
 from core.shared.metrics import (
     LOGIN_ATTEMPTS, REGISTRATIONS, EMAIL_VERIFICATIONS,
-    INVITATION_CODES_REDEEMED, EMAILS_SENT,
+    INVITATION_CODES_REDEEMED, EMAILS_SENT, MAGIC_LOGINS,
 )
 
 logger = logging.getLogger(__name__)
@@ -650,3 +654,70 @@ def reactivate_account_view(request, token):
 
     login(request, user)
     return redirect('dashboard')
+
+
+_MAGIC_LOGIN_MAX_ATTEMPTS = 10
+_MAGIC_LOGIN_WINDOW = 300
+
+
+def magic_login_view(request, token):
+    """Auto-login desde un correo (magic link).
+
+    Es un GET que muta estado (crea sesión), técnicamente no idempotente —
+    mismo patrón que verify_email_view, y por la misma razón: un correo solo
+    puede enlazar un GET.
+
+    El destino sale de LoginToken.redirect_to (BD), NUNCA de un ?next= en la
+    URL: eso es lo que impide usar el dominio como trampolín de phishing.
+    """
+    from core.tenant_management.models import LoginToken
+
+    ip = _get_client_ip(request)
+    cache_key = f'magic_login_attempts:{ip}'
+
+    # El límite se evalúa ANTES de tocar la base de datos — si no, el DoS que
+    # queremos prevenir seguiría costando un query por request.
+    if (cache.get(cache_key) or 0) >= _MAGIC_LOGIN_MAX_ATTEMPTS:
+        MAGIC_LOGINS.labels(result='rate_limited').inc()
+        return HttpResponse('Demasiados intentos. Intenta de nuevo en 5 minutos.', status=429)
+
+    def _registrar_fallo():
+        # Solo los intentos FALLIDOS incrementan el contador. Un usuario
+        # legítimo que abre su link diez veces nunca se topa con el límite.
+        try:
+            cache.incr(cache_key)
+        except ValueError:
+            cache.set(cache_key, 1, _MAGIC_LOGIN_WINDOW)
+
+    login_url = reverse('login')
+    tok = LoginToken.objects.filter(token=token).select_related('user').first()
+
+    if tok is None:
+        _registrar_fallo()
+        MAGIC_LOGINS.labels(result='invalid').inc()
+        return redirect(login_url)
+
+    if not tok.is_valid():
+        _registrar_fallo()
+        MAGIC_LOGINS.labels(result='expired').inc()
+        return redirect(f'{login_url}?{urlencode({"next": tok.redirect_to})}')
+
+    if not tok.user.is_active:
+        _registrar_fallo()
+        MAGIC_LOGINS.labels(result='inactive').inc()
+        return redirect(login_url)
+
+    # login() cicla la sesión: si había sesión de otro usuario en este
+    # navegador queda correctamente reemplazada. Si era del mismo usuario,
+    # simplemente rota — inofensivo, sin caso especial.
+    login(request, tok.user)
+
+    tok.used_count += 1
+    tok.last_used_at = timezone.now()
+    tok.last_used_ip = ip or None
+    tok.save(update_fields=['used_count', 'last_used_at', 'last_used_ip'])
+
+    MAGIC_LOGINS.labels(result='success').inc()
+    # El 302 saca el token de la barra de direcciones, así que no queda
+    # visible ni se filtra por el header Referer.
+    return redirect(tok.redirect_to)

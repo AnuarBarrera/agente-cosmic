@@ -66,6 +66,12 @@ EMAIL_VERIFICATIONS = Counter(
     ['result'],
 )
 
+MAGIC_LOGINS = Counter(
+    'cosmic_magic_logins_total',
+    'Magic link auto-logins',
+    ['result'],
+)
+
 INVITATION_CODES_REDEEMED = Counter(
     'cosmic_invitation_codes_redeemed_total',
     'Invitation codes redeemed',
