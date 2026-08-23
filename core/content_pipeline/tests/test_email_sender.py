@@ -322,3 +322,139 @@ def test_send_reactivation_analysis_calls_django_send(full_setup):
     mock_send.assert_called_once()
     call_kwargs = mock_send.call_args
     assert user.email in call_kwargs[1]['recipient_list']
+
+
+# ── Magic link en los correos ──
+
+import secrets
+from django.contrib.auth import get_user_model
+from django.core.cache import cache
+from unittest.mock import patch
+from core.tenant_management.models import LoginToken
+
+
+@pytest.fixture
+def job_con_user(full_setup):
+    """full_setup crea el AnalysisJob SIN user (el campo es nullable).
+    Aquí se le asigna uno para ejercitar el camino con magic link."""
+    User = get_user_model()
+    job, dna, calendar, posts = full_setup
+    user = User.objects.create_user(email='dueno@ejemplo.com', password='Str0ng-Pwd-123!')
+    job.user = user
+    job.save(update_fields=['user'])
+    return job, dna, calendar, posts, user
+
+
+def test_magic_url_crea_token_con_el_destino_correcto(db):
+    User = get_user_model()
+    from core.content_pipeline.email_sender import _magic_url
+    user = User.objects.create_user(email='mu@ejemplo.com', password='Str0ng-Pwd-123!')
+
+    url = _magic_url(user, '/calendar/abc/')
+
+    tok = LoginToken.objects.get(user=user)
+    assert tok.redirect_to == '/calendar/abc/'
+    assert tok.token in url
+    assert url.startswith('http')
+
+
+def test_magic_url_sin_user_devuelve_link_normal(db):
+    """AnalysisJob.user es nullable (on_delete=SET_NULL): un job cuyo usuario
+    fue eliminado sigue mandando correos. Ese caso es ESPERADO, no excepcional,
+    así que se atiende con un guard explícito en vez de dejarlo caer al
+    except — si no, cada correo de un job sin usuario escribiría un stack
+    trace completo en los logs."""
+    from core.content_pipeline.email_sender import _magic_url
+
+    url = _magic_url(None, '/dashboard/')
+
+    assert url.endswith('/dashboard/')
+    assert '/auth/entrar/' not in url
+    assert LoginToken.objects.count() == 0
+
+
+def test_magic_url_fail_open_si_falla_la_creacion_del_token(db):
+    """LA PRUEBA MÁS IMPORTANTE DEL PLAN: si la base de datos falla al crear el
+    token, el correo que anuncia el contenido generado DEBE salir igual, con el
+    link de siempre. Nunca un fallo del magic link puede bloquear el correo que
+    entrega el valor."""
+    User = get_user_model()
+    from core.content_pipeline.email_sender import _magic_url
+    user = User.objects.create_user(email='fo@ejemplo.com', password='Str0ng-Pwd-123!')
+
+    with patch(
+        'core.tenant_management.models.LoginToken.objects.create',
+        side_effect=Exception('base de datos caida'),
+    ):
+        url = _magic_url(user, '/calendar/xyz/')
+
+    assert url.endswith('/calendar/xyz/')
+    assert '/auth/entrar/' not in url
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx')
+def test_los_cinco_correos_de_calendario_llevan_magic_link(job_con_user):
+    """Los 5 correos que aterrizan en calendar_review. Se prueban juntos porque
+    comparten destino: si uno se queda sin _magic_url, este test lo atrapa."""
+    from core.content_pipeline.email_sender import EmailSender
+    job, dna, calendar, posts, user = job_con_user
+    sender = EmailSender()
+    destino = f'/calendar/{job.id}/'
+
+    llamadas = [
+        lambda: sender.send_initial(job=job, brand_dna=dna),
+        lambda: sender.send_month_ready(job=job, brand_dna=dna),
+        lambda: sender.send_week_ready(job=job, brand_dna=dna),
+        lambda: sender.send_daily(post=posts[0]),
+        lambda: sender.send_reactivation_calendar(calendar=calendar),
+    ]
+
+    for llamada in llamadas:
+        LoginToken.objects.all().delete()
+        with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+            llamada()
+        tok = LoginToken.objects.get(user=user)
+        assert tok.redirect_to == destino
+        assert f'/auth/entrar/{tok.token}/' in mock_send.call_args[1]['html_message']
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx')
+def test_payment_failed_lleva_magic_link_al_dashboard(job_con_user):
+    from core.content_pipeline.email_sender import EmailSender
+    job, dna, calendar, posts, user = job_con_user
+
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        EmailSender().send_payment_failed(job=job, brand_dna=dna)
+
+    tok = LoginToken.objects.get(user=user)
+    assert tok.redirect_to == '/dashboard/'
+    assert f'/auth/entrar/{tok.token}/' in mock_send.call_args[1]['html_message']
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx')
+def test_reactivation_analysis_lleva_magic_link_a_nuevo_analisis(db):
+    User = get_user_model()
+    from core.content_pipeline.email_sender import EmailSender
+    user = User.objects.create_user(email='react@ejemplo.com', password='Str0ng-Pwd-123!')
+
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        EmailSender().send_reactivation_analysis(user=user)
+
+    tok = LoginToken.objects.get(user=user)
+    assert tok.redirect_to.endswith('/nuevo-analisis/') or 'analisis' in tok.redirect_to
+    assert f'/auth/entrar/{tok.token}/' in mock_send.call_args[1]['html_message']
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx')
+def test_los_dos_correos_de_stripe_no_generan_token(job_con_user):
+    """Su único link va a Stripe (fuera del dominio) — no hay vista de Django
+    que auto-loguear."""
+    from core.content_pipeline.email_sender import EmailSender
+    job, dna, calendar, posts, user = job_con_user
+    sender = EmailSender()
+
+    with patch('core.content_pipeline.email_sender.send_mail'):
+        sender.send_trial_expired(job=job, brand_dna=dna)
+        sender.send_month_expired(job=job, brand_dna=dna)
+
+    assert LoginToken.objects.count() == 0
