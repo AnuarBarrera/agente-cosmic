@@ -27,6 +27,12 @@ def generate_reset_token():
     """Generate a secure token for password reset"""
     return secrets.token_urlsafe(32)
 
+
+def generate_login_token():
+    """Generate a secure token for magic link auto-login"""
+    return secrets.token_urlsafe(32)
+
+
 class Plan(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100, unique=True)
@@ -221,6 +227,46 @@ class PasswordResetToken(models.Model):
         db_table = 'password_reset_tokens'
         verbose_name = 'Password Reset Token'
         verbose_name_plural = 'Password Reset Tokens'
+
+
+class LoginToken(models.Model):
+    """Token de auto-login enviado por correo (magic link).
+
+    A diferencia de EmailVerificationToken y PasswordResetToken, este token es
+    REUTILIZABLE dentro de su ventana de 72h: un token de un solo uso lo
+    quemaría el prefetch de Gmail/Outlook antes de que el usuario haga clic, y
+    rompería el caso "lo abro en el celular y luego en la computadora".
+    Por eso no lleva is_used — used_count registra los accesos para auditoría.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    token = models.CharField(max_length=64, unique=True, default=generate_login_token)
+    # Ruta RELATIVA del propio dominio (ej. '/calendar/<uuid>/'). Guardar el
+    # destino del lado del servidor —en vez de aceptar un ?next= en la URL—
+    # es lo que cierra el open redirect.
+    redirect_to = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_count = models.IntegerField(default=0)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    last_used_ip = models.GenericIPAddressField(null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            # Token válido por 72 horas
+            self.expires_at = timezone.now() + timezone.timedelta(hours=72)
+        super().save(*args, **kwargs)
+
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+
+    def is_valid(self):
+        return not self.is_expired()
+
+    class Meta:
+        db_table = 'login_tokens'
+        verbose_name = 'Login Token'
+        verbose_name_plural = 'Login Tokens'
 
 
 class BlacklistedToken(models.Model):
