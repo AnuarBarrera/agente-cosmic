@@ -1,12 +1,19 @@
 import pytest
+import secrets
 from unittest.mock import patch
 from django.test import override_settings
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
 from core.brand_dna.models import AnalysisJob, BrandDNA
 from core.content_pipeline.models import ContentCalendar, ContentPost
 
 pytestmark = pytest.mark.django_db
+
+# Contraseñas generadas dinámicamente — no hardcodeadas en el código fuente
+# (misma convención que test_auth_views.py y el resto de la suite; un literal
+# aquí dispara los escáneres de secretos aunque el valor sea de prueba).
+_TEST_PWD = f"T3st-{secrets.token_urlsafe(10)}!"
 
 
 @pytest.fixture
@@ -107,7 +114,7 @@ def test_send_trial_expired_email_calls_django_send(full_setup):
     })
     from django.contrib.auth import get_user_model
     UserModel = get_user_model()
-    user = UserModel.objects.create_user(username=job.email, email=job.email, password='pass1234')
+    user = UserModel.objects.create_user(username=job.email, email=job.email, password=_TEST_PWD)
     tenant = TenantModel.objects.create(name=user.email, status='active')
     Subscription.objects.create(tenant=tenant, plan=plan, status='trial_expired')
     user.tenant = tenant
@@ -137,7 +144,7 @@ def test_send_payment_failed_email_calls_django_send(full_setup):
     })
     from django.contrib.auth import get_user_model
     UserModel = get_user_model()
-    user = UserModel.objects.create_user(username=job.email, email=job.email, password='pass1234')
+    user = UserModel.objects.create_user(username=job.email, email=job.email, password=_TEST_PWD)
     tenant = TenantModel.objects.create(name=user.email, status='active')
     Subscription.objects.create(tenant=tenant, plan=plan, status='past_due', stripe_customer_id='cus_test1')
     user.tenant = tenant
@@ -222,7 +229,7 @@ def test_send_month_expired_email_calls_django_send(full_setup):
     })
     from django.contrib.auth import get_user_model
     UserModel = get_user_model()
-    user = UserModel.objects.create_user(username=job.email, email=job.email, password='pass1234')
+    user = UserModel.objects.create_user(username=job.email, email=job.email, password=_TEST_PWD)
     tenant = TenantModel.objects.create(name=user.email, status='active')
     Subscription.objects.create(tenant=tenant, plan=plan, status='trial_expired')
     user.tenant = tenant
@@ -253,7 +260,7 @@ def test_send_trial_expired_uses_plan_specific_payment_link(full_setup):
     )
     from django.contrib.auth import get_user_model
     UserModel = get_user_model()
-    user = UserModel.objects.create_user(username=job.email, email=job.email, password='pass1234')
+    user = UserModel.objects.create_user(username=job.email, email=job.email, password=_TEST_PWD)
     tenant = TenantModel.objects.create(name=user.email, status='active')
     Subscription.objects.create(tenant=tenant, plan=plan, status='trial_expired')
     user.tenant = tenant
@@ -280,7 +287,7 @@ def test_send_month_expired_uses_plan_specific_payment_link(full_setup):
     )
     from django.contrib.auth import get_user_model
     UserModel = get_user_model()
-    user = UserModel.objects.create_user(username=job.email, email=job.email, password='pass1234')
+    user = UserModel.objects.create_user(username=job.email, email=job.email, password=_TEST_PWD)
     tenant = TenantModel.objects.create(name=user.email, status='active')
     Subscription.objects.create(tenant=tenant, plan=plan, status='trial_expired')
     user.tenant = tenant
@@ -315,7 +322,7 @@ def test_send_reactivation_analysis_calls_django_send(full_setup):
     from django.contrib.auth import get_user_model
     job, dna, calendar, posts = full_setup
     UserModel = get_user_model()
-    user = UserModel.objects.create_user(username=job.email, email=job.email, password='pass1234')
+    user = UserModel.objects.create_user(username=job.email, email=job.email, password=_TEST_PWD)
     with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
         sender = EmailSender()
         sender.send_reactivation_analysis(user=user)
@@ -326,8 +333,6 @@ def test_send_reactivation_analysis_calls_django_send(full_setup):
 
 # ── Magic link en los correos ──
 
-import secrets
-from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from unittest.mock import patch
 from core.tenant_management.models import LoginToken
@@ -339,7 +344,7 @@ def job_con_user(full_setup):
     Aquí se le asigna uno para ejercitar el camino con magic link."""
     User = get_user_model()
     job, dna, calendar, posts = full_setup
-    user = User.objects.create_user(email='dueno@ejemplo.com', password='Str0ng-Pwd-123!')
+    user = User.objects.create_user(email='dueno@ejemplo.com', password=_TEST_PWD)
     job.user = user
     job.save(update_fields=['user'])
     return job, dna, calendar, posts, user
@@ -348,7 +353,7 @@ def job_con_user(full_setup):
 def test_magic_url_crea_token_con_el_destino_correcto(db):
     User = get_user_model()
     from core.content_pipeline.email_sender import _magic_url
-    user = User.objects.create_user(email='mu@ejemplo.com', password='Str0ng-Pwd-123!')
+    user = User.objects.create_user(email='mu@ejemplo.com', password=_TEST_PWD)
 
     url = _magic_url(user, '/calendar/abc/')
 
@@ -380,7 +385,7 @@ def test_magic_url_fail_open_si_falla_la_creacion_del_token(db):
     entrega el valor."""
     User = get_user_model()
     from core.content_pipeline.email_sender import _magic_url
-    user = User.objects.create_user(email='fo@ejemplo.com', password='Str0ng-Pwd-123!')
+    user = User.objects.create_user(email='fo@ejemplo.com', password=_TEST_PWD)
 
     with patch(
         'core.tenant_management.models.LoginToken.objects.create',
@@ -435,7 +440,7 @@ def test_payment_failed_lleva_magic_link_al_dashboard(job_con_user):
 def test_reactivation_analysis_lleva_magic_link_a_nuevo_analisis(db):
     User = get_user_model()
     from core.content_pipeline.email_sender import EmailSender
-    user = User.objects.create_user(email='react@ejemplo.com', password='Str0ng-Pwd-123!')
+    user = User.objects.create_user(email='react@ejemplo.com', password=_TEST_PWD)
 
     with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
         EmailSender().send_reactivation_analysis(user=user)

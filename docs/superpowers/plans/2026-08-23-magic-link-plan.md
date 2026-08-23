@@ -582,6 +582,12 @@ GIT_EDITOR=true git commit -m "feat(brand_dna): vista de magic link con rate lim
 
 Agregar al final de `core/content_pipeline/tests/test_email_sender.py`:
 
+**Convención obligatoria del repo**: las contraseñas de prueba se generan
+dinámicamente (`_TEST_PWD = f"T3st-{secrets.token_urlsafe(10)}!"`), nunca como
+literal en el código — ver `test_auth_views.py:11-12` y otros 5 archivos de la
+suite. Un literal dispara los escáneres de secretos (GitGuardian) aunque el
+valor sea de prueba.
+
 El fixture `full_setup` (línea 12) devuelve la **tupla** `(job, dna, calendar, posts)`, y crea el `AnalysisJob` **sin user**. Los tests existentes del archivo mockean `send_mail` con `patch('core.content_pipeline.email_sender.send_mail')`, así que `mail.outbox` nunca se llena — el HTML se inspecciona desde `mock_send.call_args[1]['html_message']`. Los tests nuevos siguen ese mismo estilo.
 
 ```python
@@ -594,7 +600,7 @@ def job_con_user(full_setup):
     from django.contrib.auth import get_user_model
     User = get_user_model()
     job, dna, calendar, posts = full_setup
-    user = User.objects.create_user(email='dueno@ejemplo.com', password='Str0ng-Pwd-123!')
+    user = User.objects.create_user(email='dueno@ejemplo.com', password=_TEST_PWD)
     job.user = user
     job.save(update_fields=['user'])
     return job, dna, calendar, posts, user
@@ -605,7 +611,7 @@ def test_magic_url_crea_token_con_el_destino_correcto(db):
     from core.content_pipeline.email_sender import _magic_url
     from core.tenant_management.models import LoginToken
     User = get_user_model()
-    user = User.objects.create_user(email='mu@ejemplo.com', password='Str0ng-Pwd-123!')
+    user = User.objects.create_user(email='mu@ejemplo.com', password=_TEST_PWD)
 
     url = _magic_url(user, '/calendar/abc/')
 
@@ -639,7 +645,7 @@ def test_magic_url_fail_open_si_falla_la_creacion_del_token(db):
     from django.contrib.auth import get_user_model
     from core.content_pipeline.email_sender import _magic_url
     User = get_user_model()
-    user = User.objects.create_user(email='fo@ejemplo.com', password='Str0ng-Pwd-123!')
+    user = User.objects.create_user(email='fo@ejemplo.com', password=_TEST_PWD)
 
     with patch(
         'core.tenant_management.models.LoginToken.objects.create',
@@ -698,7 +704,7 @@ def test_reactivation_analysis_lleva_magic_link_a_nuevo_analisis(db):
     from core.content_pipeline.email_sender import EmailSender
     from core.tenant_management.models import LoginToken
     User = get_user_model()
-    user = User.objects.create_user(email='react@ejemplo.com', password='Str0ng-Pwd-123!')
+    user = User.objects.create_user(email='react@ejemplo.com', password=_TEST_PWD)
 
     with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
         EmailSender().send_reactivation_analysis(user=user)
