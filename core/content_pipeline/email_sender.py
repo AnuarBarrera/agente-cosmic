@@ -7,7 +7,6 @@ from django.urls import reverse
 from django.utils import timezone
 from core.brand_dna.models import AnalysisJob, BrandDNA
 from core.content_pipeline.models import ContentCalendar, ContentPost
-from core.brand_dna.rate_limits import get_payment_url
 from core.shared.metrics import EMAILS_SENT
 
 logger = logging.getLogger(__name__)
@@ -143,7 +142,10 @@ class EmailSender:
         logger.info(f"Email dia {locked_post.day_number} enviado a {email}")
 
     def send_trial_expired(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
-        payment_url = get_payment_url(job.user)
+        # Va al calendario, NO directo a Stripe: el usuario ve su contenido,
+        # puede agregar fotos nuevas antes de generar, y llega al pago ya
+        # logueado (así el retorno de Stripe lo encuentra con sesión viva).
+        payment_url = _magic_url(job.user, reverse('calendar_review', args=[job.id]))
         html = render_to_string('content_pipeline/email_trial_expired.html', {
             'brand_dna': brand_dna,
             'payment_url': payment_url,
@@ -152,8 +154,8 @@ class EmailSender:
         subject = f'⏳ Tu semana gratis de {name} terminó' if name else '⏳ Tu semana gratis terminó'
         plain = (
             f'Tu semana gratis de contenido para {name} terminó. '
-            f'Paga para seguir generando contenido: {payment_url}'
-        ) if name else f'Tu semana gratis terminó. Paga para seguir generando contenido: {payment_url}'
+            f'Entra a tu calendario para generar el próximo mes: {payment_url}'
+        ) if name else f'Tu semana gratis terminó. Entra a tu calendario para generar el próximo mes: {payment_url}'
         send_mail(
             subject,
             plain,
@@ -188,7 +190,8 @@ class EmailSender:
         logger.info(f"Email de cobro fallido enviado a {job.email} para job {job.id}")
 
     def send_month_expired(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
-        payment_url = get_payment_url(job.user)
+        # Mismo criterio que send_trial_expired: al calendario, no a Stripe.
+        payment_url = _magic_url(job.user, reverse('calendar_review', args=[job.id]))
         html = render_to_string('content_pipeline/email_month_expired.html', {
             'brand_dna': brand_dna,
             'payment_url': payment_url,
@@ -197,8 +200,8 @@ class EmailSender:
         subject = f'⏳ Ya pasó un mes — {name}' if name else '⏳ Ya pasó un mes desde tu última generación'
         plain = (
             f'Ya pasó un mes desde tu última generación de contenido para {name}. '
-            f'Genera un mes nuevo ahora: {payment_url}'
-        ) if name else f'Ya pasó un mes desde tu última generación de contenido. Genera un mes nuevo ahora: {payment_url}'
+            f'Entra a tu calendario para generar el próximo mes: {payment_url}'
+        ) if name else f'Ya pasó un mes desde tu última generación de contenido. Entra a tu calendario para generar el próximo mes: {payment_url}'
         send_mail(
             subject,
             plain,

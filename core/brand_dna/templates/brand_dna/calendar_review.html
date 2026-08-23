@@ -173,7 +173,7 @@
   {% if payment_needed %}
   <div id="payment-banner" style="background:#1a1a2e;border:1px solid #e94560;border-radius:12px;padding:20px;margin-bottom:24px;">
     <h2 style="font-size:1.1rem;margin-bottom:4px;">💳 Genera tu próximo mes</h2>
-    <p style="color:#aaa;font-size:0.85rem;margin-bottom:16px;">Paga para generar tu próximo mes de contenido — listo en minutos.</p>
+    <p style="color:#aaa;font-size:0.85rem;margin-bottom:16px;">{% if plan_price %}Genera tu próximo mes de contenido por <strong style="color:#f0f0f0;">${{ plan_price }} MXN</strong> — listo en minutos.{% else %}Paga para generar tu próximo mes de contenido — listo en minutos.{% endif %}</p>
     {% if photos_remaining > 0 %}
     <button type="button" onclick="openPhotoModal('{{ payment_url }}')" style="display:block;text-align:center;width:100%;padding:14px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:1rem;cursor:pointer;">Genera tu próximo mes →</button>
     {% else %}
@@ -183,7 +183,7 @@
   {% elif early_cta %}
   <div id="early-cta-banner" style="background:#1a1a2e;border:1px solid #4a9eff;border-radius:12px;padding:20px;margin-bottom:24px;">
     <h2 style="font-size:1.1rem;margin-bottom:4px;">⚡ ¿Quieres el mes completo desde hoy?</h2>
-    <p style="color:#aaa;font-size:0.85rem;margin-bottom:16px;">Paga ahora y genera un mes completo de contenido de inmediato — ahorra horas de trabajo cada semana.</p>
+    <p style="color:#aaa;font-size:0.85rem;margin-bottom:16px;">{% if plan_price %}Por <strong style="color:#f0f0f0;">${{ plan_price }} MXN</strong> genera un mes completo de inmediato — ahorra horas de trabajo cada semana.{% else %}Paga ahora y genera un mes completo de contenido de inmediato — ahorra horas de trabajo cada semana.{% endif %}</p>
     {% if photos_remaining > 0 %}
     <button type="button" onclick="openPhotoModal('{{ payment_url }}')" style="display:block;text-align:center;width:100%;padding:14px;background:#4a9eff;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:1rem;cursor:pointer;">Genera tu mes completo →</button>
     {% else %}

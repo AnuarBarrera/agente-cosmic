@@ -1503,3 +1503,37 @@ def test_precheck_api_missing_file_fails_open(user):
     assert data == {'ok': True, 'skipped': True}
 
 
+
+
+def test_calendar_review_muestra_el_precio_cuando_el_plan_lo_tiene(client, user, job_with_calendar, free_plan, settings):
+    """El banner es el ultimo punto antes de Stripe desde que los correos de
+    vencimiento entran por aqui en vez de ir al cobro directo. Si no dice el
+    monto, la sorpresa del precio solo se mueve un paso adelante."""
+    settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/global123'
+    free_plan.price = 199
+    free_plan.save(update_fields=['price'])
+    user.tenant.subscription.status = 'trial_expired'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+
+    assert response.context['plan_price'] == 199
+    assert '199' in response.content.decode('utf-8')
+
+
+def test_calendar_review_omite_el_precio_cuando_el_plan_esta_en_cero(client, user, job_with_calendar, free_plan, settings):
+    """Degradacion segura: Plan.price hoy esta en 0 para User y Fundador (el
+    precio real solo vive en el Payment Link de Stripe). Mientras no se
+    configure, el banner NO debe inventar una cifra."""
+    settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/global123'
+    free_plan.price = 0
+    free_plan.save(update_fields=['price'])
+    user.tenant.subscription.status = 'trial_expired'
+    user.tenant.subscription.save(update_fields=['status'])
+    client.force_login(user)
+
+    response = client.get(f'/calendar/{job_with_calendar.id}/')
+
+    assert response.context['plan_price'] == 0
+    assert 'Paga para generar tu próximo mes' in response.content.decode('utf-8')

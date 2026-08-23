@@ -376,6 +376,11 @@ def calendar_review_view(request, job_id):
     payment_url = ''
     if payment_needed or early_cta:
         payment_url = get_payment_url(job.user)
+    # El banner es el ultimo punto antes de Stripe desde que los correos de
+    # vencimiento entran por aqui. Plan.price hoy esta en 0 (el precio real
+    # vive solo en el Payment Link), asi que el template lo omite si es 0 en
+    # vez de inventar una cifra que podria no coincidir con el cobro.
+    plan_price = int(plan.price) if plan.price else 0
     photos_remaining = max(0, plan.max_product_reference_photos - len(job.product_reference_image_paths))
 
     from core.brand_dna.rate_limits import can_create_calendar
@@ -438,6 +443,7 @@ def calendar_review_view(request, job_id):
         'total_edits': total_edits,
         'can_create_calendar': can_create,
         'payment_needed': payment_needed,
+        'plan_price': plan_price,
         'early_cta': early_cta,
         'payment_url': payment_url,
         'photos_remaining': photos_remaining,
