@@ -440,8 +440,9 @@ def test_reactivation_analysis_lleva_magic_link_a_nuevo_analisis(db):
     with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
         EmailSender().send_reactivation_analysis(user=user)
 
+    from django.urls import reverse
     tok = LoginToken.objects.get(user=user)
-    assert tok.redirect_to.endswith('/nuevo-analisis/') or 'analisis' in tok.redirect_to
+    assert tok.redirect_to == reverse('new_analysis')
     assert f'/auth/entrar/{tok.token}/' in mock_send.call_args[1]['html_message']
 
 

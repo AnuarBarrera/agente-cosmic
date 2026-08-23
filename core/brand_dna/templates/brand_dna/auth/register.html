@@ -21,8 +21,17 @@
     .btn-google { background: #fff; color: #333; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 12px; }
     .btn-google:hover { background: #f0f0f0; }
     .btn-google svg { width: 20px; height: 20px; }
-    .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; }
-    .divider span { color: #555; font-size: 0.8rem; }
+    /* El botón de correo pasa a contorno: en sólido coral competía con el de
+       Google y se llevaba la mirada, escondiendo el camino de 1 clic. */
+    .btn-outline { background: transparent; color: #e94560; border: 1px solid #e94560; }
+    .btn-outline:hover { background: rgba(233,69,96,0.1); }
+    .badge-fast { background: #2ecc71; color: #06301b; font-size: 0.68rem; font-weight: 700; padding: 2px 7px; border-radius: 10px; letter-spacing: 0.02em; }
+    .pwd-wrap { position: relative; }
+    .pwd-wrap input { padding-right: 62px; }
+    .pwd-toggle { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: transparent; border: none; color: #888; font-size: 0.8rem; font-weight: 600; cursor: pointer; padding: 6px 8px; }
+    .pwd-toggle:hover { color: #e94560; }
+    .divider { display: flex; align-items: center; gap: 12px; margin: 24px 0; }
+    .divider span { color: #888; font-size: 0.85rem; font-weight: 600; }
     .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #333; }
     .error-box { background: #3a1520; border: 1px solid #e94560; color: #f9a; padding: 12px; border-radius: 8px; font-size: 0.85rem; margin-bottom: 4px; }
     .field-errors { margin-top: 6px; }
@@ -64,11 +73,12 @@
           <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
           <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
         </svg>
-        Continuar con Google
+        Registrarme con Google
+        <span class="badge-fast">MÁS RÁPIDO</span>
       </button>
     </a>
 
-    <div class="divider"><span>o con tu correo</span></div>
+    <div class="divider"><span>o crea tu cuenta con correo</span></div>
 
     <form method="POST" onsubmit="if (typeof gtag === 'function') gtag('event', 'register_submit', { event_category: 'auth' });">
       {% csrf_token %}
@@ -84,7 +94,10 @@
       </div>
       <div class="form-group">
         <label for="password1">Contraseña</label>
-        <input type="password" id="password1" name="password1" placeholder="Mínimo 12 caracteres" required>
+        <div class="pwd-wrap">
+          <input type="password" id="password1" name="password1" placeholder="Mínimo 12 caracteres" required>
+          <button type="button" class="pwd-toggle" id="pwdToggle" aria-label="Mostrar contraseña">Ver</button>
+        </div>
         <div class="hint">Tu información está protegida.</div>
         {% if form.password1.errors %}
         <div class="field-errors">
@@ -92,16 +105,7 @@
         </div>
         {% endif %}
       </div>
-      <div class="form-group">
-        <label for="password2">Confirmar contraseña</label>
-        <input type="password" id="password2" name="password2" placeholder="Repite tu contraseña" required>
-        {% if form.password2.errors %}
-        <div class="field-errors">
-          {% for e in form.password2.errors %}<div class="error-box">{{ e }}</div>{% endfor %}
-        </div>
-        {% endif %}
-      </div>
-      <button type="submit" class="btn">Crear cuenta</button>
+      <button type="submit" class="btn btn-outline">Crear cuenta con correo</button>
     </form>
 
     <div class="footer-link">
@@ -112,5 +116,21 @@
     </div>
     {% endif %}
   </div>
+  <script>
+    // Reemplaza al campo "confirmar contraseña": deja verificar lo tecleado sin
+    // duplicar la interacción, que en móvil es la causa principal de abandono.
+    (function() {
+      var btn = document.getElementById('pwdToggle');
+      var input = document.getElementById('password1');
+      if (!btn || !input) return;
+      btn.addEventListener('click', function() {
+        var oculto = input.type === 'password';
+        input.type = oculto ? 'text' : 'password';
+        btn.textContent = oculto ? 'Ocultar' : 'Ver';
+        btn.setAttribute('aria-label', oculto ? 'Ocultar contraseña' : 'Mostrar contraseña');
+        input.focus();
+      });
+    })();
+  </script>
 </body>
 </html>

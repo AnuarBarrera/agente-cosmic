@@ -14,10 +14,6 @@ class RegisterForm(forms.Form):
         min_length=12,
         help_text='Mínimo 12 caracteres',
     )
-    password2 = forms.CharField(
-        label='Confirmar contraseña',
-        widget=forms.PasswordInput,
-    )
     invitation_code = forms.CharField(
         label='Código de invitación',
         required=False,
@@ -38,13 +34,9 @@ class RegisterForm(forms.Form):
             validate_password(password)
         return password
 
-    def clean(self):
-        cleaned = super().clean()
-        p1 = cleaned.get('password1')
-        p2 = cleaned.get('password2')
-        if p1 and p2 and p1 != p2:
-            self.add_error('password2', 'Las contraseñas no coinciden.')
-        return cleaned
+    # Sin clean() de confirmación: el registro ya no pide repetir la contraseña.
+    # En su lugar el formulario ofrece un botón para ver lo que se escribió, que
+    # cumple la misma función de evitar errores de tecleo sin duplicar el campo.
 
 
 class LoginForm(forms.Form):

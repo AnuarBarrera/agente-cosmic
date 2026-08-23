@@ -48,10 +48,11 @@ def setup_plans_and_groups(db):
 class TestRegisterView:
     @patch('core.brand_dna.auth_views.send_mail')
     def test_register_creates_token_not_user(self, mock_send, client, setup_plans_and_groups):
+        # Sin password2: confirmar contraseña se eliminó del registro (antipatrón
+        # de UX en móvil — duplica la interacción y sube el abandono).
         resp = client.post('/auth/register/', {
             'email': 'new@test.com',
             'password1': _TEST_PWD,
-            'password2': _TEST_PWD,
         })
         assert resp.status_code == 200
         assert b'Revisa tu correo' in resp.content
@@ -68,7 +69,6 @@ class TestRegisterView:
         resp = client.post('/auth/register/', {
             'email': 'invited@test.com',
             'password1': _TEST_PWD,
-            'password2': _TEST_PWD,
             'invitation_code': code.code,
         })
         assert resp.status_code == 200
