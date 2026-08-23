@@ -46,6 +46,12 @@
     .job-links { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; width: 100%; }
     .job-link { color: #e94560; text-decoration: none; font-size: 0.88rem; font-weight: 600; }
     .job-link:hover { text-decoration: underline; }
+    /* El calendario es lo que el usuario vino a buscar: va como botón sólido.
+       El ADN de marca baja a link de texto — sigue accesible, deja de competir. */
+    .job-link-primary { display: inline-block; padding: 9px 18px; background: #e94560; color: #fff; border-radius: 8px; text-decoration: none; font-size: 0.88rem; font-weight: 700; white-space: nowrap; }
+    .job-link-primary:hover { background: #c73652; text-decoration: none; }
+    .job-link-secondary { color: #8a8aa0; text-decoration: none; font-size: 0.82rem; font-weight: 500; }
+    .job-link-secondary:hover { color: #aaa; text-decoration: underline; }
     .colors { display: flex; gap: 4px; margin-top: 6px; }
     .color-dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #333; flex-shrink: 0; }
 
@@ -129,8 +135,8 @@
         {% endif %}
         <div class="job-links" style="display:flex;gap:10px;flex-direction:column;align-items:flex-end;">
           {% if job.status == 'done' %}
-          <a href="{% url 'results' job.id %}" class="job-link">Análisis de marca →</a>
-          <a href="{% url 'calendar_review' job.id %}" class="job-link" style="color:#4a9eff;">Revisar calendario →</a>
+          <a href="{% url 'calendar_review' job.id %}" class="job-link-primary">Ver mi calendario →</a>
+          <a href="{% url 'results' job.id %}" class="job-link-secondary">Análisis de marca</a>
           {% endif %}
         </div>
       </div>
@@ -162,9 +168,12 @@
   </div>
   {% endif %}
 
-  <details style="max-width:700px;margin:48px auto 32px;border:1px solid #c0392b;border-radius:12px;background:#1a1215;">
-    <summary style="padding:16px 28px;cursor:pointer;color:#e74c3c;font-weight:600;font-size:1.1rem;list-style:none;display:flex;align-items:center;gap:8px;">
-      <span style="transition:transform 0.2s;display:inline-block;" id="dangerArrow">&#9654;</span> Zona de peligro
+  <!-- Colapsado y en gris: en la primera sesión un bloque rojo con marco
+       propio se lee como advertencia y transmite desconfianza. El rojo se
+       reserva para el botón real de eliminar, ya dentro del desplegable. -->
+  <details style="max-width:700px;margin:48px auto 32px;border:1px solid #2a2a4a;border-radius:12px;background:#1a1a2e;">
+    <summary style="padding:16px 28px;cursor:pointer;color:#8a8aa0;font-weight:600;font-size:0.95rem;list-style:none;display:flex;align-items:center;gap:8px;">
+      <span style="transition:transform 0.2s;display:inline-block;" id="dangerArrow">&#9654;</span> Ajustes de mi cuenta
     </summary>
     <div style="padding:0 28px 28px;">
       <p style="color:#aaa;font-size:0.9rem;margin-bottom:16px;">
@@ -224,9 +233,11 @@
           return '<div class="color-dot" style="background:' + c + ';" title="' + c + '"></div>';
         }).join('');
         var jobId = card.dataset.jobId;
+        // Mismo orden y mismas clases que el render del servidor — si divergen,
+        // la tarjeta cambia de jerarquía sola al terminar el polling.
         card.querySelector('.job-links').innerHTML =
-          '<a href="/resultados/' + jobId + '/" class="job-link">Análisis de marca →</a>' +
-          '<a href="/calendar/' + jobId + '/" class="job-link" style="color:#4a9eff;">Revisar calendario →</a>';
+          '<a href="/calendar/' + jobId + '/" class="job-link-primary">Ver mi calendario →</a>' +
+          '<a href="/resultados/' + jobId + '/" class="job-link-secondary">Análisis de marca</a>';
       }
     }
 

@@ -30,6 +30,16 @@
     .section-title { font-size: 1rem; color: #e94560; margin: 28px 0 16px; font-weight: 600; }
     .optional-badge { font-size: 0.75rem; background: #333; color: #aaa; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
     input[type="file"] { width: 100%; padding: 10px; background: #0d0d1a; border: 1px dashed #444; border-radius: 8px; color: #aaa; }
+    /* Caja de subida visual — reemplaza el botón nativo "Seleccionar archivo",
+       cuyo texto el navegador corta ("Sin archi...ionados") y desentona con el
+       resto del formulario. El input real queda oculto detrás del label. */
+    .file-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 22px 16px; border: 1px dashed #444; border-radius: 8px; background: #0d0d1a; color: #888; cursor: pointer; text-align: center; font-size: 0.9rem; margin-bottom: 0; transition: border-color 0.2s, color 0.2s; }
+    .file-drop:hover { border-color: #e94560; color: #aaa; }
+    .file-drop .file-drop-icon { font-size: 1.6rem; line-height: 1; }
+    .file-drop.has-file { border-color: #2ecc71; color: #2ecc71; }
+    /* Oculto visualmente pero accesible: display:none rompería el foco por
+       teclado y el disparo del click desde el label en algunos navegadores. */
+    .file-input-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
     #photoPrecheckStatus.checking { color: #aaa; }
     #photoPrecheckStatus.ok { color: #2ecc71; }
     #photoPrecheckStatus.warning { color: #e74c3c; }
@@ -92,19 +102,32 @@
       </div>
       <div class="form-group">
         <label>Describe tu negocio</label>
-        <textarea name="business_description" id="inputDesc" placeholder="Escribe aquí..." required></textarea>
+        <textarea name="business_description" id="inputDesc" placeholder="Ej: Pizzería artesanal en CDMX, masa de fermentación lenta de 48 horas e ingredientes italianos. Entregamos en menos de 30 minutos en Roma y Condesa." required></textarea>
         <small style="color:#666;font-size:0.8rem;margin-top:4px;display:block;">¿Qué vendes? ¿A quién? ¿Qué te hace diferente?</small>
       </div>
-      <div class="form-group">
-        <label>URL de tu sitio web <span class="optional-badge">opcional</span></label>
-        <input type="url" name="business_url" id="inputUrl" placeholder="https://tuempresa.com">
-        <small style="color:#666;font-size:0.8rem;margin-top:4px;display:block;">Si tienes sitio web, compártelo para enriquecer el análisis. Sin esto, generamos todo desde tu descripción.</small>
-      </div>
+      <!-- URL y logo van dentro del acordeón: son los opcionales que menos
+           mueven el resultado final. Las fotos de producto se quedan fuera a
+           propósito — esconderlas bajaría su uso, y son justo lo que hace que
+           el contenido se parezca al negocio real. -->
+      <details class="extra-info">
+        <summary><i class="arrow">&#9654;</i> Mejora tus resultados <span class="optional-badge">opcional</span></summary>
+        <div class="extra-body">
+          <div class="form-group">
+            <label>URL de tu sitio web</label>
+            <input type="url" name="business_url" id="inputUrl" placeholder="https://tuempresa.com">
+            <small style="color:#666;font-size:0.8rem;margin-top:4px;display:block;">Si tienes sitio web, compártelo para enriquecer el análisis. Sin esto, generamos todo desde tu descripción.</small>
+          </div>
 
-      <div class="form-group">
-        <label>Logo de tu marca <span class="optional-badge">opcional</span></label>
-        <input type="file" name="logo" accept="image/*">
-      </div>
+          <div class="form-group">
+            <label>Logo de tu marca</label>
+            <label class="file-drop" for="logoInput" id="logoDrop">
+              <span class="file-drop-icon">&#127912;</span>
+              <span id="logoDropText">Toca para subir tu logo</span>
+            </label>
+            <input type="file" name="logo" accept="image/*" id="logoInput" class="file-input-hidden">
+          </div>
+        </div>
+      </details>
 
       {% if allows_sample_generation %}
       <div class="form-group">
@@ -124,7 +147,11 @@
       {% endif %}
       <div class="form-group" id="productPhotoGroup">
         <label>Fotos reales de tus productos <span class="optional-badge">opcional</span></label>
-        <input type="file" name="product_reference_photo" accept="image/*" id="productPhotoInput" multiple>
+        <label class="file-drop" for="productPhotoInput" id="productPhotoDrop">
+          <span class="file-drop-icon">&#128247;</span>
+          <span id="productPhotoDropText">Toca para subir fotos de tus productos</span>
+        </label>
+        <input type="file" name="product_reference_photo" accept="image/*" id="productPhotoInput" multiple class="file-input-hidden">
         <small id="photoCounter" style="display:block;margin-top:6px;font-size:0.85rem;color:#888;">0/{{ max_product_reference_photos }} fotos</small>
         <div id="photoThumbnails" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
         <small id="photoPrecheckStatus" style="display:none;margin-top:6px;font-size:0.85rem;"></small>
@@ -182,6 +209,17 @@
       var accepted = selectedPhotos.filter(function(p) { return p.status !== 'rejected'; });
       var counterEl = document.getElementById('photoCounter');
       if (counterEl) counterEl.textContent = accepted.length + '/' + MAX_PRODUCT_PHOTOS + ' fotos';
+      // La caja de subida refleja el estado real: se actualiza también cuando
+      // el usuario quita una foto o el precheck rechaza alguna.
+      var dropText = document.getElementById('productPhotoDropText');
+      var dropBox = document.getElementById('productPhotoDrop');
+      if (dropText) {
+        dropText.textContent = accepted.length
+          ? (accepted.length === 1 ? '1 foto seleccionada — toca para agregar más'
+                                   : accepted.length + ' fotos seleccionadas — toca para agregar más')
+          : 'Toca para subir fotos de tus productos';
+      }
+      if (dropBox) dropBox.classList.toggle('has-file', accepted.length > 0);
     }
 
     function renderPhotoThumbnails() {
@@ -244,6 +282,19 @@
       el.className = cls;
       el.textContent = text;
       el.style.display = text ? 'block' : 'none';
+    }
+
+    // El logo no pasa por compresión ni precheck — solo refleja el nombre del
+    // archivo elegido, que es lo que el botón nativo mostraba cortado.
+    var logoInputEl = document.getElementById('logoInput');
+    if (logoInputEl) {
+      logoInputEl.addEventListener('change', function() {
+        var t = document.getElementById('logoDropText');
+        var box = document.getElementById('logoDrop');
+        var tieneArchivo = this.files && this.files.length > 0;
+        if (t) t.textContent = tieneArchivo ? this.files[0].name : 'Toca para subir tu logo';
+        if (box) box.classList.toggle('has-file', tieneArchivo);
+      });
     }
 
     var productPhotoInputEl = document.getElementById('productPhotoInput');
