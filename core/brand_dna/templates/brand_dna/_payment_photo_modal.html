@@ -1,0 +1,224 @@
+<div id="photoModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center;padding:20px;">
+  <div id="photoModalCard" style="background:#1a1a2e;border-radius:16px;padding:32px;max-width:480px;width:100%;max-height:90vh;overflow-y:auto;">
+    <div id="photoModalStep1">
+      <h2 style="font-size:1.15rem;margin-bottom:12px;">📸 ¿Quieres agregar fotos de tus productos?</h2>
+      <p style="color:#aaa;font-size:0.9rem;margin-bottom:24px;line-height:1.5;">Úsalas para que el contenido del próximo mes muestre tus productos reales, en vez de imágenes generadas desde cero.</p>
+      <button type="button" onclick="showPhotoUploadStep()" style="width:100%;padding:14px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:1rem;cursor:pointer;margin-bottom:10px;">Sí, agregar fotos</button>
+      <button type="button" onclick="goToPayment()" style="width:100%;padding:14px;background:transparent;color:#aaa;border:1px solid #333;border-radius:8px;font-weight:600;font-size:1rem;cursor:pointer;">No, continuar al pago</button>
+    </div>
+    <div id="photoModalStep2" style="display:none;">
+      <h2 style="font-size:1.15rem;margin-bottom:12px;">Fotos reales de tus productos</h2>
+      <input type="file" accept="image/*" id="modalPhotoInput" multiple style="width:100%;padding:10px;background:#0d0d1a;border:1px dashed #444;border-radius:8px;color:#aaa;">
+      <small id="modalPhotoCounter" style="display:block;margin-top:6px;font-size:0.85rem;color:#888;">0/{{ photos_remaining }} fotos</small>
+      <div id="modalPhotoThumbnails" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
+      <small id="modalPhotoPrecheckStatus" style="display:none;margin-top:6px;font-size:0.85rem;"></small>
+      <button type="button" id="modalContinueBtn" onclick="uploadPhotosAndContinue()" style="width:100%;padding:14px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:1rem;cursor:pointer;margin-top:20px;">Continuar al pago →</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  var MODAL_CSRF = '{{ csrf_token }}';
+  var MODAL_PHOTOS_ROOM = {{ photos_remaining|default:0 }};
+  var modalSelectedPhotos = []; // {id, file, status: 'checking'|'ok'|'rejected'|'skipped'}
+  var modalPhotoSeq = 0;
+  var modalPaymentUrl = '';
+
+  function modalCompressImage(file) {
+    return new Promise(function(resolve) {
+      if (!file.type.startsWith('image/')) { resolve(file); return; }
+      var img = new Image();
+      img.onload = function() {
+        var w = img.width, h = img.height;
+        if (w > MAX_SIDE || h > MAX_SIDE) {
+          var ratio = Math.min(MAX_SIDE / w, MAX_SIDE / h);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
+        }
+        var canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        canvas.toBlob(function(blob) {
+          var name = file.name.replace(/\.[^.]+$/, '.jpg');
+          resolve(new File([blob], name, {type: 'image/jpeg'}));
+        }, 'image/jpeg', JPEG_QUALITY);
+      };
+      img.onerror = function() { resolve(file); };
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  function openPhotoModal(paymentUrl) {
+    modalPaymentUrl = paymentUrl;
+    document.getElementById('photoModalStep1').style.display = 'block';
+    document.getElementById('photoModalStep2').style.display = 'none';
+    document.getElementById('photoModalOverlay').style.display = 'flex';
+  }
+
+  function showPhotoUploadStep() {
+    document.getElementById('photoModalStep1').style.display = 'none';
+    document.getElementById('photoModalStep2').style.display = 'block';
+    updateModalContinueButtonState();
+  }
+
+  function updateModalContinueButtonState() {
+    var btn = document.getElementById('modalContinueBtn');
+    if (!btn) return;
+    var stillChecking = modalSelectedPhotos.some(function(p) { return p.status === 'checking'; });
+    btn.disabled = stillChecking;
+    btn.textContent = stillChecking ? 'Validando fotos...' : 'Continuar al pago →';
+  }
+
+  function goToPayment() {
+    window.location.href = modalPaymentUrl;
+  }
+
+  function renderModalPhotoCounter() {
+    var accepted = modalSelectedPhotos.filter(function(p) { return p.status !== 'rejected'; });
+    document.getElementById('modalPhotoCounter').textContent = accepted.length + '/' + MODAL_PHOTOS_ROOM + ' fotos';
+  }
+
+  function renderModalPhotoThumbnails() {
+    var container = document.getElementById('modalPhotoThumbnails');
+    container.innerHTML = '';
+    modalSelectedPhotos.forEach(function(photo) {
+      var wrap = document.createElement('div');
+      wrap.style.cssText = 'position:relative;width:64px;height:64px;';
+      var img = document.createElement('img');
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:6px;opacity:' + (photo.status === 'checking' ? '0.5' : '1') + ';';
+      if (photo.dataUrl) {
+        img.src = photo.dataUrl;
+      } else {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          photo.dataUrl = e.target.result;
+          img.src = photo.dataUrl;
+        };
+        reader.readAsDataURL(photo.file);
+      }
+      wrap.appendChild(img);
+
+      if (photo.status === 'ok' || photo.status === 'skipped') {
+        var okBadge = document.createElement('span');
+        okBadge.textContent = '✓';
+        okBadge.title = 'Foto lista para usar';
+        okBadge.style.cssText = 'position:absolute;bottom:-4px;left:-4px;background:#2ecc71;color:#fff;border-radius:50%;width:18px;height:18px;text-align:center;line-height:18px;font-size:11px;font-weight:bold;';
+        wrap.appendChild(okBadge);
+      } else if (photo.status === 'rejected') {
+        var rejectBadge = document.createElement('span');
+        rejectBadge.textContent = '❌';
+        rejectBadge.title = photo.reason || 'No cumple con las políticas de contenido';
+        rejectBadge.style.cssText = 'position:absolute;bottom:-4px;left:-4px;font-size:16px;';
+        wrap.appendChild(rejectBadge);
+      }
+
+      var removeBtn = document.createElement('a');
+      removeBtn.href = '#';
+      removeBtn.textContent = '×';
+      removeBtn.style.cssText = 'position:absolute;top:-6px;right:-6px;background:#e94560;color:#fff;border-radius:50%;width:18px;height:18px;text-align:center;line-height:18px;font-size:12px;text-decoration:none;';
+      removeBtn.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        modalSelectedPhotos = modalSelectedPhotos.filter(function(p) { return p.id !== photo.id; });
+        renderModalPhotoThumbnails();
+        renderModalPhotoCounter();
+        updateModalContinueButtonState();
+      });
+      wrap.appendChild(removeBtn);
+      container.appendChild(wrap);
+    });
+  }
+
+  function setModalPrecheckStatus(cls, text) {
+    var el = document.getElementById('modalPhotoPrecheckStatus');
+    el.className = cls;
+    el.textContent = text;
+    el.style.display = text ? 'block' : 'none';
+  }
+
+  var modalPhotoInputEl = document.getElementById('modalPhotoInput');
+  if (modalPhotoInputEl) {
+    modalPhotoInputEl.addEventListener('change', function() {
+      var accepted = modalSelectedPhotos.filter(function(p) { return p.status !== 'rejected'; });
+      var incoming = Array.from(this.files);
+      var room = MODAL_PHOTOS_ROOM - accepted.length;
+      if (incoming.length > room) {
+        setModalPrecheckStatus('warning', '⚠ Llegaste al límite de ' + MODAL_PHOTOS_ROOM + ' fotos — se agregaron solo las primeras ' + Math.max(room, 0) + '.');
+      }
+      var toAdd = incoming.slice(0, Math.max(room, 0));
+      this.value = '';
+
+      toAdd.forEach(function(file) {
+        modalPhotoSeq += 1;
+        var photoId = modalPhotoSeq;
+        modalSelectedPhotos.push({id: photoId, file: file, status: 'checking'});
+        renderModalPhotoThumbnails();
+        renderModalPhotoCounter();
+        updateModalContinueButtonState();
+
+        modalCompressImage(file).then(function(compressed) {
+          var fd = new FormData();
+          fd.append('csrfmiddlewaretoken', MODAL_CSRF);
+          fd.append('product_reference_photo', compressed);
+          var xhr = new XMLHttpRequest();
+          xhr.open('POST', '{% url "product_photo_precheck_api" %}');
+          xhr.onload = function() {
+            var entry = modalSelectedPhotos.find(function(p) { return p.id === photoId; });
+            if (!entry) return;
+            if (xhr.status !== 200) {
+              entry.status = 'skipped';
+              renderModalPhotoThumbnails();
+              updateModalContinueButtonState();
+              return;
+            }
+            var data;
+            try { data = JSON.parse(xhr.responseText); } catch (e) { data = {ok: true, skipped: true}; }
+            if (data.ok === false) {
+              entry.status = 'rejected';
+              entry.reason = data.reason || '';
+              var rejectedCount = modalSelectedPhotos.filter(function(p) { return p.status === 'rejected'; }).length;
+              setModalPrecheckStatus('warning', '⚠ Quitamos ' + rejectedCount + ' foto(s) porque no cumplen con las políticas de contenido.');
+              renderModalPhotoThumbnails();
+              renderModalPhotoCounter();
+            } else {
+              entry.status = 'ok';
+              renderModalPhotoThumbnails();
+            }
+            updateModalContinueButtonState();
+          };
+          xhr.onerror = function() {
+            var entry = modalSelectedPhotos.find(function(p) { return p.id === photoId; });
+            if (entry) { entry.status = 'skipped'; renderModalPhotoThumbnails(); }
+            updateModalContinueButtonState();
+          };
+          xhr.send(fd);
+        });
+      });
+    });
+  }
+
+  function uploadPhotosAndContinue() {
+    var btn = document.getElementById('modalContinueBtn');
+    // Solo fotos ya resueltas por el precheck (ok/skipped) -- 'checking' nunca
+    // deberia llegar aqui porque el boton esta deshabilitado mientras tanto
+    // (updateModalContinueButtonState), pero se filtra explicito por defensa.
+    var validPhotos = modalSelectedPhotos.filter(function(p) { return p.status === 'ok' || p.status === 'skipped'; }).map(function(p) { return p.file; });
+    if (!validPhotos.length) { goToPayment(); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Subiendo fotos...';
+
+    Promise.all(validPhotos.map(modalCompressImage)).then(function(compressed) {
+      var fd = new FormData();
+      compressed.forEach(function(f) { fd.append('product_reference_photo', f); });
+      fetch('{% url "add_product_photos_api" job.id %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': MODAL_CSRF },
+        body: fd,
+      }).then(function() {
+        goToPayment();
+      }).catch(function() {
+        goToPayment(); // no bloquear el pago si la subida falla -- el pool se queda como estaba
+      });
+    });
+  }
+</script>

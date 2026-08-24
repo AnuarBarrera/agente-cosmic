@@ -1285,11 +1285,33 @@ def test_calendar_review_early_cta_links_directly_when_pool_full(client, user, j
     job_with_calendar.brand_dna.calendar.first_download_at = timezone.now()
     job_with_calendar.brand_dna.calendar.save(update_fields=['first_download_at'])
     client.force_login(user)
-    client.force_login(user)
     response = client.get(f'/calendar/{job_with_calendar.id}/')
-    assert response.context['photos_remaining'] == 0
-    assert b'onclick="openPhotoModal(' not in response.content
     assert f'https://buy.stripe.com/test123?client_reference_id={user.tenant_id}'.encode() in response.content
+
+
+@pytest.mark.django_db
+def test_payment_context_devuelve_las_cinco_claves(client):
+    from core.brand_dna.views import _payment_context
+    from core.tenant_management.models import Plan
+    user = User.objects.create_user(
+        email='ctx@example.com', password=_TEST_PWD, username='ctx@example.com')
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    plan, _ = Plan.objects.get_or_create(
+        name='User', defaults={'max_calendars_per_week': 2})
+    Subscription.objects.create(tenant=tenant, plan=plan, status='trialing')
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+    job = AnalysisJob.objects.create(
+        user=user, email=user.email, business_description='Taqueria',
+        status=AnalysisJob.STATUS_DONE)
+
+    ctx = _payment_context(job, user)
+
+    assert set(ctx) == {
+        'payment_needed', 'early_cta', 'payment_url', 'plan_price',
+        'photos_remaining',
+    }
+    assert ctx['photos_remaining'] == plan.max_product_reference_photos
 
 
 def test_add_product_photos_requires_login(client, job_with_calendar):

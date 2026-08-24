@@ -353,6 +353,37 @@ def status_api(request, job_id):
     })
 
 
+def _payment_context(job, user) -> dict:
+    """Contexto del CTA de pago, compartido por el calendario y el ADN.
+
+    Vivia inline en calendar_review_view; results lo necesita igual desde que
+    el boton de regenerar se convirtio en CTA de pago.
+    """
+    from core.brand_dna.rate_limits import get_user_plan, get_payment_url
+    plan = get_user_plan(user)
+    subscription = getattr(getattr(job.user, 'tenant', None), 'subscription', None)
+    calendar = getattr(getattr(job, 'brand_dna', None), 'calendar', None)
+
+    payment_needed = bool(subscription and (
+        subscription.status == 'trial_expired'
+        or (subscription.paid_until and subscription.paid_until <= timezone.now())
+    ))
+    early_cta = bool(
+        subscription and not payment_needed and subscription.status == 'trialing'
+        and job.status == AnalysisJob.STATUS_DONE
+        and calendar is not None and calendar.first_download_at is not None
+    )
+    payment_url = get_payment_url(job.user) if (payment_needed or early_cta) else ''
+    return {
+        'payment_needed': payment_needed,
+        'early_cta': early_cta,
+        'payment_url': payment_url,
+        'plan_price': int(plan.price) if plan.price else 0,
+        'photos_remaining': max(
+            0, plan.max_product_reference_photos - len(job.product_reference_image_paths)),
+    }
+
+
 @login_required
 def calendar_review_view(request, job_id):
     from core.brand_dna.rate_limits import get_user_plan, get_payment_url
@@ -436,6 +467,7 @@ def calendar_review_view(request, job_id):
                 'is_current': any(w['is_current'] for w in month_week_groups),
             })
 
+    pay_ctx = _payment_context(job, request.user)
     return render(request, 'brand_dna/calendar_review.html', {
         'job': job,
         'brand_dna': brand_dna,
@@ -449,11 +481,7 @@ def calendar_review_view(request, job_id):
         'total_edits': total_edits,
         'can_create_calendar': can_create,
         'can_delete_calendar': can_delete_calendar,
-        'payment_needed': payment_needed,
-        'plan_price': plan_price,
-        'early_cta': early_cta,
-        'payment_url': payment_url,
-        'photos_remaining': photos_remaining,
+        **pay_ctx,
         'max_product_reference_photos': plan.max_product_reference_photos,
     })
 
