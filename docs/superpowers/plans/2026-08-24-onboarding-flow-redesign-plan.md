@@ -792,6 +792,14 @@ Y en `calendar_review_view`, sustituir el cálculo inline de
 
 pasando `**pay_ctx` en el `render(...)` de esa vista.
 
+**Cuidado con dos cambios previos sobre el mismo `render`:** la Task 2
+añadió `can_delete_calendar` a ese contexto y la Task 4 ya ajustó el
+cálculo de `early_cta` para exigir `first_download_at`. Ambos deben
+sobrevivir: `can_delete_calendar` se queda como clave propia junto a
+`**pay_ctx`, y la condición de `first_download_at` es la que aparece ya
+incorporada en el código del helper de arriba — no se pierde al mover, se
+muda con él.
+
 - [ ] **Step 4: Correr el test del helper**
 
 Run: `docker compose exec -T backend python -m pytest core/brand_dna/tests/test_views.py -q -k payment_context`
@@ -800,10 +808,33 @@ Expected: PASS.
 
 - [ ] **Step 5: Crear el partial**
 
-Crear `core/brand_dna/templates/brand_dna/_payment_photo_modal.html` con el
-HTML del modal (hoy en `calendar_review.html:217-234`) seguido de un
-`<script>` que contenga, **movidas literalmente** desde
-`calendar_review.html`:
+Crear `core/brand_dna/templates/brand_dna/_payment_photo_modal.html`. La
+primera parte es el HTML del modal, movido tal cual desde
+`calendar_review.html:217-234`:
+
+```html
+<div id="photoModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center;padding:20px;">
+  <div id="photoModalCard" style="background:#1a1a2e;border-radius:16px;padding:32px;max-width:480px;width:100%;max-height:90vh;overflow-y:auto;">
+    <div id="photoModalStep1">
+      <h2 style="font-size:1.15rem;margin-bottom:12px;">📸 ¿Quieres agregar fotos de tus productos?</h2>
+      <p style="color:#aaa;font-size:0.9rem;margin-bottom:24px;line-height:1.5;">Úsalas para que el contenido del próximo mes muestre tus productos reales, en vez de imágenes generadas desde cero.</p>
+      <button type="button" onclick="showPhotoUploadStep()" style="width:100%;padding:14px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:1rem;cursor:pointer;margin-bottom:10px;">Sí, agregar fotos</button>
+      <button type="button" onclick="goToPayment()" style="width:100%;padding:14px;background:transparent;color:#aaa;border:1px solid #333;border-radius:8px;font-weight:600;font-size:1rem;cursor:pointer;">No, continuar al pago</button>
+    </div>
+    <div id="photoModalStep2" style="display:none;">
+      <h2 style="font-size:1.15rem;margin-bottom:12px;">Fotos reales de tus productos</h2>
+      <input type="file" accept="image/*" id="modalPhotoInput" multiple style="width:100%;padding:10px;background:#0d0d1a;border:1px dashed #444;border-radius:8px;color:#aaa;">
+      <small id="modalPhotoCounter" style="display:block;margin-top:6px;font-size:0.85rem;color:#888;">0/{{ photos_remaining }} fotos</small>
+      <div id="modalPhotoThumbnails" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
+      <small id="modalPhotoPrecheckStatus" style="display:none;margin-top:6px;font-size:0.85rem;"></small>
+      <button type="button" id="modalContinueBtn" onclick="uploadPhotosAndContinue()" style="width:100%;padding:14px;background:#e94560;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:1rem;cursor:pointer;margin-top:20px;">Continuar al pago →</button>
+    </div>
+  </div>
+</div>
+```
+
+La segunda parte es un `<script>` que contenga, **movidas literalmente**
+desde `calendar_review.html`:
 
 - las variables `MODAL_PHOTOS_ROOM` (línea ~468), `modalSelectedPhotos`
   (~469) y `modalPaymentUrl` (~471);
@@ -995,13 +1026,22 @@ Buscar la etiqueta vieja y sustituirla:
 grep -rn "brand_dna_regenerated_calendar" core/
 ```
 
-Donde el ADN abre el flujo de pago —en `results`, al construir el
-contexto cuando `payment_needed or early_cta` es verdadero— incrementar:
+La línea vieja vive dentro de `regenerate_calendar_api`, así que
+desaparece con la función en el Step 3 — no hay que borrarla aparte.
+
+La nueva va en la vista `results` de `core/brand_dna/views.py`,
+inmediatamente después de la línea `pay_ctx = _payment_context(job,
+request.user)` que añadiste en el Step 4 y antes del `return render(...)`:
 
 ```python
+    # Mide si editar el ADN funciona como motor de conversion: se cuenta cada
+    # vez que la pantalla se sirve con el CTA de pago visible.
     if pay_ctx['payment_needed'] or pay_ctx['early_cta']:
         POST_ACTIONS.labels(action='brand_dna_payment_cta').inc()
 ```
+
+`POST_ACTIONS` ya está importado en `core/brand_dna/views.py`; si el grep
+muestra que no, importarlo desde `core.shared.metrics`.
 
 - [ ] **Step 8: Correr la suite completa**
 
