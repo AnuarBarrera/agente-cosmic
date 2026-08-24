@@ -284,7 +284,7 @@ def _post_auth_destination(user) -> str:
 
 def login_view(request):
     if request.user.is_authenticated:
-        return redirect('dashboard')
+        return redirect(_post_auth_destination(request.user))
 
     error = None
     if request.method == 'POST':

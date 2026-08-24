@@ -23,6 +23,8 @@
   var modalSelectedPhotos = []; // {id, file, status: 'checking'|'ok'|'rejected'|'skipped'}
   var modalPhotoSeq = 0;
   var modalPaymentUrl = '';
+  var MAX_SIDE = 1200;
+  var JPEG_QUALITY = 0.82;
 
   function modalCompressImage(file) {
     return new Promise(function(resolve) {

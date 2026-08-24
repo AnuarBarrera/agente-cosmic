@@ -526,6 +526,7 @@
     }
     if (allFieldsApproved()) {
       btn.disabled = false;
+      btn.style.display = '';
       hint.textContent = 'Hiciste cambios a tu ADN de marca. Genera tu próximo mes para verlos aplicados.';
     } else {
       btn.disabled = true;
