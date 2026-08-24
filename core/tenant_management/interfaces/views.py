@@ -114,7 +114,7 @@ class TenantViewSet(viewsets.ViewSet):
         return Response([])
 
     def destroy(self, request: Request, pk=None) -> Response:
-        if request.user.tenant_id != pk:
+        if str(request.user.tenant_id) != str(pk):
             return Response(status=status.HTTP_403_FORBIDDEN)
         try:
             self.service.suspend_tenant(pk)

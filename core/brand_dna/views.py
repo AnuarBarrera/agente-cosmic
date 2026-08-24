@@ -666,7 +666,7 @@ def post_action_api(request, post_id):
         allowed, remaining = can_edit(post, request.user)
         if not allowed:
             return JsonResponse({
-                'error': 'Límite de ediciones alcanzado para este post (máximo 2).',
+                'error': 'Límite de ediciones alcanzado para este calendario.',
                 'limit_reached': True,
             }, status=429)
         post.caption = value
@@ -685,7 +685,7 @@ def post_action_api(request, post_id):
         allowed, remaining = can_regenerate(post, request.user)
         if not allowed:
             return JsonResponse({
-                'error': 'Límite de regeneraciones alcanzado para este post (máximo 2).',
+                'error': 'Límite de regeneraciones alcanzado para este calendario.',
                 'limit_reached': True,
             }, status=429)
         # Guard de reentrada ANTES de gastar cualquier trabajo (incluido el

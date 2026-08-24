@@ -73,6 +73,10 @@ google-cloud-cli-*.tar.gz
 .cybersec-exceptions.md
 ciberaudit.txt
 analisis.txt
+.cybersec-context.md
+pentesting.md
+changelog.md
+patches/
 patch/
 
 # Documento de trabajo interno — pendientes entre sesiones

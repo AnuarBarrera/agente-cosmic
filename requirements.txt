@@ -45,7 +45,7 @@ djangorestframework-simplejwt
 django-cors-headers==4.3.1
 django-anymail
 bleach==6.2.0
-cryptography>=48.0.1
+cryptography>=50.0.0
 python-telegram-bot==21.10
 pgvector==0.3.6
 pytest-asyncio==0.24.0
@@ -64,3 +64,4 @@ qrcode>=7.4
 django-prometheus>=2.3.1
 defusedxml>=0.7.1
 stripe>=10.0.0
+pyasn1>=0.6.4

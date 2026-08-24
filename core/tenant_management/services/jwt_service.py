@@ -77,6 +77,11 @@ class CustomJWTService:
         try:
             # Validate the refresh token
             token = RefreshToken(refresh_token)
+
+            # Check if token is blacklisted
+            if cls.is_token_blacklisted(token['jti']):
+                raise TokenError("Token is blacklisted")
+
             user = User.objects.get(id=token['user_id'])
             
             # Blacklist old token

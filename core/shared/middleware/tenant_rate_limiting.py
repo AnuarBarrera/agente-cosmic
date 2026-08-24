@@ -138,8 +138,9 @@ class TenantRateLimitingMiddleware:
                 
                 # Increment counter with appropriate expiry
                 try:
-                    cache.get_or_set(cache_key, 0, timeout=window_seconds)
-                    cache.set(cache_key, cache.get(cache_key, 0) + 1, timeout=window_seconds)
+                    cache.incr(cache_key)
+                except ValueError:
+                    cache.set(cache_key, 1, timeout=window_seconds)
                 except Exception as e:
                     logger.warning(f"Failed to update rate limit counter: {e}")
                     
@@ -162,7 +163,10 @@ class TenantRateLimitingMiddleware:
                 return True
             
             # Increment counter
-            cache.set(cache_key, current_count + 1, timeout=60)
+            try:
+                cache.incr(cache_key)
+            except ValueError:
+                cache.set(cache_key, 1, timeout=60)
             return False
             
         except Exception as e:
@@ -266,7 +270,10 @@ class APIThrottlingMiddleware:
                     return True
                 
                 # Increment counter
-                cache.set(cache_key, current_count + 1, timeout=window_seconds)
+                try:
+                    cache.incr(cache_key)
+                except ValueError:
+                    cache.set(cache_key, 1, timeout=window_seconds)
             
             return False
             
