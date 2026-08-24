@@ -544,7 +544,17 @@ def dashboard_view(request):
     used_total = AnalysisJob.objects.filter(user=request.user, deleted_at__isnull=True).count()
     plan = get_user_plan(request.user)
     subscription = getattr(getattr(request.user, 'tenant', None), 'subscription', None)
-    early_cta = bool(subscription and subscription.status == 'trialing' and not has_processing)
+    # Misma regla que en el calendario: la oferta no puede aparecer en una
+    # pantalla mientras en la otra todavia no corresponde.
+    ya_descargo = any(
+        getattr(getattr(getattr(j, 'brand_dna', None), 'calendar', None),
+                'first_download_at', None) is not None
+        for j in jobs
+    )
+    early_cta = bool(
+        subscription and subscription.status == 'trialing'
+        and not has_processing and ya_descargo
+    )
     payment_url = ''
     if early_cta:
         payment_url = get_payment_url(request.user)

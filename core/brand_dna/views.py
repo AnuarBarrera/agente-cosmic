@@ -369,9 +369,13 @@ def calendar_review_view(request, job_id):
         subscription.status == 'trial_expired'
         or (subscription.paid_until and subscription.paid_until <= timezone.now())
     ))
+    # La venta anticipada solo aparece cuando el usuario ya se llevo algo:
+    # ofrecer el mes completo antes de que toque su contenido gratis se lee
+    # como cobro por adelantado, no como oportunidad.
     early_cta = bool(
         subscription and not payment_needed and subscription.status == 'trialing'
         and job.status == AnalysisJob.STATUS_DONE
+        and calendar is not None and calendar.first_download_at is not None
     )
     payment_url = ''
     if payment_needed or early_cta:

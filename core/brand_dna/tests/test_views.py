@@ -919,6 +919,14 @@ def test_dashboard_uses_plan_specific_payment_link(client, user, free_plan, sett
     free_plan.save(update_fields=['stripe_payment_link_url'])
     user.tenant.subscription.status = 'trialing'
     user.tenant.subscription.save(update_fields=['status'])
+    # Create a calendar and mark first download
+    job = AnalysisJob.objects.create(
+        email=user.email, business_url='https://tuwebmx.com', user=user,
+        status=AnalysisJob.STATUS_DONE)
+    dna = BrandDNA.objects.create(job=job, business_name='Test', description='desc', audience='aud', tone='profesional', keywords=[], primary_colors=[])
+    calendar = ContentCalendar.objects.create(brand_dna=dna)
+    calendar.first_download_at = timezone.now()
+    calendar.save(update_fields=['first_download_at'])
     client.force_login(user)
     response = client.get('/dashboard/')
     assert f'https://buy.stripe.com/founder123?client_reference_id={user.tenant_id}'.encode() in response.content
@@ -1121,6 +1129,8 @@ def test_calendar_review_shows_early_cta_when_trialing(client, user, job_with_ca
     settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
     user.tenant.subscription.status = 'trialing'
     user.tenant.subscription.save(update_fields=['status'])
+    job_with_calendar.brand_dna.calendar.first_download_at = timezone.now()
+    job_with_calendar.brand_dna.calendar.save(update_fields=['first_download_at'])
     client.force_login(user)
     response = client.get(f'/calendar/{job_with_calendar.id}/')
     assert response.context['early_cta'] is True
@@ -1143,6 +1153,14 @@ def test_dashboard_shows_early_cta_when_trialing(client, user, settings):
     settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
     user.tenant.subscription.status = 'trialing'
     user.tenant.subscription.save(update_fields=['status'])
+    # Create a calendar and mark first download
+    job = AnalysisJob.objects.create(
+        email=user.email, business_url='https://tuwebmx.com', user=user,
+        status=AnalysisJob.STATUS_DONE)
+    dna = BrandDNA.objects.create(job=job, business_name='Test', description='desc', audience='aud', tone='profesional', keywords=[], primary_colors=[])
+    calendar = ContentCalendar.objects.create(brand_dna=dna)
+    calendar.first_download_at = timezone.now()
+    calendar.save(update_fields=['first_download_at'])
     client.force_login(user)
     response = client.get('/dashboard/')
     assert b'mes completo' in response.content
@@ -1249,6 +1267,8 @@ def test_calendar_review_early_cta_shows_photo_modal_button_when_room(client, us
     settings.STRIPE_PAYMENT_LINK_URL = 'https://buy.stripe.com/test123'
     user.tenant.subscription.status = 'trialing'
     user.tenant.subscription.save(update_fields=['status'])
+    job_with_calendar.brand_dna.calendar.first_download_at = timezone.now()
+    job_with_calendar.brand_dna.calendar.save(update_fields=['first_download_at'])
     client.force_login(user)
     response = client.get(f'/calendar/{job_with_calendar.id}/')
     assert b'onclick="openPhotoModal(' in response.content
@@ -1262,6 +1282,9 @@ def test_calendar_review_early_cta_links_directly_when_pool_full(client, user, j
     job_with_calendar.save(update_fields=['product_reference_image_paths'])
     user.tenant.subscription.status = 'trialing'
     user.tenant.subscription.save(update_fields=['status'])
+    job_with_calendar.brand_dna.calendar.first_download_at = timezone.now()
+    job_with_calendar.brand_dna.calendar.save(update_fields=['first_download_at'])
+    client.force_login(user)
     client.force_login(user)
     response = client.get(f'/calendar/{job_with_calendar.id}/')
     assert response.context['photos_remaining'] == 0
@@ -1630,3 +1653,34 @@ def test_primera_descarga_se_estampa_una_sola_vez(client, free_plan):
         client.get(f'/api/post/{post.id}/download/')
     calendar.refresh_from_db()
     assert calendar.first_download_at == primera
+
+
+@pytest.mark.django_db
+def test_banner_de_venta_no_aparece_antes_de_la_primera_descarga(client):
+    from django.utils import timezone
+    from core.brand_dna.models import BrandDNA
+    from core.content_pipeline.models import ContentCalendar
+    from core.tenant_management.models import Plan
+    user = User.objects.create_user(
+        email='cta@example.com', password=_TEST_PWD, username='cta@example.com')
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    plan, _ = Plan.objects.get_or_create(
+        name='User', defaults={'max_calendars_per_week': 2})
+    Subscription.objects.create(tenant=tenant, plan=plan, status='trialing')
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+    job = AnalysisJob.objects.create(
+        user=user, email=user.email, business_description='Taqueria',
+        status=AnalysisJob.STATUS_DONE)
+    dna = BrandDNA.objects.create(job=job, business_name='Taqueria')
+    calendar = ContentCalendar.objects.create(brand_dna=dna)
+    client.force_login(user)
+
+    resp = client.get(f'/calendar/{job.id}/')
+    assert resp.context['early_cta'] is False
+
+    calendar.first_download_at = timezone.now()
+    calendar.save(update_fields=['first_download_at'])
+
+    resp = client.get(f'/calendar/{job.id}/')
+    assert resp.context['early_cta'] is True
