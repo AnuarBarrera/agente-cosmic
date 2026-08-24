@@ -84,8 +84,13 @@ resolución y no pidió cambiarla.
 Se agrega un helper en `core/brand_dna/auth_views.py`:
 
 ```
-_post_auth_destination(user) -> str   # nombre de ruta o URL
+_post_auth_destination(user) -> str   # URL ya resuelta, vía reverse()
 ```
+
+Devuelve una URL resuelta y no un nombre de ruta, porque el caso 2
+necesita argumentos (`reverse('calendar_review', args=[job.id])`) y los
+otros dos no. Un único tipo de retorno evita que cada llamador decida
+cómo resolverlo.
 
 Reglas, evaluadas en orden:
 
@@ -154,13 +159,24 @@ junto a su JS (`openPhotoModal`). Se extrae a un partial incluible desde
 dos copias de una pieza con lógica propia de cupo de fotos y estado del
 botón.
 
+**Usuario con mes pagado vigente.** El CTA de pago solo aplica a quien
+puede comprar un mes nuevo: usa la misma condición que ya gobierna los
+banners del calendario (`payment_needed` / `early_cta` en
+`core/brand_dna/views.py`). Si ninguna de las dos se cumple —el usuario
+tiene un mes vigente y nada que comprar todavía— el botón no se
+renderiza, igual que hoy no se renderiza el banner.
+
 **Aviso de ADN desincronizado.** Tras guardar cambios en el ADN,
 `results` muestra que los cambios están guardados y que el contenido
-actual se generó con la información anterior. Sin ese aviso, editar sin
-pagar se lee como que la app ignoró los cambios.
+actual se generó con la información anterior. El aviso se muestra solo
+cuando ya existe un calendario generado: antes de eso no hay nada
+desincronizado. Sin ese aviso, editar sin pagar se lee como que la app
+ignoró los cambios.
 
-**Métrica nueva:** una etiqueta de intención de pago desde el ADN, para
-medir si editar la marca funciona como motor de conversión.
+**Métrica nueva:** `POST_ACTIONS.labels(action='brand_dna_payment_cta')`
+(`core/shared/metrics.py:42`), incrementada cuando el usuario abre el
+flujo de pago desde el ADN. Sustituye a la de regeneración y mide si
+editar la marca funciona como motor de conversión.
 
 ### 3. Borrado de calendario cerrado por plan
 
@@ -195,7 +211,7 @@ límite ya existente (`views.py:119`) dirige a soporte.
 
 ### 4. Primera descarga y banner de venta
 
-Campo nuevo en el calendario:
+Campo nuevo en `core.content_pipeline.models.ContentCalendar`:
 
 ```
 first_download_at = models.DateTimeField(null=True, blank=True)
