@@ -386,6 +386,8 @@ def calendar_review_view(request, job_id):
     from core.brand_dna.rate_limits import can_create_calendar
     can_create, _ = can_create_calendar(request.user)
 
+    can_delete_calendar = plan.allows_calendar_deletion
+
     week_groups = []
     month_groups = []
     if posts:
@@ -442,6 +444,7 @@ def calendar_review_view(request, job_id):
         'total_regens': total_regens,
         'total_edits': total_edits,
         'can_create_calendar': can_create,
+        'can_delete_calendar': can_delete_calendar,
         'payment_needed': payment_needed,
         'plan_price': plan_price,
         'early_cta': early_cta,
@@ -456,7 +459,17 @@ def calendar_review_view(request, job_id):
 def delete_calendar_api(request, job_id):
     from django.utils import timezone
     import django_rq
+    from core.brand_dna.rate_limits import get_user_plan
     job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
+
+    # El boton se oculta en el template, pero este endpoint es llamable
+    # directo -- la regla vive aqui y el template solo la refleja.
+    if not get_user_plan(request.user).allows_calendar_deletion:
+        return JsonResponse(
+            {'error': 'Tu plan no permite eliminar calendarios. Escríbenos y lo vemos contigo.'},
+            status=403,
+        )
+
     job.deleted_at = timezone.now()
     job.save(update_fields=['deleted_at'])
 

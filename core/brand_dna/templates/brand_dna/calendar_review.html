@@ -133,7 +133,7 @@
   <div class="nav-actions">
     <a href="{% url 'dashboard' %}" class="nav-btn nav-btn-ghost">Dashboard</a>
     {% if can_create_calendar %}<a href="{% url 'new_analysis' %}" class="nav-btn nav-btn-primary">+ Nuevo análisis</a>{% endif %}
-    <button onclick="deleteCalendar('{{ job.id }}')" class="nav-btn nav-btn-danger">🗑 Eliminar</button>
+    {% if can_delete_calendar %}<button onclick="deleteCalendar('{{ job.id }}')" class="nav-btn nav-btn-danger">🗑 Eliminar</button>{% endif %}
     <a href="{% url 'logout' %}" class="nav-btn nav-btn-ghost nav-logout">Salir</a>
   </div>
 </nav>

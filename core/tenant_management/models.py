@@ -54,6 +54,11 @@ class Plan(models.Model):
     # formulario de analisis, en vez del calendario completo de 7 dias —
     # pensado para prospeccion. Activado hoy solo en el Plan Admin.
     allows_sample_generation = models.BooleanField(default=False)
+    # Permite al usuario borrar su calendario desde la UI. Default False:
+    # sin borrado, cada calendario ocupa cupo de forma permanente, que es el
+    # control de costo de IA buscado -- un plan nuevo no hereda el permiso
+    # por accidente. Solo Tester y Admin lo tienen encendido.
+    allows_calendar_deletion = models.BooleanField(default=False)
     # Payment Link de Stripe propio de este plan -- vacio (default) cae al
     # link global settings.STRIPE_PAYMENT_LINK_URL, retrocompatible. Ver
     # core/brand_dna/rate_limits.py:get_payment_url.

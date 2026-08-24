@@ -2,12 +2,17 @@ import pytest
 import io
 import json
 import os
+import secrets
 from unittest.mock import patch, MagicMock
 from django.test import Client, override_settings
 from django.utils import timezone
 from datetime import timedelta
 from core.brand_dna.models import AnalysisJob, BrandDNA, ProductPhotoPrecheckAttempt
 from core.content_pipeline.models import ContentCalendar, ContentPost
+from core.tenant_management.models import Plan, TenantModel, Subscription, User
+
+# Contraseñas generadas dinámicamente — no hardcodeadas en el código fuente
+_TEST_PWD = f"T3st-{secrets.token_urlsafe(10)}!"   # ~17 chars, cumple todos los validators
 
 pytestmark = pytest.mark.django_db
 
@@ -1537,3 +1542,53 @@ def test_calendar_review_omite_el_precio_cuando_el_plan_esta_en_cero(client, use
 
     assert response.context['plan_price'] == 0
     assert 'Paga para generar tu próximo mes' in response.content.decode('utf-8')
+
+
+@pytest.mark.django_db
+def test_borrar_calendario_prohibido_en_plan_sin_permiso(client):
+    from core.tenant_management.models import Plan
+    user = User.objects.create_user(
+        email='nodelete@example.com', password=_TEST_PWD, username='nodelete@example.com')
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    plan, _ = Plan.objects.get_or_create(
+        name='User', defaults={'max_calendars_per_week': 2})
+    plan.allows_calendar_deletion = False
+    plan.save(update_fields=['allows_calendar_deletion'])
+    Subscription.objects.create(tenant=tenant, plan=plan)
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+    job = AnalysisJob.objects.create(
+        user=user, email=user.email, business_description='Taqueria',
+        status=AnalysisJob.STATUS_DONE)
+    client.force_login(user)
+
+    resp = client.post(f'/api/calendar/{job.id}/delete/')
+
+    assert resp.status_code == 403
+    job.refresh_from_db()
+    assert job.deleted_at is None
+
+
+@pytest.mark.django_db
+def test_borrar_calendario_permitido_en_plan_interno(client):
+    from core.tenant_management.models import Plan
+    user = User.objects.create_user(
+        email='tester@example.com', password=_TEST_PWD, username='tester@example.com')
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    plan, _ = Plan.objects.get_or_create(
+        name='Tester', defaults={'max_calendars_per_week': 5})
+    plan.allows_calendar_deletion = True
+    plan.save(update_fields=['allows_calendar_deletion'])
+    Subscription.objects.create(tenant=tenant, plan=plan)
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+    job = AnalysisJob.objects.create(
+        user=user, email=user.email, business_description='Taqueria',
+        status=AnalysisJob.STATUS_DONE)
+    client.force_login(user)
+
+    resp = client.post(f'/api/calendar/{job.id}/delete/')
+
+    assert resp.status_code == 200
+    job.refresh_from_db()
+    assert job.deleted_at is not None
