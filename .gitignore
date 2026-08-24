@@ -74,8 +74,8 @@ google-cloud-cli-*.tar.gz
 ciberaudit.txt
 analisis.txt
 .cybersec-context.md
-pentesting.md
-changelog.md
+pentesting*.md
+changelog*.md
 patches/
 patch/
 
