@@ -1592,3 +1592,41 @@ def test_borrar_calendario_permitido_en_plan_interno(client):
     assert resp.status_code == 200
     job.refresh_from_db()
     assert job.deleted_at is not None
+
+
+@pytest.mark.django_db
+def test_primera_descarga_se_estampa_una_sola_vez(client, free_plan):
+    from unittest.mock import patch, MagicMock
+    from core.brand_dna.models import BrandDNA
+    from core.content_pipeline.models import ContentCalendar, ContentPost
+    from core.tenant_management.models import TenantModel, Subscription
+    user = User.objects.create_user(
+        email='dl@example.com', password=_TEST_PWD, username='dl@example.com')
+    tenant = TenantModel.objects.create(name=user.email, status='active')
+    Subscription.objects.create(tenant=tenant, plan=free_plan)
+    user.tenant = tenant
+    user.save(update_fields=['tenant'])
+    job = AnalysisJob.objects.create(
+        user=user, email=user.email, business_description='Taqueria',
+        status=AnalysisJob.STATUS_DONE)
+    dna = BrandDNA.objects.create(job=job, business_name='Taqueria')
+    calendar = ContentCalendar.objects.create(brand_dna=dna)
+    post = ContentPost.objects.create(
+        calendar=calendar, day_number=1, caption='Hola',
+        image_url='https://storage.googleapis.com/bucket/img.png',
+        suggested_time='19:00', hashtags=[],
+        scheduled_at=timezone.now() + timedelta(days=1))
+    client.force_login(user)
+
+    fake = MagicMock(content=b'PNG')
+    fake.raise_for_status = MagicMock()
+    with patch('requests.get', return_value=fake):
+        client.get(f'/api/post/{post.id}/download/')
+    calendar.refresh_from_db()
+    primera = calendar.first_download_at
+    assert primera is not None
+
+    with patch('requests.get', return_value=fake):
+        client.get(f'/api/post/{post.id}/download/')
+    calendar.refresh_from_db()
+    assert calendar.first_download_at == primera

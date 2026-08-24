@@ -9,6 +9,10 @@ class ContentCalendar(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     next_week_generating = models.BooleanField(default=False)
     last_reactivation_email_at = models.DateTimeField(null=True, blank=True)
+    # Momento en que el usuario se llevo su primer contenido. Es la senal de
+    # valor entregado: dispara el banner de venta anticipada, que antes salia
+    # antes de que el usuario tocara nada.
+    first_download_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'content_pipeline_calendar'

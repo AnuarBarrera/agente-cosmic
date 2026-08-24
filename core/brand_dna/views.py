@@ -513,6 +513,16 @@ def download_post_image(request, post_id):
     if not post.image_url:
         raise Http404
 
+    # Primera vez que este usuario se lleva algo de su calendario. Se estampa
+    # antes de servir el archivo: si la descarga falla despues, el usuario ya
+    # demostro intencion, y un banner de venta de mas es mejor que uno que
+    # nunca aparece.
+    calendar = post.calendar
+    if calendar.first_download_at is None:
+        from django.utils import timezone as _tz
+        calendar.first_download_at = _tz.now()
+        calendar.save(update_fields=['first_download_at'])
+
     if post.format == ContentPost.FORMAT_REEL and post.video_url:
         if not _is_gcs_url(post.video_url):
             raise Http404
