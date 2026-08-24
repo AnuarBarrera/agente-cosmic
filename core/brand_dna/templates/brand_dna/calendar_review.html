@@ -222,7 +222,7 @@
   const CSRF = '{{ csrf_token }}';
 
   // Convierte los horarios (servidos en UTC) a la hora local del navegador del usuario.
-  document.queryAll('.post-schedule[data-scheduled]').forEach(function(el) {
+  document.querySelectorAll('.post-schedule[data-scheduled]').forEach(function(el) {
     const d = new Date(el.dataset.scheduled);
     if (isNaN(d.getTime())) return;
     const dateStr = d.toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short' });
