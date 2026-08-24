@@ -7,6 +7,9 @@ from django.test import Client
 from core.tenant_management.models import (
     EmailVerificationToken, InvitationCode, Plan, TenantModel, Subscription,
 )
+from core.brand_dna.models import AnalysisJob, BrandDNA
+from core.content_pipeline.models import ContentCalendar
+from core.brand_dna.auth_views import _post_auth_destination
 
 # Contraseñas generadas dinámicamente — no hardcodeadas en el código fuente
 _TEST_PWD = f"T3st-{secrets.token_urlsafe(10)}!"   # ~17 chars, cumple todos los validators
@@ -337,3 +340,89 @@ def test_magic_link_exitoso_no_cuenta_contra_el_rate_limit(client, magic_user):
         resp = client.get(f'/auth/entrar/{tok.token}/', HTTP_X_REAL_IP='198.51.100.9')
         assert resp.status_code == 302
         assert resp.url == '/dashboard/'
+
+
+def _make_user(email='dest@example.com'):
+    user = User.objects.create_user(email=email, password=_TEST_PWD, username=email)
+    _make_tenant(user)
+    return user
+
+
+@pytest.mark.django_db
+def test_destination_sin_calendarios_va_al_formulario():
+    user = _make_user()
+    assert _post_auth_destination(user) == '/nuevo-analisis/'
+
+
+@pytest.mark.django_db
+def test_destination_con_job_procesando_va_al_dashboard():
+    user = _make_user('proc@example.com')
+    AnalysisJob.objects.create(
+        user=user, email=user.email, business_description='Taqueria',
+        status=AnalysisJob.STATUS_PROCESSING,
+    )
+    assert _post_auth_destination(user) == '/dashboard/'
+
+
+@pytest.mark.django_db
+def test_destination_con_un_calendario_listo_va_a_ese_calendario():
+    user = _make_user('uno@example.com')
+    job = AnalysisJob.objects.create(
+        user=user, email=user.email, business_description='Taqueria',
+        status=AnalysisJob.STATUS_DONE,
+    )
+    dna = BrandDNA.objects.create(job=job, business_name='Taqueria')
+    ContentCalendar.objects.create(brand_dna=dna)
+    assert _post_auth_destination(user) == f'/calendar/{job.id}/'
+
+
+@pytest.mark.django_db
+def test_destination_con_dos_calendarios_va_al_dashboard():
+    user = _make_user('dos@example.com')
+    for i in range(2):
+        job = AnalysisJob.objects.create(
+            user=user, email=user.email, business_description=f'Negocio {i}',
+            status=AnalysisJob.STATUS_DONE,
+        )
+        dna = BrandDNA.objects.create(job=job, business_name=f'Negocio {i}')
+        ContentCalendar.objects.create(brand_dna=dna)
+    assert _post_auth_destination(user) == '/dashboard/'
+
+
+@pytest.mark.django_db
+def test_destination_ignora_calendarios_borrados():
+    from django.utils import timezone
+    user = _make_user('borrado@example.com')
+    job = AnalysisJob.objects.create(
+        user=user, email=user.email, business_description='Borrado',
+        status=AnalysisJob.STATUS_DONE, deleted_at=timezone.now(),
+    )
+    dna = BrandDNA.objects.create(job=job, business_name='Borrado')
+    ContentCalendar.objects.create(brand_dna=dna)
+    assert _post_auth_destination(user) == '/nuevo-analisis/'
+
+
+@pytest.mark.django_db
+def test_verificar_correo_deja_al_usuario_logueado(client, setup_plans_and_groups):
+    from django.contrib.auth.hashers import make_password
+    token = EmailVerificationToken.objects.create(
+        email='nuevo@example.com',
+        tenant_name='',
+        user_data={'password': make_password(_TEST_PWD), 'invitation_code': ''},
+    )
+    resp = client.get(f'/auth/verify/{token.token}/')
+    # Aterriza en el formulario, no en login, y con sesion iniciada
+    assert resp.status_code == 302
+    assert resp.url == '/nuevo-analisis/'
+    assert '_auth_user_id' in client.session
+
+
+@pytest.mark.django_db
+def test_login_respeta_next_explicito(client, setup_plans_and_groups):
+    user = _make_user('next@example.com')
+    resp = client.post(
+        '/auth/login/?next=/dashboard/',
+        {'email': user.email, 'password': _TEST_PWD},
+    )
+    assert resp.status_code == 302
+    assert resp.url == '/dashboard/'

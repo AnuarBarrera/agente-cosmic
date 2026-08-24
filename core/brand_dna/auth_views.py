@@ -125,7 +125,7 @@ def _is_registration_open():
 
 def register_view(request):
     if request.user.is_authenticated:
-        return redirect('dashboard')
+        return redirect(_post_auth_destination(request.user))
 
     if not _is_registration_open():
         return render(request, 'brand_dna/auth/register.html', {
@@ -243,11 +243,43 @@ def verify_email_view(request, token):
 
     notify_admin_new_user(user, invitation_code=invitation_code_str or None)
 
-    return redirect('login')
+    # Auto-login: el token es de un solo uso, expira en 24h y ya tiene poder
+    # para crear la cuenta -- loguearla no amplia la superficie, y ahorra al
+    # usuario escribir su contrasena por segunda vez en el mismo minuto.
+    login(request, user)
+    return redirect(_post_auth_destination(user))
 
 
 _LOGIN_MAX_ATTEMPTS = 5
 _LOGIN_LOCKOUT_SECONDS = 300
+
+
+def _post_auth_destination(user) -> str:
+    """URL a la que mandar al usuario despues de autenticarse.
+
+    Reemplaza el 'redirect(dashboard)' que cada punto de entrada decidia por
+    su cuenta. Devuelve URL ya resuelta porque el caso del calendario
+    necesita argumentos y los otros dos no.
+    """
+    from django.urls import reverse
+    from core.brand_dna.models import AnalysisJob
+
+    jobs = AnalysisJob.objects.filter(user=user, deleted_at__isnull=True)
+
+    if jobs.filter(status__in=(AnalysisJob.STATUS_PENDING,
+                               AnalysisJob.STATUS_PROCESSING)).exists():
+        return reverse('dashboard')
+
+    ready = list(
+        jobs.filter(brand_dna__calendar__isnull=False).values_list('id', flat=True)[:2]
+    )
+    if len(ready) == 1:
+        return reverse('calendar_review', args=[ready[0]])
+
+    if ready:
+        return reverse('dashboard')
+
+    return reverse('new_analysis')
 
 
 def login_view(request):
@@ -276,8 +308,8 @@ def login_view(request):
                     cache.delete(cache_key)
                     LOGIN_ATTEMPTS.labels(result='success').inc()
                     login(request, user)
-                    next_url = request.GET.get('next', 'dashboard')
-                    return redirect(next_url)
+                    next_url = request.GET.get('next')
+                    return redirect(next_url or _post_auth_destination(user))
                 LOGIN_ATTEMPTS.labels(result='failed').inc()
                 deactivated = User.objects.filter(email=email, is_active=False).first()
                 if deactivated:
@@ -297,7 +329,7 @@ def logout_view(request):
 
 def forgot_password_view(request):
     if request.user.is_authenticated:
-        return redirect('dashboard')
+        return redirect(_post_auth_destination(request.user))
 
     sent = False
     error = None
@@ -476,7 +508,7 @@ def google_callback_view(request):
                 pass
 
     login(request, user)
-    return redirect('dashboard')
+    return redirect(_post_auth_destination(user))
 
 
 @login_required
