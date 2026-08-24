@@ -337,8 +337,19 @@
 
   <div class="regen-banner" id="regenBanner">
     <span id="regenBannerText">Hiciste cambios a tu ADN de marca.</span>
-    <button id="regenBtn" onclick="regenerateCalendar()">Regenerar mis posts con estos cambios</button>
+    {% if payment_needed or early_cta %}
+      {% if photos_remaining > 0 %}
+      <button id="regenBtn" type="button" onclick="openPhotoModal('{{ payment_url }}')">Genera tu contenido con estos cambios →</button>
+      {% else %}
+      <a id="regenBtn" href="{{ payment_url }}" style="display:inline-block;text-decoration:none;">Genera tu contenido con estos cambios →</a>
+      {% endif %}
+    {% endif %}
   </div>
+  {% if calendar %}
+  <p style="color:#888;font-size:0.85rem;text-align:center;margin-top:8px;">
+    Tus cambios quedaron guardados. El contenido que ya tienes se generó con la información anterior.
+  </p>
+  {% endif %}
   {{ brand_dna.approved_fields|json_script:"approved-fields-data" }}
 
   <div style="text-align:center;margin-top:24px;">
@@ -503,17 +514,23 @@
     return EDITABLE_FIELDS.every(f => APPROVED_FIELDS.has(f));
   }
 
-  // Habilita "Regenerar mis posts" solo cuando TODOS los campos del ADN de
-  // marca están aprobados — evita regenerar contenido con partes sin revisar.
+  // El CTA de pago solo se ofrece cuando TODOS los campos del ADN estan
+  // aprobados -- misma regla que tenia el boton de regenerar. El boton puede
+  // no existir (usuario con mes vigente, sin nada que comprar).
   function updateRegenButtonState() {
     const btn = document.getElementById('regenBtn');
     const hint = document.getElementById('regenBannerText');
+    if (!btn) {
+      if (hint) hint.textContent = 'Hiciste cambios a tu ADN de marca.';
+      return;
+    }
     if (allFieldsApproved()) {
       btn.disabled = false;
-      hint.textContent = 'Hiciste cambios a tu ADN de marca.';
+      hint.textContent = 'Hiciste cambios a tu ADN de marca. Genera tu próximo mes para verlos aplicados.';
     } else {
       btn.disabled = true;
-      hint.textContent = 'Hiciste cambios a tu ADN de marca. Aprueba todos los campos de arriba para poder regenerar tus posts.';
+      btn.style.display = 'none';
+      hint.textContent = 'Hiciste cambios a tu ADN de marca. Aprueba todos los campos de arriba para poder generar contenido con ellos.';
     }
   }
 
@@ -602,31 +619,6 @@
       showToast(data.error || 'Error', '#e74c3c');
     }
   }
-
-  async function regenerateCalendar() {
-    const btn = document.getElementById('regenBtn');
-    btn.disabled = true;
-    btn.textContent = 'Regenerando...';
-    try {
-      const res = await fetch('/api/calendar/' + JOB_ID + '/regenerate/', {
-        method: 'POST',
-        headers: { 'X-CSRFToken': CSRF },
-      });
-      const data = await res.json();
-      if (data.status === 'ok') {
-        showToast('Posts regenerados ✓');
-        document.getElementById('regenBanner').style.display = 'none';
-      } else {
-        showToast(data.error || 'Error regenerando', '#e74c3c');
-        btn.disabled = false;
-        btn.textContent = 'Regenerar mis posts con estos cambios';
-      }
-    } catch (e) {
-      showToast('Error de red', '#e74c3c');
-      btn.disabled = false;
-      btn.textContent = 'Regenerar mis posts con estos cambios';
-    }
-  }
   {% else %}
   // ── Mensajes rotativos mientras se analiza ──
   const loadingMsgs = [
@@ -705,5 +697,6 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 </script>
+{% include "brand_dna/_payment_photo_modal.html" %}
 </body>
 </html>

@@ -1314,6 +1314,13 @@ def test_payment_context_devuelve_las_cinco_claves(client):
     assert ctx['photos_remaining'] == plan.max_product_reference_photos
 
 
+@pytest.mark.django_db
+def test_la_ruta_de_regenerar_calendario_ya_no_existe(client):
+    from django.urls import NoReverseMatch, reverse
+    with pytest.raises(NoReverseMatch):
+        reverse('regenerate_calendar_api', args=['00000000-0000-0000-0000-000000000000'])
+
+
 def test_add_product_photos_requires_login(client, job_with_calendar):
     response = client.post(f'/api/brand-dna/{job_with_calendar.id}/add-product-photos/', {
         'product_reference_photo': _fake_product_photo(),

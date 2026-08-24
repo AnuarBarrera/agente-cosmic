@@ -33,7 +33,6 @@ urlpatterns = [
     path('api/post/<uuid:post_id>/download/', views.download_post_image, name='download_post_image'),
     path('api/calendar/<uuid:job_id>/delete/', views.delete_calendar_api, name='delete_calendar_api'),
     path('api/brand-dna/<uuid:job_id>/field/', views.brand_dna_field_action_api, name='brand_dna_field_action_api'),
-    path('api/calendar/<uuid:job_id>/regenerate/', views.regenerate_calendar_api, name='regenerate_calendar_api'),
     path('stripe/webhook/', stripe_views.stripe_webhook_view, name='stripe_webhook'),
     path('dashboard/suscripcion/', stripe_views.manage_subscription_view, name='manage_subscription'),
 ]

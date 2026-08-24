@@ -303,12 +303,18 @@ def results(request, job_id):
         calendar = getattr(brand_dna, 'calendar', None)
     from core.brand_dna.rate_limits import can_create_calendar
     can_create = can_create_calendar(request.user)[0]
+    pay_ctx = _payment_context(job, request.user)
+    # Mide si editar el ADN funciona como motor de conversion: se cuenta cada
+    # vez que la pantalla se sirve con el CTA de pago visible.
+    if pay_ctx['payment_needed'] or pay_ctx['early_cta']:
+        POST_ACTIONS.labels(action='brand_dna_payment_cta').inc()
     return render(request, 'brand_dna/results.html', {
         'job': job,
         'brand_dna': brand_dna,
         'calendar': calendar,
         'can_create_calendar': can_create,
         'tone_choices': _ALLOWED_TONES,
+        **pay_ctx,
     })
 
 
@@ -966,69 +972,3 @@ def _reanalyze_brand_field(brand_dna, job, field: str, feedback: str):
     if field == 'keywords':
         return data['keywords']
     return data['value']
-
-
-@login_required
-@require_POST
-def regenerate_calendar_api(request, job_id):
-    from core.content_pipeline.generators.text_generator import TextGenerator
-    from core.content_pipeline.generators.image_generator import ImageGenerator
-    from core.content_pipeline.models import ContentPost
-
-    job = get_object_or_404(AnalysisJob, id=job_id, user=request.user)
-    brand_dna = getattr(job, 'brand_dna', None)
-    calendar = getattr(brand_dna, 'calendar', None) if brand_dna else None
-    if not calendar:
-        return JsonResponse({'error': 'No hay calendario para regenerar'}, status=404)
-
-    if not _BRAND_DNA_EDITABLE_FIELDS.issubset(set(brand_dna.approved_fields)):
-        return JsonResponse({
-            'error': 'Aprueba todos los campos del ADN de marca antes de regenerar tu contenido.',
-        }, status=400)
-
-    pending_posts = list(calendar.posts.exclude(status=ContentPost.STATUS_SENT).order_by('day_number'))
-    if not pending_posts:
-        return JsonResponse({'error': 'No hay posts pendientes por regenerar — todos ya fueron enviados.'}, status=400)
-
-    try:
-        posts_data = TextGenerator().generate(brand_dna)
-    except Exception as e:
-        logger.error(f"Error regenerando texto para job {job_id}: {e}")
-        return JsonResponse({'error': 'No se pudo regenerar el contenido. Intenta de nuevo.'}, status=500)
-
-    posts_by_day = {p.day_number: p for p in pending_posts}
-    regenerated_days = []
-    for i, post_data in enumerate(posts_data, start=1):
-        post = posts_by_day.get(i)
-        if not post:
-            continue
-        post.caption = post_data['caption']
-        post.hashtags = post_data.get('hashtags', [])
-        post.user_status = ContentPost.USER_STATUS_PENDING
-        post.save(update_fields=['caption', 'hashtags', 'user_status'])
-        regenerated_days.append(i)
-
-    day1 = posts_by_day.get(1)
-    if day1 and day1.image_url:
-        try:
-            image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
-            new_image_url = image_gen.generate(
-                caption=day1.caption,
-                colors=brand_dna.primary_colors,
-                tone=brand_dna.tone,
-                filename=f"{job_id}-day1-regen-{int(_time.time())}",
-                brand_name=brand_dna.business_name,
-                keywords=brand_dna.keywords,
-                description=brand_dna.description,
-                audience=brand_dna.audience,
-                max_qc_retries=0,
-            )
-            if new_image_url:
-                day1.image_url = new_image_url
-                day1.save(update_fields=['image_url'])
-        except Exception as e:
-            logger.error(f"Error regenerando imagen dia 1 para job {job_id}: {e}")
-
-    POST_ACTIONS.labels(action='brand_dna_regenerated_calendar').inc()
-    logger.info(f"Calendario regenerado tras cambios en Brand DNA | job={job_id} | user={request.user.email}")
-    return JsonResponse({'status': 'ok', 'regenerated_days': regenerated_days})
