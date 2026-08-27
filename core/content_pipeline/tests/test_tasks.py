@@ -1592,6 +1592,25 @@ def test_send_reactivation_emails_task_sends_for_stale_calendar_without_download
     assert calendar_with_dna.last_reactivation_email_at is not None
 
 
+def test_send_reactivation_emails_task_skips_calendar_with_deleted_job(calendar_with_dna):
+    """HALLAZGO 2026-08-27: eliminar un calendario solo marca AnalysisJob.deleted_at
+    (soft delete) -- el ContentCalendar sigue existiendo y stale_calendars no
+    filtraba por deleted_at, asi que el cron seguia mandando el correo de
+    reactivacion indefinidamente para calendarios ya eliminados por el usuario."""
+    for i in range(1, 4):
+        _make_post(calendar_with_dna, i)
+    ContentCalendar.objects.filter(id=calendar_with_dna.id).update(
+        created_at=timezone.now() - timedelta(days=4)
+    )
+    job = calendar_with_dna.brand_dna.job
+    job.deleted_at = timezone.now()
+    job.save(update_fields=['deleted_at'])
+    with patch('core.content_pipeline.tasks.EmailSender') as MockEmail:
+        from core.content_pipeline.tasks import send_reactivation_emails_task
+        send_reactivation_emails_task()
+    MockEmail.return_value.send_reactivation_calendar.assert_not_called()
+
+
 def test_send_reactivation_emails_task_skips_recent_calendar(calendar_with_dna):
     for i in range(1, 4):
         _make_post(calendar_with_dna, i)
