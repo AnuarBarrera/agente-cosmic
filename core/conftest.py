@@ -13,6 +13,24 @@ def _silence_llm_audit_log():
 
 
 @pytest.fixture(autouse=True)
+def _pin_free_tier_gemini_flag(settings):
+    # HALLAZGO 2026-08-30: settings.FREE_TIER_USES_GEMINI_API (ventana temporal
+    # IME, ver saas_chatbot/settings.py) se lee directo del entorno del proceso.
+    # Si el contenedor donde corre pytest ya tiene esa env var en True (como en
+    # produccion durante la ventana), ~20 tests que instancian ImageGenerator/
+    # ReelGenerator sin pasar use_gemini_api y solo mockean _vertex_client
+    # empiezan a golpear la API real de Gemini (sin mock), con 400 reales o
+    # 200 reales que no matchean los bytes/asserts esperados -- 22 tests caidos
+    # en produccion (reportado por Anuar) que en dev pasaban limpio porque ahi
+    # la env var seguia en False. Los tests no deben depender del entorno
+    # ambiente del proceso; se fija aqui a False por default para que el
+    # comportamiento sea deterministico sin importar la env var real del
+    # contenedor. Los tests que SI quieren probar el camino en True lo activan
+    # explicito con override_settings/settings fixture en su propio scope.
+    settings.FREE_TIER_USES_GEMINI_API = False
+
+
+@pytest.fixture(autouse=True)
 def _clear_cache_between_tests():
     # HALLAZGO 79 (hallazgos.txt): TenantRateLimitingMiddleware usa django.core.cache
     # (en memoria, compartido por TODO el proceso de pytest) para contar requests
