@@ -178,6 +178,17 @@ REEL_TEXT_OVERLAY_ENGINE = get_env('REEL_TEXT_OVERLAY_ENGINE', default='drawtext
 # BigQuery, ver consolidado.md). El codigo de Veo se queda intacto para poder
 # reactivarlo cambiando solo esta variable de entorno, sin tocar codigo.
 REEL_VEO_ENABLED = get_env('REEL_VEO_ENABLED', default='False', cast=bool)
+
+# Ventana temporal 2026-08-30 -> ~2026-09-16 (decision de Anuar): Vertex esta
+# limitado a 1 rpm (RPM_LIMITS en rate_limiter.py) contra 20 rpm de Gemini API,
+# y el 1-sep se presenta Cosmic en la comunidad del IME -- si el trial gratis
+# se queda en Vertex, un pico de registros nuevos generaria contenido
+# dolorosamente lento justo en el momento de mayor visibilidad. Mientras esta
+# variable este en True, TODO el trial gratis/Tester/Admin genera con Gemini
+# API igual que el plan pagado (consume la cuenta de pago real, no creditos de
+# GCP -- trade-off costo/UX aceptado a proposito). Apagar cuando la cuenta de
+# Gemini API pase a postpago y se re-evalue la estrategia de proveedor.
+FREE_TIER_USES_GEMINI_API = get_env('FREE_TIER_USES_GEMINI_API', default='False', cast=bool)
 # GOOGLE_APPLICATION_CREDENTIALS se inyecta vía docker-compose (volumen ADC)
 
 # Google OAuth (para Sign in with Google)

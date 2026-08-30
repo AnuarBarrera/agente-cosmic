@@ -380,7 +380,9 @@ class ReelGenerator:
         self._bucket = bucket_name
         # True = plan pagado (Gemini API, api_key) SOLO para _generate_scene_still.
         # Veo/Lyria/TTS ignoran este flag, se quedan en Vertex siempre.
-        self._use_gemini_api = use_gemini_api
+        # settings.FREE_TIER_USES_GEMINI_API fuerza True para TODOS mientras
+        # este activo -- mismo criterio que ImageGenerator, ver ese comentario.
+        self._use_gemini_api = use_gemini_api or settings.FREE_TIER_USES_GEMINI_API
 
     # Compartido por Veo (_generate_single_clip) e imagen de escena
     # (_generate_scene_still). Para Veo se pasa via el parametro negative_prompt

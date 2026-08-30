@@ -280,7 +280,11 @@ class ImageGenerator:
         self._bucket = bucket_name
         # True = plan pagado (Gemini API, api_key). False = trial gratis
         # (Vertex, créditos de GCP). Ver _gemini_api_client().
-        self._use_gemini_api = use_gemini_api
+        # settings.FREE_TIER_USES_GEMINI_API fuerza True para TODOS mientras
+        # este activo (ventana temporal, ver comentario en settings.py) -- se
+        # aplica aqui, en el punto unico de construccion, para no tener que
+        # tocar cada call site que instancia ImageGenerator.
+        self._use_gemini_api = use_gemini_api or settings.FREE_TIER_USES_GEMINI_API
 
     def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, business_url: str = '') -> str:
         try:
