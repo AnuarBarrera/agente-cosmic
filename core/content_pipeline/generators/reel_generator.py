@@ -1,4 +1,5 @@
 import base64
+import concurrent.futures
 import html as _html
 import json
 import logging
@@ -384,6 +385,34 @@ class ReelGenerator:
         # este activo -- mismo criterio que ImageGenerator, ver ese comentario.
         self._use_gemini_api = use_gemini_api or settings.FREE_TIER_USES_GEMINI_API
 
+    @staticmethod
+    def _run_parallel(callables: list) -> list:
+        """Corre N funciones sin argumentos en paralelo (I/O-bound: llamadas de
+        red a Gemini API/Vertex). Devuelve resultados en el MISMO ORDEN que la
+        lista de entrada, nunca en orden de finalizacion -- quien llama puede
+        hacer zip() con la lista original sin perder la correspondencia.
+
+        HALLAZGO 2026-08-30: las escenas de un reel se generaban secuencialmente
+        (una llamada de red + reintento de QC tras otra, dentro de una sola tarea
+        de RQ) -- con 3 workers y 7 posts por semana, 2 workers terminaban sus
+        posts normales y quedaban ociosos ~6-7 min esperando al worker del reel,
+        que hacia ~5-8 llamadas de red una por una. Subir de Vertex (1 rpm) a
+        Gemini API (20 rpm) no bajo el tiempo total porque el limite de RPM
+        nunca fue la restriccion real: si una sola llamada (con su reintento de
+        QC) ya tarda mas de 60s/N, el throttle nunca se activa. El cuello de
+        botella real es la SUMA de latencias secuenciales.
+
+        Cada llamada de _generate_scene_still/_gemini_api_client()/_vertex_client()
+        construye un cliente FRESCO por invocacion (ver esas funciones) -- sin
+        estado compartido entre llamadas, seguro correrlas concurrentes via
+        threads dentro del mismo worker, sin tocar la orquestacion de RQ ni
+        depender de que otros workers esten libres."""
+        if not callables:
+            return []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(callables)) as executor:
+            futures = [executor.submit(fn) for fn in callables]
+            return [f.result() for f in futures]
+
     # Compartido por Veo (_generate_single_clip) e imagen de escena
     # (_generate_scene_still). Para Veo se pasa via el parametro negative_prompt
     # de la API (GenerateVideosConfig lo soporta), NO concatenado al prompt
@@ -666,10 +695,16 @@ class ReelGenerator:
             if still_clip is not None:
                 clips.append(still_clip)
 
-        for prompt in scene_prompts[1:]:
-            still_clip = self._generate_still_scene_clip(
-                prompt, width, height, fps, duration=_IMAGE_SHOT_DURATION_SECONDS,
+        # En paralelo, no secuencial -- ver _run_parallel para el hallazgo
+        # completo (cada escena hacia su propia llamada de red una tras otra,
+        # sumando varios minutos dentro de una sola tarea de RQ).
+        still_results = self._run_parallel([
+            lambda p=prompt: self._generate_still_scene_clip(
+                p, width, height, fps, duration=_IMAGE_SHOT_DURATION_SECONDS,
             )
+            for prompt in scene_prompts[1:]
+        ])
+        for prompt, still_clip in zip(scene_prompts[1:], still_results):
             if still_clip is not None:
                 clips.append(still_clip)
             else:

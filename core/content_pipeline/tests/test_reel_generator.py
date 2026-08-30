@@ -340,9 +340,14 @@ class TestGenerateVideoClips:
         assert clips == [b'veo-clip'] + [b'animated-clip'] * 5
         mock_veo.assert_called_once_with('scene 1')
         mock_probe.assert_called_once_with(b'veo-clip')
-        assert mock_still.call_args_list == [
-            call('scene 2'), call('scene 3'), call('scene 4'), call('scene 5'), call('scene 6'),
-        ]
+        # Las 5 escenas ahora se generan en paralelo (ver _run_parallel) -- el
+        # ORDEN de llegada a este mock ya no es deterministico entre escenas,
+        # pero clips SI mantiene el orden correcto (verificado arriba), que es
+        # lo que realmente importa para el ensamblaje del video final.
+        assert {c.args[0] for c in mock_still.call_args_list} == {
+            'scene 2', 'scene 3', 'scene 4', 'scene 5', 'scene 6',
+        }
+        assert mock_still.call_count == 5
         assert mock_animate.call_args_list == [
             call(b'still-bytes', 720, 1280, 24.0, duration=_IMAGE_SHOT_DURATION_SECONDS),
         ] * 5
