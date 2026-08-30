@@ -578,6 +578,12 @@ class ReelGenerator:
             with open(vars_path, 'w') as f:
                 json.dump(variables, f)
             output_path = os.path.join(tmp, 'output.mp4')
+            # HALLAZGO 2026-08-30: este subprocess (render con navegador headless)
+            # no dejaba NINGUN rastro en logs mientras corria -- en produccion
+            # se vio como un hueco silencioso de minutos, dificil de diferenciar
+            # de un cuelgue real. start/duracion aqui para que el proximo
+            # cuello de botella sea visible sin tener que inferirlo de logs.
+            start = time.monotonic()
             try:
                 subprocess.run(
                     [_HYPERFRAMES_BINARY, 'render', '.', '-c', composition,
@@ -586,11 +592,24 @@ class ReelGenerator:
                     timeout=_HYPERFRAMES_TIMEOUT_SECONDS,
                 )
             except Exception as e:
-                logger.warning(f"HyperFrames {kind} generation failed: {e}")
+                logger.warning(f"HyperFrames {kind} generation failed tras {time.monotonic() - start:.1f}s: {e}")
                 return None
+            logger.info(f"HyperFrames {kind} generado en {time.monotonic() - start:.1f}s")
             record_hyperframes_generation(kind)
             with open(output_path, 'rb') as f:
                 return f.read()
+
+    def _generate_branded_segment_with_retry(self, kind: str, hook_text: str, highlight_word: str,
+                                              tag_cta: str, primary_color: str, template: str,
+                                              font_family: str) -> bytes | None:
+        segment = self._generate_branded_segment(
+            kind, hook_text, highlight_word, tag_cta, primary_color, template, font_family,
+        )
+        if segment is None:
+            segment = self._generate_branded_segment(
+                kind, hook_text, highlight_word, tag_cta, primary_color, template, font_family,
+            )  # 1 reintento
+        return segment
 
     def _normalize_branded_segment(self, segment_bytes: bytes, width: int, height: int, fps: float) -> bytes:
         with tempfile.TemporaryDirectory() as tmp:
@@ -630,28 +649,26 @@ class ReelGenerator:
         font_preset = choose_font_preset(font_seed)
         template = self._choose_reel_template(hook_text, tag_cta)
 
-        portada = self._generate_branded_segment(
-            'portada', hook_text, highlight_word, tag_cta, primary_color, template, font_preset['font_family'],
-        )
-        if portada is None:
-            portada = self._generate_branded_segment(
+        # HALLAZGO 2026-08-30 (medido en produccion, ver commit 4f6bea9): portada
+        # y contraportada llaman al binario de HyperFrames por subprocess
+        # (renderizado con navegador headless) -- NO son llamadas de red rapidas
+        # como se asumio al dejarlas fuera del primer fix de paralelizacion.
+        # Confirmado en logs reales de produccion: un tramo de 3m32s sin ningun
+        # log entre la seleccion de template y la siguiente llamada visible,
+        # justo donde corren estas dos generaciones. _generate_branded_segment
+        # usa tempfile.TemporaryDirectory() (aislado por llamada, sin estado
+        # compartido) -- mismo criterio de seguridad que _run_parallel ya
+        # documenta para las escenas, aplica igual aqui.
+        portada, contraportada = self._run_parallel([
+            lambda: self._generate_branded_segment_with_retry(
                 'portada', hook_text, highlight_word, tag_cta, primary_color, template, font_preset['font_family'],
-            )  # 1 reintento
-
-        if portada is None:
-            logger.warning("Portada o contraportada fallaron tras reintento, reel sin marca (estructura Parte A)")
-            record_hyperframes_fallback()
-            return clips, False
-
-        contraportada = self._generate_branded_segment(
-            'contraportada', hook_text, highlight_word, tag_cta, primary_color, template, font_preset['font_family'],
-        )
-        if contraportada is None:
-            contraportada = self._generate_branded_segment(
+            ),
+            lambda: self._generate_branded_segment_with_retry(
                 'contraportada', hook_text, highlight_word, tag_cta, primary_color, template, font_preset['font_family'],
-            )  # 1 reintento
+            ),
+        ])
 
-        if contraportada is None:
+        if portada is None or contraportada is None:
             logger.warning("Portada o contraportada fallaron tras reintento, reel sin marca (estructura Parte A)")
             record_hyperframes_fallback()
             return clips, False

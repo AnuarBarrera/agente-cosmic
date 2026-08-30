@@ -1210,8 +1210,10 @@ class TestGenerateClipsWithBranding:
              patch.object(gen, '_choose_reel_template', return_value='panel-wipe') as mock_template, \
              patch('core.content_pipeline.generators.reel_generator.choose_font_preset',
                    return_value={'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins'}) as mock_font, \
-             patch.object(gen, '_generate_branded_segment', side_effect=[b'portada-raw', b'contra-raw']) as mock_branded, \
-             patch.object(gen, '_normalize_branded_segment', side_effect=[b'portada-norm', b'contra-norm']) as mock_norm:
+             patch.object(gen, '_generate_branded_segment',
+                          side_effect=lambda kind, *a, **kw: {'portada': b'portada-raw', 'contraportada': b'contra-raw'}[kind]) as mock_branded, \
+             patch.object(gen, '_normalize_branded_segment',
+                          side_effect=lambda segment_bytes, *a, **kw: {b'portada-raw': b'portada-norm', b'contra-raw': b'contra-norm'}[segment_bytes]) as mock_norm:
             clips, has_branding = gen._generate_clips_with_branding(
                 ['scene 1', 'scene 2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
             )
@@ -1220,10 +1222,12 @@ class TestGenerateClipsWithBranding:
         assert clips == [b'portada-norm', b'v', b's1', b's2', b's3', b's4', b's5', b'contra-norm']
         mock_font.assert_called_once_with('job1')
         mock_template.assert_called_once_with('Hook', 'CTA')
-        assert mock_branded.call_args_list == [
-            call('portada', 'Hook', 'word', 'CTA', '#1a1a2e', 'panel-wipe', "'Poppins', sans-serif"),
-            call('contraportada', 'Hook', 'word', 'CTA', '#1a1a2e', 'panel-wipe', "'Poppins', sans-serif"),
-        ]
+        # Portada y contraportada corren en paralelo (ver _run_parallel) -- el
+        # orden de llegada a este mock ya no es deterministico entre ellas
+        # (por eso side_effect es una funcion por kind, no una lista posicional).
+        mock_branded.assert_any_call('portada', 'Hook', 'word', 'CTA', '#1a1a2e', 'panel-wipe', "'Poppins', sans-serif")
+        mock_branded.assert_any_call('contraportada', 'Hook', 'word', 'CTA', '#1a1a2e', 'panel-wipe', "'Poppins', sans-serif")
+        assert mock_branded.call_count == 2
         assert mock_norm.call_args_list == [
             call(b'portada-raw', 720, 1280, 24.0),
             call(b'contra-raw', 720, 1280, 24.0),
@@ -1266,8 +1270,13 @@ class TestGenerateClipsWithBranding:
         assert clips == [b'v', b's1', b's2', b's3', b's4', b's5']
         mock_norm.assert_not_called()
         mock_fallback.assert_called_once()
-        # 2 intentos de portada (1 + reintento) antes de rendirse
-        assert mock_branded.call_count == 2
+        # Portada y contraportada corren en paralelo (ver _run_parallel) -- ya
+        # no hay forma de "cortar antes" la generacion de contraportada cuando
+        # portada falla, como si pasaba con el codigo secuencial de antes.
+        # 2 intentos (1 + reintento) x 2 segmentos = 4. Costo extra minimo y
+        # solo en el camino de fallo (poco frecuente); el camino de exito es
+        # el que se beneficia de correr ambas en paralelo.
+        assert mock_branded.call_count == 4
 
     def test_skips_branding_attempt_when_body_has_fewer_than_3_clips(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
@@ -1291,8 +1300,10 @@ class TestGenerateClipsWithBranding:
              patch.object(gen, '_choose_reel_template', return_value='panel-wipe'), \
              patch('core.content_pipeline.generators.reel_generator.choose_font_preset',
                    return_value={'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins'}), \
-             patch.object(gen, '_generate_branded_segment', side_effect=[b'portada-raw', b'contra-raw']), \
-             patch.object(gen, '_normalize_branded_segment', side_effect=[b'portada-norm', b'contra-norm']):
+             patch.object(gen, '_generate_branded_segment',
+                          side_effect=lambda kind, *a, **kw: {'portada': b'portada-raw', 'contraportada': b'contra-raw'}[kind]), \
+             patch.object(gen, '_normalize_branded_segment',
+                          side_effect=lambda segment_bytes, *a, **kw: {b'portada-raw': b'portada-norm', b'contra-raw': b'contra-norm'}[segment_bytes]):
             clips, has_branding = gen._wrap_with_branding(
                 [b'v', b's1', b's2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
             )
