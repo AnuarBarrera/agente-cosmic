@@ -374,14 +374,13 @@ class TestGenerateVideoClips:
 
         mock_veo.assert_not_called()
         assert clips == [b'animated-clip'] * 6
-        assert mock_animate.call_args_list[0] == call(
-            b'still-bytes', _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS,
-            duration=_VEO_CLIP_DURATION_SECONDS,
-        )
-        assert mock_animate.call_args_list[1] == call(
-            b'still-bytes', _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS,
-            duration=_IMAGE_SHOT_DURATION_SECONDS,
-        )
+        # Con skip_veo=True las 6 escenas (incluida la 0) van al MISMO lote
+        # paralelo (ver _generate_video_clips) -- el orden de llegada a este
+        # mock ya no es deterministico entre escenas. Se verifica por conteo
+        # de duraciones en vez de por indice.
+        durations_used = [c.kwargs['duration'] for c in mock_animate.call_args_list]
+        assert durations_used.count(_VEO_CLIP_DURATION_SECONDS) == 1
+        assert durations_used.count(_IMAGE_SHOT_DURATION_SECONDS) == 5
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',

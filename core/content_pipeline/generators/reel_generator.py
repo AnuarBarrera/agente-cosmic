@@ -688,23 +688,43 @@ class ReelGenerator:
         # animacion zoompan de ffmpeg, cada uno de _IMAGE_SHOT_DURATION_SECONDS=2s —
         # ritmo de corte rapido tipo publicidad, costo marginal (Imagen $0.04/imagen).
         # Ver docs/superpowers/specs/2026-07-15-reels-short-image-shots-design.md
-        clips = []
+        if skip_veo:
+            # Sin Veo, la escena 0 usa las MISMAS dimensiones fijas que el
+            # resto -- a diferencia del camino con Veo (abajo), no hay ninguna
+            # dependencia real de datos que la obligue a ir primero. Confirmado
+            # en produccion (2026-08-31, ver commit 88cbdfa): dejarla fuera del
+            # lote paralelo la aislaba ~2m24s del resto sin ningun motivo real,
+            # justo el mismo patron que ya se corrigio para scene_prompts[1:].
+            width, height, fps = _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS
+            durations = [_VEO_CLIP_DURATION_SECONDS] + [_IMAGE_SHOT_DURATION_SECONDS] * (len(scene_prompts) - 1)
+            still_results = self._run_parallel([
+                lambda p=prompt, d=duration: self._generate_still_scene_clip(p, width, height, fps, duration=d)
+                for prompt, duration in zip(scene_prompts, durations)
+            ])
+            clips = []
+            for prompt, still_clip in zip(scene_prompts, still_results):
+                if still_clip is not None:
+                    clips.append(still_clip)
+                else:
+                    logger.warning(f"Escena de Imagen fallida tras reintento, se omite: {prompt[:80]}")
+            return clips
 
-        veo_clip = None
-        if not skip_veo:
-            veo_clip = self._generate_single_clip(scene_prompts[0])
-            if veo_clip is None:
-                veo_clip = self._generate_single_clip(scene_prompts[0])  # 1 reintento
+        # Con Veo: la escena 0 SI depende de ir primero -- las demas escenas
+        # toman su ancho/alto del clip de Veo ya generado (_probe_clip_dimensions),
+        # dimensiones que varian segun lo que Veo devuelva.
+        clips = []
+        veo_clip = self._generate_single_clip(scene_prompts[0])
+        if veo_clip is None:
+            veo_clip = self._generate_single_clip(scene_prompts[0])  # 1 reintento
 
         if veo_clip is not None:
             clips.append(veo_clip)
             width, height, fps = self._probe_clip_dimensions(veo_clip)
         else:
-            if not skip_veo:
-                logger.warning(
-                    f"Clip de Veo fallido tras reintento, escena 0 tambien se genera via "
-                    f"Imagen: {scene_prompts[0][:80]}"
-                )
+            logger.warning(
+                f"Clip de Veo fallido tras reintento, escena 0 tambien se genera via "
+                f"Imagen: {scene_prompts[0][:80]}"
+            )
             width, height, fps = _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS
             still_clip = self._generate_still_scene_clip(
                 scene_prompts[0], width, height, fps, duration=_VEO_CLIP_DURATION_SECONDS,
