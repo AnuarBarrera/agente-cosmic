@@ -386,11 +386,11 @@ class ReelGenerator:
         self._use_gemini_api = use_gemini_api or settings.FREE_TIER_USES_GEMINI_API
 
     @staticmethod
-    def _run_parallel(callables: list) -> list:
-        """Corre N funciones sin argumentos en paralelo (I/O-bound: llamadas de
-        red a Gemini API/Vertex). Devuelve resultados en el MISMO ORDEN que la
-        lista de entrada, nunca en orden de finalizacion -- quien llama puede
-        hacer zip() con la lista original sin perder la correspondencia.
+    def _run_parallel(callables: list, max_workers: int = None) -> list:
+        """Corre N funciones sin argumentos en paralelo. Devuelve resultados en
+        el MISMO ORDEN que la lista de entrada, nunca en orden de finalizacion
+        -- quien llama puede hacer zip() con la lista original sin perder la
+        correspondencia.
 
         HALLAZGO 2026-08-30: las escenas de un reel se generaban secuencialmente
         (una llamada de red + reintento de QC tras otra, dentro de una sola tarea
@@ -406,10 +406,24 @@ class ReelGenerator:
         construye un cliente FRESCO por invocacion (ver esas funciones) -- sin
         estado compartido entre llamadas, seguro correrlas concurrentes via
         threads dentro del mismo worker, sin tocar la orquestacion de RQ ni
-        depender de que otros workers esten libres."""
+        depender de que otros workers esten libres. Este razonamiento aplica a
+        trabajo I/O-bound (red): el GIL se libera mientras el thread espera la
+        respuesta, asi que mas threads que nucleos de CPU sigue dando beneficio
+        real.
+
+        HALLAZGO 2026-08-31 (medido en produccion, ver commit pendiente): para
+        trabajo CPU-bound (ej. _animate_still_to_clip, que corre ffmpeg via
+        subprocess) esto NO aplica igual -- con solo 2 vCPUs en produccion, 6
+        threads lanzando ffmpeg simultaneo compiten por 2 nucleos reales, sin
+        ganancia de wall-clock (confirmado: el tramo paso de tapado por otro
+        cuello de botella a ser el cuello de botella dominante el mismo, ~3m51s,
+        sin mejora vs. antes de paralelizar). Para ese caso pasar max_workers
+        explicito (ej. os.cpu_count()) para no sobre-suscribir CPU real."""
         if not callables:
             return []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(callables)) as executor:
+        workers = max_workers if max_workers is not None else len(callables)
+        workers = max(1, min(workers, len(callables)))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             futures = [executor.submit(fn) for fn in callables]
             return [f.result() for f in futures]
 
@@ -501,8 +515,13 @@ class ReelGenerator:
                 f.write(video_bytes)
             return _probe_video_dimensions(path)
 
-    def _generate_still_scene_clip(self, prompt: str, width: int, height: int, fps: float,
-                                    duration: float = _VEO_CLIP_DURATION_SECONDS) -> bytes | None:
+    def _generate_validated_still(self, prompt: str) -> bytes | None:
+        """Parte I/O-bound (red) de una escena -- generar + QC + 1 reintento,
+        SIN animar todavia. Separada de _generate_still_scene_clip a proposito
+        (ver HALLAZGO 2026-08-31 en _run_parallel): esta parte si se beneficia
+        de correr con mas threads que nucleos de CPU (el GIL se libera
+        esperando la respuesta de red); el paso de animar (ffmpeg, CPU-bound)
+        no, y necesita su propio limite de concurrencia."""
         still = self._generate_scene_still(prompt)
         if still is None or not self._validate_scene_still(still):
             retry_still = self._generate_scene_still(prompt)
@@ -510,6 +529,11 @@ class ReelGenerator:
                 still = retry_still  # se usa el reintento aunque tambien falle QC —
                 # mismo criterio que _generate_background: reintentos agotados, se
                 # acepta la ultima imagen generada en vez de perder la escena completa.
+        return still
+
+    def _generate_still_scene_clip(self, prompt: str, width: int, height: int, fps: float,
+                                    duration: float = _VEO_CLIP_DURATION_SECONDS) -> bytes | None:
+        still = self._generate_validated_still(prompt)
         if still is None:
             return None
         return self._animate_still_to_clip(still, width, height, fps, duration=duration)
@@ -697,15 +721,33 @@ class ReelGenerator:
             # justo el mismo patron que ya se corrigio para scene_prompts[1:].
             width, height, fps = _VIDEO_WIDTH, _VIDEO_HEIGHT, _DEFAULT_CLIP_FPS
             durations = [_VEO_CLIP_DURATION_SECONDS] + [_IMAGE_SHOT_DURATION_SECONDS] * (len(scene_prompts) - 1)
+
+            # Fase 1 (red, I/O-bound): generar+QC las 6 imagenes SIN animar
+            # todavia -- sin limite de concurrencia, mas threads que nucleos
+            # sigue dando beneficio real aqui (ver _run_parallel).
             still_results = self._run_parallel([
-                lambda p=prompt, d=duration: self._generate_still_scene_clip(p, width, height, fps, duration=d)
-                for prompt, duration in zip(scene_prompts, durations)
+                lambda p=prompt: self._generate_validated_still(p)
+                for prompt in scene_prompts
             ])
-            clips = []
-            for prompt, still_clip in zip(scene_prompts, still_results):
-                if still_clip is not None:
-                    clips.append(still_clip)
-                else:
+
+            # Fase 2 (ffmpeg, CPU-bound): animar SOLO las que si se generaron,
+            # con concurrencia acotada a los nucleos de CPU disponibles.
+            # HALLAZGO 2026-08-31 (medido en produccion): 6 threads corriendo
+            # ffmpeg a la vez en una VM de 2 vCPUs no daba ninguna ganancia de
+            # wall-clock sobre secuencial (~3m51s de todas formas) -- el
+            # cuello de botella se movio de las llamadas de red al render de
+            # video, sin resolverse. os.cpu_count() acota la concurrencia real
+            # a lo que la maquina puede correr en paralelo de verdad.
+            ok_indices = [i for i, still in enumerate(still_results) if still is not None]
+            clips = self._run_parallel([
+                lambda i=i: self._animate_still_to_clip(
+                    still_results[i], width, height, fps, duration=durations[i],
+                )
+                for i in ok_indices
+            ], max_workers=os.cpu_count() or 2)
+
+            for i, prompt in enumerate(scene_prompts):
+                if still_results[i] is None:
                     logger.warning(f"Escena de Imagen fallida tras reintento, se omite: {prompt[:80]}")
             return clips
 
