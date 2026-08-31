@@ -23,7 +23,6 @@ from core.shared.metrics_utils import (
     track_external_api, record_tokens, record_veo_generation,
     record_lyria_generation, record_tts_generation,
     record_playwright_overlay_fallback, record_gemini_image_generation,
-    record_hyperframes_generation, record_hyperframes_fallback,
     vertex_labels,
 )
 from core.shared.rate_limiter import call_with_429_retry
@@ -59,14 +58,6 @@ _DRAWTEXT_FONT_PATH = os.path.normpath(os.path.join(
 _VIDEO_HEIGHT = 1920  # alto fijo del canvas de Playwright (viewport 1080x1920)
 
 _DEFAULT_CLIP_FPS = 24.0  # usado solo cuando no hay clip real de Veo del cual medir fps
-
-_BRANDED_SEGMENT_DURATION_SECONDS = 3.0
-_HYPERFRAMES_PROJECT_DIR = os.path.normpath(os.path.join(
-    os.path.dirname(__file__), '..', 'hyperframes_reel',
-))
-_HYPERFRAMES_BINARY = os.path.join(_HYPERFRAMES_PROJECT_DIR, 'node_modules', '.bin', 'hyperframes')
-_HYPERFRAMES_TIMEOUT_SECONDS = 120
-
 
 _OVERLAY_TEMPLATE_MAP = {'hook': 'reel_hook.html', 'cta': 'reel_cta.html'}
 
@@ -580,126 +571,20 @@ class ReelGenerator:
             logger.warning(f"Seleccion de template de reel por IA fallo, usando aleatorio: {e}")
         return random.choice(_REEL_TEMPLATES)
 
-    def _generate_branded_segment(self, kind: str, hook_text: str, highlight_word: str,
-                                   tag_cta: str, primary_color: str, template: str,
-                                   font_family: str) -> bytes | None:
-        text_color = _readable_text_color(primary_color)
-        if kind == 'portada':
-            before, highlight, after = _split_highlight(hook_text, highlight_word)
-            variables = {
-                'hook_before': before, 'hook_highlight': highlight, 'hook_after': after,
-                'primary_color': primary_color, 'text_color': text_color, 'font_family': font_family,
-            }
-        else:
-            variables = {
-                'cta_text': tag_cta, 'primary_color': primary_color,
-                'text_color': text_color, 'font_family': font_family,
-            }
-        composition = f'compositions/{kind}-{template}.html'
-
-        with tempfile.TemporaryDirectory() as tmp:
-            vars_path = os.path.join(tmp, 'vars.json')
-            with open(vars_path, 'w') as f:
-                json.dump(variables, f)
-            output_path = os.path.join(tmp, 'output.mp4')
-            # HALLAZGO 2026-08-30: este subprocess (render con navegador headless)
-            # no dejaba NINGUN rastro en logs mientras corria -- en produccion
-            # se vio como un hueco silencioso de minutos, dificil de diferenciar
-            # de un cuelgue real. start/duracion aqui para que el proximo
-            # cuello de botella sea visible sin tener que inferirlo de logs.
-            start = time.monotonic()
-            try:
-                subprocess.run(
-                    [_HYPERFRAMES_BINARY, 'render', '.', '-c', composition,
-                     '-o', output_path, '--variables-file', vars_path, '--fps', '24', '--quiet'],
-                    cwd=_HYPERFRAMES_PROJECT_DIR, check=True, capture_output=True,
-                    timeout=_HYPERFRAMES_TIMEOUT_SECONDS,
-                )
-            except Exception as e:
-                logger.warning(f"HyperFrames {kind} generation failed tras {time.monotonic() - start:.1f}s: {e}")
-                return None
-            logger.info(f"HyperFrames {kind} generado en {time.monotonic() - start:.1f}s")
-            record_hyperframes_generation(kind)
-            with open(output_path, 'rb') as f:
-                return f.read()
-
-    def _generate_branded_segment_with_retry(self, kind: str, hook_text: str, highlight_word: str,
-                                              tag_cta: str, primary_color: str, template: str,
-                                              font_family: str) -> bytes | None:
-        segment = self._generate_branded_segment(
-            kind, hook_text, highlight_word, tag_cta, primary_color, template, font_family,
-        )
-        if segment is None:
-            segment = self._generate_branded_segment(
-                kind, hook_text, highlight_word, tag_cta, primary_color, template, font_family,
-            )  # 1 reintento
-        return segment
-
-    def _normalize_branded_segment(self, segment_bytes: bytes, width: int, height: int, fps: float) -> bytes:
-        with tempfile.TemporaryDirectory() as tmp:
-            input_path = os.path.join(tmp, 'input.mp4')
-            with open(input_path, 'wb') as f:
-                f.write(segment_bytes)
-            output_path = os.path.join(tmp, 'output.mp4')
-            subprocess.run(
-                ['ffmpeg', '-y', '-i', input_path,
-                 '-vf', f'scale={width}:{height}', '-r', str(fps),
-                 '-c:v', 'libx264', '-pix_fmt', 'yuv420p', output_path],
-                check=True, capture_output=True,
-            )
-            with open(output_path, 'rb') as f:
-                return f.read()
-
-    def _generate_clips_with_branding(self, scene_prompts: list[str], hook_text: str,
-                                       highlight_word: str, tag_cta: str, primary_color: str,
-                                       filename_prefix: str, skip_veo: bool = False,
-                                       image_gen=None, photos: list[bytes] = None,
-                                       mime_types: list[str] = None, colors: list[str] = None) -> tuple[list[bytes], bool]:
+    def _generate_clips(self, scene_prompts: list[str], hook_text: str,
+                         highlight_word: str, tag_cta: str, primary_color: str,
+                         filename_prefix: str, skip_veo: bool = False,
+                         image_gen=None, photos: list[bytes] = None,
+                         mime_types: list[str] = None, colors: list[str] = None) -> tuple[list[bytes], bool]:
+        """Genera los clips de video del reel. Retorna (clips, has_branding).
+        has_branding siempre False (HyperFrames eliminado, ver spec 2026-08-31)."""
         if photos:
             clips = self._generate_video_clips_from_photo(
                 image_gen, photos, mime_types, scene_prompts, colors or [primary_color], skip_veo=skip_veo,
             )
         else:
             clips = self._generate_video_clips(scene_prompts, skip_veo=skip_veo)
-        if len(clips) < 3:
-            return clips, False
-        return self._wrap_with_branding(clips, hook_text, highlight_word, tag_cta, primary_color, filename_prefix)
-
-    def _wrap_with_branding(self, clips: list[bytes], hook_text: str, highlight_word: str,
-                             tag_cta: str, primary_color: str, filename_prefix: str) -> tuple[list[bytes], bool]:
-        width, height, fps = self._probe_clip_dimensions(clips[0])
-
-        font_seed = filename_prefix.rsplit('-day', 1)[0] if '-day' in filename_prefix else filename_prefix
-        font_preset = choose_font_preset(font_seed)
-        template = self._choose_reel_template(hook_text, tag_cta)
-
-        # HALLAZGO 2026-08-30 (medido en produccion, ver commit 4f6bea9): portada
-        # y contraportada llaman al binario de HyperFrames por subprocess
-        # (renderizado con navegador headless) -- NO son llamadas de red rapidas
-        # como se asumio al dejarlas fuera del primer fix de paralelizacion.
-        # Confirmado en logs reales de produccion: un tramo de 3m32s sin ningun
-        # log entre la seleccion de template y la siguiente llamada visible,
-        # justo donde corren estas dos generaciones. _generate_branded_segment
-        # usa tempfile.TemporaryDirectory() (aislado por llamada, sin estado
-        # compartido) -- mismo criterio de seguridad que _run_parallel ya
-        # documenta para las escenas, aplica igual aqui.
-        portada, contraportada = self._run_parallel([
-            lambda: self._generate_branded_segment_with_retry(
-                'portada', hook_text, highlight_word, tag_cta, primary_color, template, font_preset['font_family'],
-            ),
-            lambda: self._generate_branded_segment_with_retry(
-                'contraportada', hook_text, highlight_word, tag_cta, primary_color, template, font_preset['font_family'],
-            ),
-        ])
-
-        if portada is None or contraportada is None:
-            logger.warning("Portada o contraportada fallaron tras reintento, reel sin marca (estructura Parte A)")
-            record_hyperframes_fallback()
-            return clips, False
-
-        portada_normalized = self._normalize_branded_segment(portada, width, height, fps)
-        contraportada_normalized = self._normalize_branded_segment(contraportada, width, height, fps)
-        return [portada_normalized] + clips + [contraportada_normalized], True
+        return clips, False
 
     def _generate_video_clips(self, scene_prompts: list[str], skip_veo: bool = False) -> list[bytes]:
         # scene_prompts[0] va a Veo (video real, _VEO_CLIP_DURATION_SECONDS=8s),
@@ -1346,7 +1231,7 @@ class ReelGenerator:
         try:
             colors = colors or [random.choice(_FALLBACK_COLOR_POOL)]
             primary_color = colors[0]
-            clips, has_branding = self._generate_clips_with_branding(
+            clips, has_branding = self._generate_clips(
                 script['scene_prompts'], script['hook_text'], script['highlight_word'],
                 script['tag_cta'], primary_color, filename_prefix, skip_veo=skip_veo,
                 image_gen=image_gen, photos=photos, mime_types=mime_types, colors=colors,
@@ -1365,14 +1250,9 @@ class ReelGenerator:
                 clips, music, narration, script, colors, subtitles,
                 skip_hook_cta_overlay=has_branding,
             )
-            # HALLAZGO (analisisPipeline.md, 2026-07-22): con portada HyperFrames
-            # (has_branding=True, _BRANDED_SEGMENT_DURATION_SECONDS=3.0s), extraer
-            # en t=1s cae DENTRO de la animacion de fade-in del hook (0.5-2.0s en
-            # la plantilla mas lenta, dynamic-background) — poster con texto
-            # palido/incompleto. t=2.5s queda despues del fade-in mas lento de las
-            # 3 plantillas y antes de que la portada termine. Sin portada (fallback
-            # sin marca) se mantiene t=1s, comportamiento sin cambios.
-            poster_offset = 2.5 if has_branding else 1.0
+            # HyperFrames eliminado (spec 2026-08-31): has_branding siempre False,
+            # poster_offset siempre 1.0
+            poster_offset = 1.0
             poster = self._extract_poster_frame(final_video, offset_seconds=poster_offset)
 
             video_url = self._upload_video_to_storage(final_video, filename_prefix)
@@ -1402,10 +1282,8 @@ class ReelGenerator:
             if len(clips) < 3:
                 logger.warning(f"Reel con foto abortado: solo {len(clips)}/3 clips generados")
                 return '', ''
-            clips, has_branding = self._wrap_with_branding(
-                clips, script['hook_text'], script['highlight_word'], script['tag_cta'],
-                primary_color, filename_prefix,
-            )
+            # HyperFrames eliminado (spec 2026-08-31): has_branding siempre False
+            has_branding = False
 
             music = self._generate_music(script['music_mood'])
             narration = self._generate_narration(script['narration_script'])
@@ -1417,7 +1295,8 @@ class ReelGenerator:
                 clips, music, narration, script, colors, subtitles,
                 skip_hook_cta_overlay=has_branding,
             )
-            poster_offset = 2.5 if has_branding else 1.0
+            # HyperFrames eliminado: poster_offset siempre 1.0
+            poster_offset = 1.0
             poster = self._extract_poster_frame(final_video, offset_seconds=poster_offset)
 
             video_url = self._upload_video_to_storage(final_video, filename_prefix)

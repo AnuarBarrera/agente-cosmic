@@ -511,6 +511,9 @@ LOGGING = {
             'maxBytes': 1024*1024*15,  # 15MB
             'backupCount': 10,
             'formatter': 'verbose',
+        } if not DEBUG else {
+            'level': 'WARNING',
+            'class': 'logging.NullHandler',
         },
         'security_file': {
             'level': 'WARNING',
@@ -519,6 +522,9 @@ LOGGING = {
             'maxBytes': 1024*1024*10,  # 10MB
             'backupCount': 5,
             'formatter': 'verbose',
+        } if not DEBUG else {
+            'level': 'WARNING',
+            'class': 'logging.NullHandler',
         },
         'llm_audit_file': {
             'level': 'INFO',
@@ -527,30 +533,33 @@ LOGGING = {
             'maxBytes': 1024*1024*50,  # 50MB
             'backupCount': 10,
             'formatter': 'json_line',
+        } if not DEBUG else {
+            'level': 'INFO',
+            'class': 'logging.NullHandler',
         },
     },
     'loggers': {
         '': {  # Root logger
-            'handlers': ['console'] + (['file'] if not DEBUG else []),
+            'handlers': ['console'],
             'level': get_env('LOG_LEVEL', default='INFO'),
         },
         'django': {
-            'handlers': ['console'] + (['file'] if not DEBUG else []),
+            'handlers': ['console'],
             'level': 'INFO',
             'propagate': False,
         },
         'django.security': {
-            'handlers': ['console', 'security_file'] if not DEBUG else ['console'],
+            'handlers': ['console'],
             'level': 'WARNING',
             'propagate': False,
         },
         'core': {
-            'handlers': ['console'] + (['file'] if not DEBUG else []),
+            'handlers': ['console'],
             'level': get_env('LOG_LEVEL', default='INFO'),
             'propagate': False,
         },
         'cosmic.llm_audit': {
-            'handlers': ['llm_audit_file', 'console'],
+            'handlers': ['console'],
             'level': 'INFO',
             'propagate': False,
         },

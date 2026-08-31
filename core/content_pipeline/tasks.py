@@ -389,13 +389,8 @@ def _enqueue_post_images_then(post_ids: list, closing_fn, *closing_args) -> None
         post = ContentPost.objects.get(id=post_id)
         # 600s era menor que el peor caso interno de un reel: Veo puede tardar
         # hasta _VEO_POLL_TIMEOUT_SECONDS=1800s antes de rendirse a su propio
-        # fallback, y ese fallback llega DESPUES de portada+contraportada de
-        # HyperFrames (hasta 480s con 1 reintento cada una). RQ mataba el
-        # worker antes de que ese fallback ya existente tuviera oportunidad de
-        # correr -- mismo patron que el incidente de job huerfano documentado
-        # en project_rq_orphaned_job_2026_07_14. 2700s cubre 1800+480 con
-        # margen para TTS/musica/ffmpeg/uploads sin tocar ninguna logica de
-        # generacion.
+        # fallback. 2700s cubre 1800s (Veo) + TTS/musica/ffmpeg/uploads con margen
+        # sin tocar ninguna logica de generacion. HyperFrames eliminado (spec 2026-08-31).
         #
         # 300s para imagen suelta murio en la prueba real del 2026-08-11 tras
         # agregar throttle real de 1/min para gemini-3.1-flash-image

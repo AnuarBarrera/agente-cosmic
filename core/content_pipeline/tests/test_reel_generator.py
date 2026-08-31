@@ -682,7 +682,6 @@ class TestGenerateFromProductPhotoReel:
             'music_mood': 'upbeat, optimistic',
         }
         with patch.object(gen, '_generate_video_clips_from_photo', return_value=[b'c0', b'c1', b'c2', b'c3', b'c4', b'c5']) as mock_clips, \
-             patch.object(gen, '_wrap_with_branding', return_value=([b'p', b'c0', b'c1', b'c2', b'c3', b'c4', b'c5', b'c'], True)) as mock_wrap, \
              patch.object(gen, '_generate_music', return_value=b'music'), \
              patch.object(gen, '_generate_narration', return_value=None), \
              patch.object(gen, '_assemble_reel', return_value=b'final-mp4') as mock_assemble, \
@@ -699,14 +698,10 @@ class TestGenerateFromProductPhotoReel:
             image_gen, [b'photo-bytes'], ['image/jpeg'], script['scene_prompts'], ['#1a1a2e'], 1,
             skip_veo=False,
         )
-        mock_wrap.assert_called_once_with(
-            [b'c0', b'c1', b'c2', b'c3', b'c4', b'c5'], 'Descubre algo nuevo', 'nuevo', 'Compra ahora',
-            '#1a1a2e', 'job1-sample',
-        )
         mock_up_video.assert_called_once_with(b'final-mp4', 'job1-sample')
         mock_assemble.assert_called_once_with(
-            [b'p', b'c0', b'c1', b'c2', b'c3', b'c4', b'c5', b'c'], b'music', None, script, ['#1a1a2e'], [],
-            skip_hook_cta_overlay=True,
+            [b'c0', b'c1', b'c2', b'c3', b'c4', b'c5'], b'music', None, script, ['#1a1a2e'], [],
+            skip_hook_cta_overlay=False,
         )
 
     def test_passes_skip_veo_through_to_generate_video_clips_from_photo(self):
@@ -720,7 +715,6 @@ class TestGenerateFromProductPhotoReel:
             'music_mood': 'M',
         }
         with patch.object(gen, '_generate_video_clips_from_photo', return_value=[b'c0', b'c1', b'c2', b'c3', b'c4', b'c5']) as mock_clips, \
-             patch.object(gen, '_wrap_with_branding', return_value=([b'p', b'c0', b'c1', b'c2', b'c3', b'c4', b'c5', b'c'], True)), \
              patch.object(gen, '_generate_music', return_value=None), \
              patch.object(gen, '_generate_narration', return_value=None), \
              patch.object(gen, '_assemble_reel', return_value=b'final-mp4'), \
@@ -1118,246 +1112,6 @@ class TestAnimateStillToClip:
 
         cmd = mock_run.call_args.args[0]
         assert cmd[cmd.index('-t') + 1] == '8'
-
-
-class TestGenerateBrandedSegment:
-    def test_portada_builds_variables_and_renders(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        fake_output = b'fake-portada-mp4'
-
-        captured = {}
-
-        def fake_run(cmd, *args, **kwargs):
-            with open(cmd[cmd.index('--variables-file') + 1]) as f:
-                captured['variables'] = json.load(f)
-            captured['cmd'] = cmd
-            captured['cwd'] = kwargs.get('cwd')
-            output_path = cmd[cmd.index('-o') + 1]
-            with open(output_path, 'wb') as f:
-                f.write(fake_output)
-            return MagicMock(returncode=0)
-
-        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
-                    side_effect=fake_run), \
-             patch('core.content_pipeline.generators.reel_generator.record_hyperframes_generation') as mock_record:
-            result = gen._generate_branded_segment(
-                'portada', 'Descubre algo nuevo', 'algo', 'Compra ahora', '#1a1a2e',
-                'panel-wipe', "'Poppins', sans-serif",
-            )
-
-        assert result == fake_output
-        assert captured['variables'] == {
-            'hook_before': 'Descubre ', 'hook_highlight': 'algo', 'hook_after': ' nuevo',
-            'primary_color': '#1a1a2e', 'text_color': 'white', 'font_family': "'Poppins', sans-serif",
-        }
-        assert '-c' in captured['cmd']
-        assert captured['cmd'][captured['cmd'].index('-c') + 1] == 'compositions/portada-panel-wipe.html'
-        assert '--fps' in captured['cmd']
-        assert captured['cmd'][captured['cmd'].index('--fps') + 1] == '24'
-        mock_record.assert_called_once_with('portada')
-
-    def test_contraportada_builds_variables_and_renders(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        fake_output = b'fake-contraportada-mp4'
-
-        captured = {}
-
-        def fake_run(cmd, *args, **kwargs):
-            with open(cmd[cmd.index('--variables-file') + 1]) as f:
-                captured['variables'] = json.load(f)
-            captured['cmd'] = cmd
-            output_path = cmd[cmd.index('-o') + 1]
-            with open(output_path, 'wb') as f:
-                f.write(fake_output)
-            return MagicMock(returncode=0)
-
-        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
-                    side_effect=fake_run), \
-             patch('core.content_pipeline.generators.reel_generator.record_hyperframes_generation'):
-            result = gen._generate_branded_segment(
-                'contraportada', 'Descubre algo nuevo', 'algo', 'Compra ahora', '#1a1a2e',
-                'dynamic-background', "'Bebas Neue', sans-serif",
-            )
-
-        assert result == fake_output
-        assert captured['variables'] == {
-            'cta_text': 'Compra ahora', 'primary_color': '#1a1a2e',
-            'text_color': 'white', 'font_family': "'Bebas Neue', sans-serif",
-        }
-        assert captured['cmd'][captured['cmd'].index('-c') + 1] == 'compositions/contraportada-dynamic-background.html'
-
-    def test_returns_none_on_subprocess_error(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
-                    side_effect=subprocess.CalledProcessError(1, 'hyperframes')):
-            result = gen._generate_branded_segment(
-                'portada', 'Descubre algo nuevo', 'algo', 'Compra ahora', '#1a1a2e',
-                'panel-wipe', "'Poppins', sans-serif",
-            )
-        assert result is None
-
-
-class TestGenerateClipsWithBranding:
-    def test_branding_success_prepends_and_appends_normalized_segments(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_video_clips', return_value=[b'v', b's1', b's2', b's3', b's4', b's5']), \
-             patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
-             patch.object(gen, '_choose_reel_template', return_value='panel-wipe') as mock_template, \
-             patch('core.content_pipeline.generators.reel_generator.choose_font_preset',
-                   return_value={'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins'}) as mock_font, \
-             patch.object(gen, '_generate_branded_segment',
-                          side_effect=lambda kind, *a, **kw: {'portada': b'portada-raw', 'contraportada': b'contra-raw'}[kind]) as mock_branded, \
-             patch.object(gen, '_normalize_branded_segment',
-                          side_effect=lambda segment_bytes, *a, **kw: {b'portada-raw': b'portada-norm', b'contra-raw': b'contra-norm'}[segment_bytes]) as mock_norm:
-            clips, has_branding = gen._generate_clips_with_branding(
-                ['scene 1', 'scene 2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
-            )
-
-        assert has_branding is True
-        assert clips == [b'portada-norm', b'v', b's1', b's2', b's3', b's4', b's5', b'contra-norm']
-        mock_font.assert_called_once_with('job1')
-        mock_template.assert_called_once_with('Hook', 'CTA')
-        # Portada y contraportada corren en paralelo (ver _run_parallel) -- el
-        # orden de llegada a este mock ya no es deterministico entre ellas
-        # (por eso side_effect es una funcion por kind, no una lista posicional).
-        mock_branded.assert_any_call('portada', 'Hook', 'word', 'CTA', '#1a1a2e', 'panel-wipe', "'Poppins', sans-serif")
-        mock_branded.assert_any_call('contraportada', 'Hook', 'word', 'CTA', '#1a1a2e', 'panel-wipe', "'Poppins', sans-serif")
-        assert mock_branded.call_count == 2
-        assert mock_norm.call_args_list == [
-            call(b'portada-raw', 720, 1280, 24.0),
-            call(b'contra-raw', 720, 1280, 24.0),
-        ]
-
-    def test_threads_skip_veo_to_generate_video_clips(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_video_clips',
-                           return_value=[b'v', b's1', b's2', b's3', b's4', b's5']) as mock_clips, \
-             patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
-             patch.object(gen, '_choose_reel_template', return_value='panel-wipe'), \
-             patch('core.content_pipeline.generators.reel_generator.choose_font_preset',
-                   return_value={'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins'}), \
-             patch.object(gen, '_generate_branded_segment', side_effect=[b'portada-raw', b'contra-raw']), \
-             patch.object(gen, '_normalize_branded_segment', side_effect=[b'portada-norm', b'contra-norm']):
-            gen._generate_clips_with_branding(
-                ['scene 1', 'scene 2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
-                skip_veo=True,
-            )
-
-        mock_clips.assert_called_once_with(['scene 1', 'scene 2'], skip_veo=True)
-
-    def test_falls_back_when_portada_fails_completely(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_video_clips', return_value=[b'v', b's1', b's2', b's3', b's4', b's5']), \
-             patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
-             patch.object(gen, '_choose_reel_template', return_value='panel-wipe'), \
-             patch('core.content_pipeline.generators.reel_generator.choose_font_preset',
-                   return_value={'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins'}), \
-             patch.object(gen, '_generate_branded_segment', return_value=None) as mock_branded, \
-             patch.object(gen, '_normalize_branded_segment') as mock_norm, \
-             patch('core.content_pipeline.generators.reel_generator.record_hyperframes_fallback') as mock_fallback:
-            clips, has_branding = gen._generate_clips_with_branding(
-                ['scene 1', 'scene 2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
-            )
-
-        assert has_branding is False
-        assert clips == [b'v', b's1', b's2', b's3', b's4', b's5']
-        mock_norm.assert_not_called()
-        mock_fallback.assert_called_once()
-        # Portada y contraportada corren en paralelo (ver _run_parallel) -- ya
-        # no hay forma de "cortar antes" la generacion de contraportada cuando
-        # portada falla, como si pasaba con el codigo secuencial de antes.
-        # 2 intentos (1 + reintento) x 2 segmentos = 4. Costo extra minimo y
-        # solo en el camino de fallo (poco frecuente); el camino de exito es
-        # el que se beneficia de correr ambas en paralelo.
-        assert mock_branded.call_count == 4
-
-    def test_skips_branding_attempt_when_body_has_fewer_than_3_clips(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_video_clips', return_value=[b'v']), \
-             patch.object(gen, '_generate_branded_segment') as mock_branded:
-            clips, has_branding = gen._generate_clips_with_branding(
-                ['scene 1'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
-            )
-
-        assert clips == [b'v']
-        assert has_branding is False
-        mock_branded.assert_not_called()
-
-    def test_wrap_with_branding_reused_directly(self):
-        """_wrap_with_branding debe ser llamable de forma independiente (sin pasar
-        por _generate_video_clips) -- lo reusa el camino de foto real (Task 5)."""
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
-             patch.object(gen, '_choose_reel_template', return_value='panel-wipe'), \
-             patch('core.content_pipeline.generators.reel_generator.choose_font_preset',
-                   return_value={'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins'}), \
-             patch.object(gen, '_generate_branded_segment',
-                          side_effect=lambda kind, *a, **kw: {'portada': b'portada-raw', 'contraportada': b'contra-raw'}[kind]), \
-             patch.object(gen, '_normalize_branded_segment',
-                          side_effect=lambda segment_bytes, *a, **kw: {b'portada-raw': b'portada-norm', b'contra-raw': b'contra-norm'}[segment_bytes]):
-            clips, has_branding = gen._wrap_with_branding(
-                [b'v', b's1', b's2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
-            )
-
-        assert has_branding is True
-        assert clips == [b'portada-norm', b'v', b's1', b's2', b'contra-norm']
-
-    def test_routes_to_photo_clips_when_photos_provided(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        image_gen_stub = object()
-        with patch.object(gen, '_generate_video_clips_from_photo',
-                           return_value=[b'v', b's1', b's2', b's3', b's4', b's5']) as mock_photo_clips, \
-             patch.object(gen, '_generate_video_clips') as mock_scratch_clips, \
-             patch.object(gen, '_probe_clip_dimensions', return_value=(720, 1280, 24.0)), \
-             patch.object(gen, '_choose_reel_template', return_value='panel-wipe'), \
-             patch('core.content_pipeline.generators.reel_generator.choose_font_preset',
-                   return_value={'font_family': "'Poppins', sans-serif", 'font_import': 'Poppins'}), \
-             patch.object(gen, '_generate_branded_segment', side_effect=[b'portada-raw', b'contra-raw']), \
-             patch.object(gen, '_normalize_branded_segment', side_effect=[b'portada-norm', b'contra-norm']):
-            gen._generate_clips_with_branding(
-                ['scene 1', 'scene 2'], 'Hook', 'word', 'CTA', '#1a1a2e', 'job1-day1',
-                image_gen=image_gen_stub, photos=[b'photo-bytes'], mime_types=['image/jpeg'],
-                colors=['#1a1a2e', '#ffffff'],
-            )
-
-        mock_photo_clips.assert_called_once_with(
-            image_gen_stub, [b'photo-bytes'], ['image/jpeg'], ['scene 1', 'scene 2'],
-            ['#1a1a2e', '#ffffff'], skip_veo=False,
-        )
-        mock_scratch_clips.assert_not_called()
-
-
-class TestNormalizeBrandedSegment:
-    def test_builds_scale_command_with_exact_dimensions(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        fake_output = b'normalized-mp4'
-
-        def fake_run(cmd, *args, **kwargs):
-            with open(cmd[-1], 'wb') as f:
-                f.write(fake_output)
-            return MagicMock(returncode=0)
-
-        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
-                    side_effect=fake_run) as mock_run:
-            result = gen._normalize_branded_segment(b'raw-mp4', 720, 1280, 24.0)
-
-        assert result == fake_output
-        cmd = mock_run.call_args.args[0]
-        assert cmd[0] == 'ffmpeg'
-        vf_idx = cmd.index('-vf')
-        assert cmd[vf_idx + 1] == 'scale=720:1280'
-        r_idx = cmd.index('-r')
-        assert cmd[r_idx + 1] == '24.0'
 
 
 class TestProbeClipDimensions:
@@ -1858,7 +1612,7 @@ class TestGenerate:
     def test_returns_video_and_poster_urls_on_success(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2', b'c3'], False)) as mock_clips, \
+        with patch.object(gen, '_generate_clips', return_value=([b'c1', b'c2', b'c3'], False)) as mock_clips, \
              patch.object(gen, '_generate_music', return_value=b'music'), \
              patch.object(gen, '_generate_narration', return_value=b'narration'), \
              patch('core.content_pipeline.generators.reel_generator.SubtitleGenerator') as mock_sub_gen, \
@@ -1884,10 +1638,10 @@ class TestGenerate:
             skip_hook_cta_overlay=False,
         )
 
-    def test_threads_skip_veo_to_generate_clips_with_branding(self):
+    def test_threads_skip_veo_to_generate_clips(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2', b'c3'], False)) as mock_clips, \
+        with patch.object(gen, '_generate_clips', return_value=([b'c1', b'c2', b'c3'], False)) as mock_clips, \
              patch.object(gen, '_generate_music', return_value=b'music'), \
              patch.object(gen, '_generate_narration', return_value=b'narration'), \
              patch('core.content_pipeline.generators.reel_generator.SubtitleGenerator') as mock_sub_gen, \
@@ -1904,28 +1658,11 @@ class TestGenerate:
             image_gen=None, photos=None, mime_types=None, colors=['#1a1a2e'],
         )
 
-    def test_extracts_poster_later_when_branding_present(self):
-        # HALLAZGO (analisisPipeline.md, 2026-07-22): con portada HyperFrames
-        # (has_branding=True), 1s cae dentro de la animacion de fade-in del
-        # hook -> poster palido. offset debe ser 2.5s (despues del fade-in mas
-        # lento de las 3 plantillas, dentro de los 3s de la portada).
+    def test_extracts_poster_at_default_offset(self):
+        # HyperFrames eliminado (spec 2026-08-31): poster_offset siempre 1.0
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'p', b'c1', b'c2', b'c3', b'c'], True)), \
-             patch.object(gen, '_generate_music', return_value=None), \
-             patch.object(gen, '_generate_narration', return_value=None), \
-             patch.object(gen, '_assemble_reel', return_value=b'final-mp4'), \
-             patch.object(gen, '_extract_poster_frame', return_value=b'poster-png') as mock_poster, \
-             patch.object(gen, '_upload_video_to_storage', return_value='url1'), \
-             patch.object(gen, '_upload_to_storage', return_value='url2'):
-            gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
-
-        assert mock_poster.call_args.kwargs['offset_seconds'] == 2.5
-
-    def test_extracts_poster_at_default_offset_without_branding(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2', b'c3'], False)), \
+        with patch.object(gen, '_generate_clips', return_value=([b'c1', b'c2', b'c3'], False)), \
              patch.object(gen, '_generate_music', return_value=None), \
              patch.object(gen, '_generate_narration', return_value=None), \
              patch.object(gen, '_assemble_reel', return_value=b'final-mp4'), \
@@ -1936,24 +1673,10 @@ class TestGenerate:
 
         assert mock_poster.call_args.kwargs['offset_seconds'] == 1.0
 
-    def test_passes_skip_flag_when_branding_succeeds(self):
-        from core.content_pipeline.generators.reel_generator import ReelGenerator
-        gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'p', b'c1', b'c2', b'c3', b'c'], True)), \
-             patch.object(gen, '_generate_music', return_value=None), \
-             patch.object(gen, '_generate_narration', return_value=None), \
-             patch.object(gen, '_assemble_reel', return_value=b'final-mp4') as mock_assemble, \
-             patch.object(gen, '_extract_poster_frame', return_value=b'poster-png'), \
-             patch.object(gen, '_upload_video_to_storage', return_value='url1'), \
-             patch.object(gen, '_upload_to_storage', return_value='url2'):
-            gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
-
-        assert mock_assemble.call_args.kwargs['skip_hook_cta_overlay'] is True
-
     def test_skips_subtitle_generation_when_narration_fails(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2', b'c3'], False)), \
+        with patch.object(gen, '_generate_clips', return_value=([b'c1', b'c2', b'c3'], False)), \
              patch.object(gen, '_generate_music', return_value=None), \
              patch.object(gen, '_generate_narration', return_value=None), \
              patch('core.content_pipeline.generators.reel_generator.SubtitleGenerator') as mock_sub_gen, \
@@ -1970,14 +1693,14 @@ class TestGenerate:
     def test_returns_empty_strings_when_fewer_than_3_clips_generated(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2'], False)):
+        with patch.object(gen, '_generate_clips', return_value=([b'c1', b'c2'], False)):
             video_url, poster_url = gen.generate(_FAKE_SCRIPT, ['#1a1a2e'], 'job1-day1')
         assert (video_url, poster_url) == ('', '')
 
     def test_returns_empty_strings_when_assembly_raises(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2', b'c3'], False)), \
+        with patch.object(gen, '_generate_clips', return_value=([b'c1', b'c2', b'c3'], False)), \
              patch.object(gen, '_generate_music', return_value=None), \
              patch.object(gen, '_generate_narration', return_value=None), \
              patch.object(gen, '_assemble_reel', side_effect=Exception('ffmpeg error')):
@@ -1987,7 +1710,7 @@ class TestGenerate:
     def test_resolves_empty_colors_to_same_pool_color_for_clips_and_assembly(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator, _FALLBACK_COLOR_POOL
         gen = ReelGenerator(bucket_name='test-bucket')
-        with patch.object(gen, '_generate_clips_with_branding', return_value=([b'c1', b'c2', b'c3'], False)) as mock_clips, \
+        with patch.object(gen, '_generate_clips', return_value=([b'c1', b'c2', b'c3'], False)) as mock_clips, \
              patch.object(gen, '_generate_music', return_value=None), \
              patch.object(gen, '_generate_narration', return_value=None), \
              patch.object(gen, '_assemble_reel', return_value=b'final-mp4') as mock_assemble, \
