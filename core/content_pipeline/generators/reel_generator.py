@@ -1033,11 +1033,40 @@ class ReelGenerator:
             with open(image_path, 'wb') as f:
                 f.write(image_bytes)
             output_path = os.path.join(tmp, 'animated.mp4')
+            # HALLAZGO 2026-08-31 (Anuar + analisis multimodal de Gemini sobre
+            # un reel real): CERO movimiento visible en los shots del reel --
+            # confirmado extrayendo frames reales y midiendo un elemento de
+            # referencia: mismo tamano/posicion bit a bit en el frame inicial,
+            # medio y final.
+            #
+            # Causa raiz: d=1 en zoompan. Con -loop 1 -i imagen.png (una sola
+            # imagen estatica repetida) sin -framerate explicito, d=1 le pide
+            # al filtro "avanza 1 frame de salida por cada frame de entrada
+            # que llegue" -- pero eso requiere tantos frames de ENTRADA
+            # distintos como frames de SALIDA se necesiten (duration*fps),
+            # cosa que el loop de una imagen estatica no garantiza. Resultado
+            # real: zoompan evalua la expresion muy pocas veces y el resto del
+            # clip queda congelado en el ultimo valor calculado.
+            #
+            # Fix verificado empiricamente (extraccion de frames + comparacion
+            # de bbox de un elemento de referencia): d=<frames totales del
+            # clip> le dice al filtro "toma este unico frame de entrada y
+            # sostenlo generando D frames de salida, evaluando la expresion de
+            # zoom una vez por cada uno" -- el patron correcto para animar una
+            # sola imagen estatica. El incremento por frame tambien pasa a ser
+            # proporcional a la duracion (antes una constante fija 0.0015)
+            # para que el zoom termine exactamente al final del clip sin
+            # importar si dura 2s o 8s -- con la constante fija, un clip de 8s
+            # llegaba al tope de zoom en los primeros ~2.2s y quedaba
+            # estatico el resto (~6s sin movimiento).
+            total_frames = max(1, round(duration * fps))
+            target_zoom = 1.08
+            zoom_increment = (target_zoom - 1.0) / total_frames
             subprocess.run(
                 ['ffmpeg', '-y', '-loop', '1', '-i', image_path, '-t', str(duration),
                  '-vf', (
                      "scale=8000:-1,"
-                     "zoompan=z='min(zoom+0.0015,1.08)':d=1:"
+                     f"zoompan=z='min(zoom+{zoom_increment},{target_zoom})':d={total_frames}:"
                      "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
                      f"s={width}x{height}:fps={fps}"
                  ),
