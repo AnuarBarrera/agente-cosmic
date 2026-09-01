@@ -1302,6 +1302,33 @@ class TestAssembleReel:
         assert mix_cmd[filter_complex_idx + 1] == expected_filter
 
     @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
+    def test_extends_last_frame_instead_of_truncating_long_narration(self, tmp_path):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        fake_output = b'fake-mp4-bytes'
+        # PCM s16le mono a 24kHz: 48 000 bytes por segundo. La narracion dura
+        # 20s frente a un video de 18s; el output debe durar 20.5s incluyendo
+        # el margen final y mantener el CTA en sus ultimos tres segundos.
+        narration = b'\x00' * (48000 * 20)
+
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run',
+                    side_effect=_fake_ffmpeg_run(fake_output, duration='18.0')) as mock_run:
+            gen._assemble_reel(
+                clips=[b'clip1', b'clip2', b'clip3'],
+                music=None, narration=narration,
+                script=_FAKE_SCRIPT_FOR_ASSEMBLE, colors=['#1a1a2e'],
+            )
+
+        overlay_cmd = mock_run.call_args_list[3].args[0]
+        overlay_filters = overlay_cmd[overlay_cmd.index('-filter_complex') + 1]
+        assert 'tpad=stop_mode=clone:stop_duration=2.500' in overlay_filters
+        assert "enable='between(t,17.5,20.5)'" in overlay_filters
+        assert overlay_cmd[overlay_cmd.index('-t') + 1] == '20.5'
+
+        mux_cmd = mock_run.call_args_list[-1].args[0]
+        assert mux_cmd[mux_cmd.index('-t') + 1] == '20.5'
+
+    @override_settings(REEL_TEXT_OVERLAY_ENGINE='drawtext')
     def test_works_without_music_or_narration(self, tmp_path):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')
@@ -1894,4 +1921,3 @@ class TestValidateSceneStillThinking:
             gen._validate_scene_still(b'fake-png')
             call_kwargs = mock_vc.return_value.models.generate_content.call_args.kwargs
         assert call_kwargs['config'].thinking_config.thinking_budget == 0
-

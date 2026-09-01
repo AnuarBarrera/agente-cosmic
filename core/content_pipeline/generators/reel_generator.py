@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 _VEO_CLIP_DURATION_SECONDS = 8
 _IMAGE_SHOT_DURATION_SECONDS = 2.0  # duracion de cada shot corto de imagen (escenas 1-5)
+_NARRATION_END_PADDING_SECONDS = 0.5
 # La LRO (long-running operation) de Veo puede quedar en done=False indefinidamente
 # sin devolver error — el polling sin limite espera para siempre. 30 min (no los 5
 # min sugeridos por una fuente externa) porque en produccion real un clip tardo 24
@@ -1074,7 +1075,19 @@ class ReelGenerator:
                 check=True, capture_output=True,
             )
 
-            duration = _probe_video_duration(concat_path)
+            video_duration = _probe_video_duration(concat_path)
+            narration_duration = len(narration) / 48000 if narration is not None else 0.0
+            # El guion apunta a ~18s, pero TTS puede hablar mas lento (21.2s en
+            # produccion). El montaje antes imponia siempre la duracion visual y
+            # cortaba la voz con `-t`. Conservamos toda la narracion y medio
+            # segundo de respiracion final, extendiendo el ultimo frame cuando
+            # haga falta.
+            duration = max(
+                video_duration,
+                narration_duration + _NARRATION_END_PADDING_SECONDS
+                if narration is not None else video_duration,
+            )
+            extension_duration = max(0.0, duration - video_duration)
             cta_start = max(0, duration - 3)
             primary_color = colors[0] if colors else '#e94560'
             video_width = _probe_video_width(concat_path)
@@ -1087,6 +1100,12 @@ class ReelGenerator:
             extra_inputs = []
             filter_parts = []
             last_label = '0:v'
+
+            if extension_duration > 0:
+                filter_parts.append(
+                    f"[0:v]tpad=stop_mode=clone:stop_duration={extension_duration:.3f}[extended]"
+                )
+                last_label = 'extended'
 
             if not skip_hook_cta_overlay:
                 scaled_w = max(1, int(_VIDEO_WIDTH * scale))
@@ -1199,11 +1218,9 @@ class ReelGenerator:
                     cmd += ['-filter_complex', filter_complex, '-map', '0:v', '-map', '[a]']
                 else:
                     cmd += ['-map', '0:v', '-map', '1:a']
-                # SIN -shortest: la duracion del video (fijada por -t) manda. La
-                # narracion (TTS, ~15-20s hablados) suele ser mas corta que el video
-                # (24s) — con -shortest el output entero se recortaba a la pista de
-                # audio mas corta, perdiendo el CTA de los ultimos 3s. Sin ese flag,
-                # el audio simplemente termina en silencio y el video sigue completo.
+                # SIN -shortest: la duracion calculada por arriba manda. Si TTS es
+                # mas largo que los clips, el ultimo frame se extiende; si es mas
+                # corto, el audio termina en silencio y el video conserva su CTA.
                 # +faststart: ver comentario arriba (mismo motivo, streaming en <video>).
                 cmd += ['-t', str(duration), '-c:v', 'copy', '-c:a', 'aac',
                         '-movflags', '+faststart', output_path]
