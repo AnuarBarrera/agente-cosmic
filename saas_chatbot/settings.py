@@ -178,6 +178,14 @@ REEL_TEXT_OVERLAY_ENGINE = get_env('REEL_TEXT_OVERLAY_ENGINE', default='drawtext
 # BigQuery, ver consolidado.md). El codigo de Veo se queda intacto para poder
 # reactivarlo cambiando solo esta variable de entorno, sin tocar codigo.
 REEL_VEO_ENABLED = get_env('REEL_VEO_ENABLED', default='False', cast=bool)
+COMPARATIVE_PRODUCT_QC_ENABLED = get_env('COMPARATIVE_PRODUCT_QC_ENABLED', default='False', cast=bool)
+ASYNC_FULL_REGEN_ENABLED = get_env('ASYNC_FULL_REGEN_ENABLED', default='True', cast=bool)
+FINAL_MEDIA_QC_ENABLED = get_env('FINAL_MEDIA_QC_ENABLED', default='False', cast=bool)
+
+# Rollout gradual del pipeline de calidad. Apagados por defecto hasta migrar,
+# observar y validar los calendarios canarios definidos en la spec.
+CLAIM_GUARD_ENABLED = get_env('CLAIM_GUARD_ENABLED', default='False', cast=bool)
+MONTHLY_EDITORIAL_MEMORY_ENABLED = get_env('MONTHLY_EDITORIAL_MEMORY_ENABLED', default='False', cast=bool)
 
 # Ventana temporal 2026-08-30 -> ~2026-09-16 (decision de Anuar): Vertex esta
 # limitado a 1 rpm (RPM_LIMITS en rate_limiter.py) contra 20 rpm de Gemini API,

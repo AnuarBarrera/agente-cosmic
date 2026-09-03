@@ -681,100 +681,41 @@ def post_action_api(request, post_id):
             return JsonResponse({'error': 'La regeneración no está disponible para reels todavía.'}, status=400)
         if not value:
             return JsonResponse({'error': 'Feedback vacío'}, status=400)
-        from core.brand_dna.rate_limits import can_regenerate
-        allowed, remaining = can_regenerate(post, request.user)
-        if not allowed:
-            return JsonResponse({
-                'error': 'Límite de regeneraciones alcanzado para este calendario.',
-                'limit_reached': True,
-            }, status=429)
-        # Guard de reentrada ANTES de gastar cualquier trabajo (incluido el
-        # caption): el boton solo se oculta en el DOM de la pestaña que disparo
-        # la regeneracion, asi que recargar la pagina -- justo lo que sugiere el
-        # toast de timeout -- permitia reencolar sobre el mismo post. Ambos jobs
-        # leerian la misma imagen vieja y se escribirian uno encima del otro,
-        # gastando 2 slots de una cuota de 1 rpm en Vertex.
-        if post.regenerating:
-            return JsonResponse({'error': 'Ya hay una regeneración en curso para este post.'}, status=409)
-        new_caption = _regenerate_caption(post, value)
-        post.caption = new_caption
-        post.user_note = value
-        post.user_status = ContentPost.USER_STATUS_CHANGE_REQUESTED
-        post.regen_count += 1
-
-        brand_dna = post.calendar.brand_dna
-        job = brand_dna.job
-        # Hacen falta AMBAS señales, no una u otra -- este if cubre la
-        # regeneracion async de la MUESTRA individual (generate_sample_task,
-        # MODE_SAMPLE_IMAGE). Desde el plan del pool de fotos (2026-08-17),
-        # generate_from_product_photo TAMBIEN se usa para posts del calendario
-        # completo (MODE_FULL) cuando hay pool disponible -- pero regenerar
-        # esos posts NO esta cubierto por este guard todavia (deuda conocida,
-        # diferida explicitamente por el spec de ese plan): un MODE_FULL con
-        # foto real cae al else de abajo y pierde la foto real al regenerar.
-        #   - El MODO no basta: la foto es OPCIONAL en el formulario, asi que un
-        #     MODE_SAMPLE_IMAGE sin foto se generó por el camino normal (imagen
-        #     diseñada con overlay) y regenerarla "con referencia" le borraria el
-        #     diseño, ademas de dejar vision_context vacio.
-        #   - La FOTO tampoco basta: analyze_submit la acepta en cualquier modo, asi
-        #     que un MODE_FULL puede tenerla guardada sin haberla usado jamas. Con
-        #     esa condicion sola, un carrusel de MODE_FULL caia aqui y image_urls=[]
-        #     dejaba el badge de carrusel sin sus slides.
-        if (job.generation_mode == AnalysisJob.MODE_SAMPLE_IMAGE
-                and job.product_reference_image_paths and post.image_url):
-            # Foto real -- async, RQ + polling (regeneracion sincrona con foto
-            # puede tardar varios minutos por el rate limit de 1 rpm de Vertex).
+        from django.db import transaction
+        from django.db.models import Sum
+        from core.brand_dna.rate_limits import get_user_plan
+        from core.content_pipeline.models import ContentCalendar
+        # Lock the calendar so concurrent requests for different posts cannot
+        # over-reserve the same quota.
+        with transaction.atomic():
+            ContentCalendar.objects.select_for_update().get(id=post.calendar_id)
+            post = ContentPost.objects.select_for_update().get(id=post.id)
+            if post.regenerating:
+                return JsonResponse({'error': 'Ya hay una regeneración en curso para este post.'}, status=409)
+            plan = get_user_plan(request.user)
+            successful = post.calendar.posts.aggregate(total=Sum('regen_count'))['total'] or 0
+            reserved = post.calendar.posts.filter(regenerating=True).count()
+            remaining = max(0, plan.max_post_regenerations - successful - reserved)
+            if remaining == 0:
+                return JsonResponse({
+                    'error': 'Límite de regeneraciones alcanzado para este calendario.',
+                    'limit_reached': True,
+                }, status=429)
+            post.user_note = value
+            post.user_status = ContentPost.USER_STATUS_CHANGE_REQUESTED
             post.regenerating = True
-            post.save(update_fields=['caption', 'user_note', 'user_status', 'regen_count', 'regenerating'])
-            from core.content_pipeline.tasks import regenerate_post_image_task
-            django_rq.enqueue(regenerate_post_image_task, str(post.id), value, job_timeout=900)
-            POST_ACTIONS.labels(action='regenerated').inc()
-            return JsonResponse({
-                'status': 'processing',
-                'caption': new_caption,
-                'remaining_regens': remaining - 1,
-            })
+            post.save(update_fields=['user_note', 'user_status', 'regenerating'])
 
-        # Sin foto -- comportamiento de hoy, sin cambios.
-        # Regenerar imagen (o slides del carrusel, H20 + roadmap #5) con el nuevo caption
-        new_image_url = post.image_url
+        from core.content_pipeline.tasks import regenerate_post_image_task
         try:
-            from core.content_pipeline.generators.image_generator import ImageGenerator
-            from core.content_pipeline.tasks import _generate_post_media
-            job_id = str(brand_dna.job.id)
-            image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
-            generated_url, generated_urls, _ = _generate_post_media(
-                image_gen,
-                None,  # reel_script_gen
-                None,  # reel_gen
-                fmt=post.format,
-                filename=f"{job_id}-day{post.day_number}-regen-{int(_time.time())}",
-                caption=new_caption,
-                colors=brand_dna.primary_colors,
-                tone=brand_dna.tone,
-                brand_name=brand_dna.business_name,
-                keywords=brand_dna.keywords,
-                description=brand_dna.description,
-                audience=brand_dna.audience,
-                max_qc_retries=0,  # regen es síncrono — sin reintentos QC para evitar timeout
-            )
-            if generated_url:
-                new_image_url = generated_url
-                post.image_url = new_image_url
-                post.image_urls = generated_urls
-                post.save(update_fields=['caption', 'user_note', 'user_status', 'image_url', 'image_urls', 'regen_count'])
-            else:
-                post.save(update_fields=['caption', 'user_note', 'user_status', 'regen_count'])
-        except Exception as img_err:
-            logger.error(f"Image regeneration error for post {post_id}: {img_err}")
-            post.save(update_fields=['caption', 'user_note', 'user_status', 'regen_count'])
+            django_rq.enqueue(regenerate_post_image_task, str(post.id), value, job_timeout=2700)
+        except Exception:
+            ContentPost.objects.filter(id=post.id).update(regenerating=False)
+            raise
         POST_ACTIONS.labels(action='regenerated').inc()
-
         return JsonResponse({
-            'status': 'ok',
-            'caption': new_caption,
-            'image_url': new_image_url,
-            'image_urls': post.image_urls,
+            'status': 'processing',
+            'caption': post.caption,
             'remaining_regens': remaining - 1,
         })
 

@@ -16,6 +16,7 @@ from playwright.sync_api import sync_playwright
 from core.shared.metrics import GCS_OPERATIONS
 from core.shared.metrics_utils import track_external_api, record_tokens, record_gemini_image_generation, vertex_labels, _GEMINI_LITE_IMAGE_COST_PER_IMAGE
 from core.shared.rate_limiter import call_with_429_retry
+from core.content_pipeline.generators.claim_auditor import audit_text_fields
 from pydantic import BaseModel, Field
 from typing import Literal
 
@@ -23,6 +24,13 @@ from PIL import Image
 import io
 
 logger = logging.getLogger(__name__)
+
+
+def _claim_guard_fields(fields: dict[str, str], fact_profile: dict | None) -> dict[str, str]:
+    if not settings.CLAIM_GUARD_ENABLED:
+        return fields
+    corrected, _ = audit_text_fields(fields, fact_profile)
+    return corrected
 
 # Tipografías reales via Google Fonts — definidas en core/shared/font_presets.py
 # (compartido con la portada/contraportada de reels, ver reel_generator.py).
@@ -286,19 +294,20 @@ class ImageGenerator:
         # tocar cada call site que instancia ImageGenerator.
         self._use_gemini_api = use_gemini_api or settings.FREE_TIER_USES_GEMINI_API
 
-    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, business_url: str = '') -> str:
+    def generate(self, caption: str, colors: list[str], tone: str, filename: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, business_url: str = '', fact_profile: dict = None) -> str:
         try:
             # job_id (sin el sufijo "-dayN") como seed de fuente — asi las 7 imagenes
             # de una semana comparten tipografia, incluso si se regenera un solo post.
             font_seed = filename.rsplit('-day', 1)[0] if '-day' in filename else filename
-            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries, font_seed=font_seed, business_url=business_url)
+            image_bytes = self._layered_pipeline(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries, font_seed=font_seed, business_url=business_url, fact_profile=fact_profile)
             return self._upload_to_storage(image_bytes, filename)
         except Exception as e:
             logger.error(f"ImageGenerator error: {e}")
             return ''
 
     def _upload_photo_post(self, background_bytes: bytes, caption: str, colors: list[str], tone: str,
-                            description: str, keywords: list[str], business_url: str, filename: str) -> tuple[str, str]:
+                            description: str, keywords: list[str], business_url: str, filename: str,
+                            fact_profile: dict = None) -> tuple[str, str]:
         """Sube el fondo (foto real ya editada/validada por nano banana) y,
         si el overlay de texto se puede componer con exito via
         _layered_pipeline, tambien la version final compuesta. Si el overlay
@@ -313,6 +322,7 @@ class ImageGenerator:
                 caption, colors, tone, keywords or [], description,
                 business_url=business_url, font_seed=font_seed,
                 background_bytes=background_bytes,
+                fact_profile=fact_profile,
             )
             final_url = self._upload_to_storage(final_bytes, filename)
         except Exception as e:
@@ -349,7 +359,7 @@ class ImageGenerator:
                                     colors: list[str], tone: str, filename: str,
                                     vision_context: str = '', description: str = '',
                                     keywords: list[str] = None, business_url: str = '',
-                                    max_qc_retries: int = 2) -> tuple[str, str]:
+                                    max_qc_retries: int = 2, fact_profile: dict = None) -> tuple[str, str]:
         """Primera generacion usando la foto real de producto -- nano banana
         ve la foto directamente en la misma llamada que la direccion
         creativa (Enfoque A, ya validado). Usa VERTEX_IMAGE_MODEL_LITE (2026-
@@ -412,7 +422,7 @@ class ImageGenerator:
             last_bytes = self._generate_validated_photo_edit(prompt, photo_part, max_qc_retries=max_qc_retries)
             if last_bytes is None:
                 raise ValueError("Ningun intento devolvio una imagen usable")
-            return self._upload_photo_post(last_bytes, caption, colors, tone, description, keywords, business_url, filename)
+            return self._upload_photo_post(last_bytes, caption, colors, tone, description, keywords, business_url, filename, fact_profile)
         except Exception as e:
             logger.error(f"ImageGenerator.generate_from_product_photo error: {e}")
             return '', ''
@@ -503,7 +513,7 @@ class ImageGenerator:
                 return part.inline_data.data
         raise ValueError("No image returned")
 
-    def generate_carousel(self, caption: str, colors: list[str], tone: str, filename_prefix: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, num_slides: int = 4, business_url: str = '') -> list[str]:
+    def generate_carousel(self, caption: str, colors: list[str], tone: str, filename_prefix: str, brand_name: str = '', keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, num_slides: int = 4, business_url: str = '', fact_profile: dict = None) -> list[str]:
         """Genera un carrusel de `num_slides` (H20 + roadmap #5). Reutiliza UN solo
         fondo (misma llamada a Imagen 3) y superpone contenido de texto DISTINTO por
         slide — evita multiplicar el costo de generacion de imagen por N mientras
@@ -515,7 +525,7 @@ class ImageGenerator:
 
             background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
 
-            slides_content = self._generate_carousel_slides_content(caption, brand_ctx, num_slides=num_slides, business_url=business_url)
+            slides_content = self._generate_carousel_slides_content(caption, brand_ctx, num_slides=num_slides, business_url=business_url, fact_profile=fact_profile)
 
             urls = []
             for i, slide_content in enumerate(slides_content, start=1):
@@ -529,7 +539,8 @@ class ImageGenerator:
     def generate_carousel_from_product_photos(self, photos: list[bytes], mime_types: list[str], caption: str,
                                                 colors: list[str], tone: str, filename_prefix: str,
                                                 business_url: str = '', max_qc_retries: int = 1,
-                                                description: str = '', keywords: list[str] = None) -> list[str]:
+                                                description: str = '', keywords: list[str] = None,
+                                                fact_profile: dict = None) -> list[str]:
         """Carrusel con fotos reales de producto -- una slide por foto (hasta
         3), cada una editada individualmente via nano banana en vez del fondo
         unico generado desde cero que usa generate_carousel. Reusa el mismo
@@ -542,6 +553,7 @@ class ImageGenerator:
             brand_ctx = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
             slides_content = self._generate_carousel_slides_content(
                 caption, brand_ctx, business_url=business_url, num_slides=len(photos),
+                fact_profile=fact_profile,
             )
             urls = []
             for i, (photo_bytes, mime_type, slide_content) in enumerate(
@@ -579,12 +591,12 @@ class ImageGenerator:
     # Layered pipeline
     # ------------------------------------------------------------------
 
-    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, font_seed: str = '', business_url: str = '', background_bytes: bytes = None) -> bytes:
+    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, font_seed: str = '', business_url: str = '', background_bytes: bytes = None, fact_profile: dict = None) -> bytes:
         if background_bytes is None:
             background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
         kw_str = ', '.join((keywords or [])[:4])
         brand_ctx = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
-        content = self._generate_post_content(caption, brand_context=brand_ctx, business_url=business_url)
+        content = self._generate_post_content(caption, brand_context=brand_ctx, business_url=business_url, fact_profile=fact_profile)
         return self._render_html_template(background_bytes, content, colors, svg_overlay='', font_seed=font_seed)
 
 
@@ -920,7 +932,7 @@ class ImageGenerator:
             selected.pop()
         return ' '.join(selected) or clean[:25]
 
-    def _generate_post_content(self, caption: str, brand_context: str = '', business_url: str = '') -> dict:
+    def _generate_post_content(self, caption: str, brand_context: str = '', business_url: str = '', fact_profile: dict = None) -> dict:
         """Gemini generates {headline, subtitle, cta, tag}."""
         _FALLBACK = {
             'headline': self._extract_headline(caption),
@@ -971,7 +983,7 @@ class ImageGenerator:
                           prompt_preview=prompt[:500],
                           response_preview=resp.text[:500] if resp.text else '')
             data = json.loads(resp.text)
-            return {
+            result = {
                 'headline': _sanitize_web_visit_mention(
                     str(data.get('headline', '')).strip() or _FALLBACK['headline'],
                     business_url, self._extract_headline(caption),
@@ -986,11 +998,19 @@ class ImageGenerator:
                 ),
                 'tag': str(data.get('tag', '')).strip().upper() or _FALLBACK['tag'],
             }
+            audited = _claim_guard_fields(
+                {key: result[key] for key in ('headline', 'subtitle', 'cta')}, fact_profile,
+            )
+            result.update(audited)
+            return result
         except Exception as e:
             logger.warning(f"Post content generation failed, using fallback: {e}")
-        return _FALLBACK
+        audited = _claim_guard_fields(
+            {key: _FALLBACK[key] for key in ('headline', 'subtitle', 'cta')}, fact_profile,
+        )
+        return {**_FALLBACK, **audited}
 
-    def _generate_carousel_slides_content(self, caption: str, brand_context: str = '', num_slides: int = 4, business_url: str = '') -> list[dict]:
+    def _generate_carousel_slides_content(self, caption: str, brand_context: str = '', num_slides: int = 4, business_url: str = '', fact_profile: dict = None) -> list[dict]:
         """Gemini genera {headline, subtitle, cta, tag} para cada slide de un carrusel,
         como una sola llamada que mantiene coherencia narrativa entre slides (ej. problema
         -> solucion -> resultado -> CTA), en vez de N llamadas independientes de _generate_post_content."""
@@ -1057,7 +1077,7 @@ class ImageGenerator:
             slides = []
             for i in range(num_slides):
                 item = data[i] if i < len(data) else {}
-                slides.append({
+                slide = {
                     'headline': _sanitize_web_visit_mention(
                         str(item.get('headline', '')).strip() or fallback[i]['headline'],
                         business_url, fallback[i]['headline'],
@@ -1071,11 +1091,22 @@ class ImageGenerator:
                         business_url, fallback[i]['cta'],
                     ),
                     'tag': str(item.get('tag', '')).strip().upper() or fallback[i]['tag'],
-                })
+                }
+                audited = _claim_guard_fields(
+                    {key: slide[key] for key in ('headline', 'subtitle', 'cta')}, fact_profile,
+                )
+                slide.update(audited)
+                slides.append(slide)
             return slides
         except Exception as e:
             logger.warning(f"Carousel slides content generation failed, using fallback: {e}")
-        return fallback
+        safe_fallback = []
+        for slide in fallback:
+            audited = _claim_guard_fields(
+                {key: slide[key] for key in ('headline', 'subtitle', 'cta')}, fact_profile,
+            )
+            safe_fallback.append({**slide, **audited})
+        return safe_fallback
 
     _TEMPLATES = [
         'instagram_post.html',         # lower third — texto abajo

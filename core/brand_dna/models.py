@@ -119,3 +119,80 @@ class ProductPhotoPrecheckAttempt(models.Model):
 
     class Meta:
         db_table = 'brand_dna_product_photo_precheck_attempt'
+
+
+class ProductReferenceAsset(models.Model):
+    """Normalized, auditable metadata for one product-reference upload.
+
+    ``AnalysisJob.product_reference_image_paths`` intentionally remains the
+    compatibility contract while the generation pipeline migrates to assets.
+    """
+
+    RELATIONSHIP_MAKER = 'maker'
+    RELATIONSHIP_RESELLER = 'reseller'
+    RELATIONSHIP_SERVICE = 'service'
+    RELATIONSHIP_UNKNOWN = 'unknown'
+    RELATIONSHIP_CHOICES = [
+        (RELATIONSHIP_MAKER, 'Fabricante'),
+        (RELATIONSHIP_RESELLER, 'Distribuidor'),
+        (RELATIONSHIP_SERVICE, 'Servicio'),
+        (RELATIONSHIP_UNKNOWN, 'Desconocida'),
+    ]
+
+    USAGE_EDIT_ALLOWED = 'edit_allowed'
+    USAGE_PRESERVE_ONLY = 'preserve_only'
+    USAGE_CONTEXT_ONLY = 'context_only'
+    USAGE_CHOICES = [
+        (USAGE_EDIT_ALLOWED, 'Edicion creativa permitida'),
+        (USAGE_PRESERVE_ONLY, 'Conservar pixeles originales'),
+        (USAGE_CONTEXT_ONLY, 'Solo contexto'),
+    ]
+
+    TRIAGE_PENDING = 'pending'
+    TRIAGE_COMPLETE = 'complete'
+    TRIAGE_FAILED = 'failed'
+    TRIAGE_CHOICES = [
+        (TRIAGE_PENDING, 'Pendiente'),
+        (TRIAGE_COMPLETE, 'Completo'),
+        (TRIAGE_FAILED, 'Fallido'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    job = models.ForeignKey(
+        AnalysisJob, on_delete=models.CASCADE, related_name='product_reference_assets',
+    )
+    position = models.PositiveIntegerField()
+    storage_path = models.CharField(max_length=500)
+    sha256 = models.CharField(max_length=64)
+    mime_type = models.CharField(max_length=100, blank=True, default='')
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    analysis_description = models.TextField(blank=True, default='')
+    product_category = models.CharField(max_length=100, blank=True, default='')
+    commercial_relationship = models.CharField(
+        max_length=20, choices=RELATIONSHIP_CHOICES, default=RELATIONSHIP_UNKNOWN,
+    )
+    usage_mode = models.CharField(
+        max_length=20, choices=USAGE_CHOICES, default=USAGE_PRESERVE_ONLY,
+    )
+    risk_flags = models.JSONField(default=dict, blank=True)
+    visible_brands = models.JSONField(default=list, blank=True)
+    visible_text_summary = models.TextField(blank=True, default='')
+    triage_status = models.CharField(
+        max_length=20, choices=TRIAGE_CHOICES, default=TRIAGE_PENDING,
+    )
+    triage_version = models.CharField(max_length=50, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'brand_dna_product_reference_asset'
+        ordering = ['position', 'created_at']
+        constraints = [
+            models.UniqueConstraint(fields=['job', 'position'], name='unique_job_asset_position'),
+            models.UniqueConstraint(fields=['job', 'sha256'], name='unique_job_asset_sha256'),
+        ]
+        indexes = [
+            models.Index(fields=['job', 'usage_mode'], name='asset_job_usage_idx'),
+            models.Index(fields=['triage_status'], name='asset_triage_status_idx'),
+        ]

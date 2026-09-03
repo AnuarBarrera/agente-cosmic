@@ -82,3 +82,12 @@ patch/
 # Documento de trabajo interno — pendientes entre sesiones
 ultimosCambios.md
 .test-photos/
+
+# Local AI / analysis artifacts
+.analysis_tmp/
+.cibersec-exceptions.md
+.claude/
+analisis.md
+investigacion.md
+docs/superpowers/specs/2026-08-17-product-reference-image-path-backup.json
+docs/superpowers/specs/2026-09-03-generation-quality-pipeline-design.md

@@ -96,3 +96,54 @@ class ContentPost(models.Model):
 
     def __str__(self):
         return f"Día {self.day_number} — {self.calendar.brand_dna.business_name}"
+
+
+class GenerationAuditEvent(models.Model):
+    DECISION_STARTED = 'started'
+    DECISION_ACCEPTED = 'accepted'
+    DECISION_REJECTED = 'rejected'
+    DECISION_FALLBACK = 'fallback'
+    DECISION_ERROR = 'error'
+    DECISION_SKIPPED = 'skipped'
+    DECISION_CHOICES = [
+        (DECISION_STARTED, 'Iniciado'),
+        (DECISION_ACCEPTED, 'Aceptado'),
+        (DECISION_REJECTED, 'Rechazado'),
+        (DECISION_FALLBACK, 'Fallback'),
+        (DECISION_ERROR, 'Error'),
+        (DECISION_SKIPPED, 'Omitido'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    job = models.ForeignKey(
+        'brand_dna.AnalysisJob', on_delete=models.CASCADE,
+        related_name='generation_audit_events',
+    )
+    post = models.ForeignKey(
+        ContentPost, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='generation_audit_events',
+    )
+    reference_asset = models.ForeignKey(
+        'brand_dna.ProductReferenceAsset', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='generation_audit_events',
+    )
+    stage = models.CharField(max_length=100)
+    attempt = models.PositiveIntegerField(default=1)
+    decision = models.CharField(max_length=20, choices=DECISION_CHOICES)
+    flags = models.JSONField(default=dict, blank=True)
+    prompt_hash = models.CharField(max_length=64, blank=True, default='')
+    response_hash = models.CharField(max_length=64, blank=True, default='')
+    prompt_preview = models.TextField(blank=True, default='')
+    response_preview = models.TextField(blank=True, default='')
+    duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    provider = models.CharField(max_length=50, blank=True, default='')
+    model = models.CharField(max_length=150, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'content_pipeline_generation_audit_event'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['job', 'stage', 'created_at'], name='audit_job_stage_idx'),
+            models.Index(fields=['decision', 'created_at'], name='audit_decision_idx'),
+        ]

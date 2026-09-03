@@ -833,7 +833,7 @@ class TestGenerateBackgroundQC:
         VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
         VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
     )
-    def test_returns_last_image_when_all_retries_fail(self):
+    def test_returns_safe_template_when_all_retries_fail(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         img1 = _png_bytes((200, 50, 50))
@@ -842,7 +842,8 @@ class TestGenerateBackgroundQC:
         with patch.object(gen, '_generate_with_retry', side_effect=[img1, img2, img3]), \
              patch.object(gen, '_validate_background', return_value=False):
             result = gen._generate_background('Caption', ['#1a1a2e'], 'profesional')
-        assert result == img3  # last attempt returned even if rejected
+        assert result not in (img1, img2, img3)
+        assert Image.open(io.BytesIO(result)).size == (1080, 1080)
 
 
 
@@ -1621,14 +1622,14 @@ class TestGenerateValidatedPhotoEdit:
         GOOGLE_CLOUD_LOCATION_TEXT='global',
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
     )
-    def test_returns_last_bytes_when_qc_never_passes(self):
+    def test_returns_none_when_qc_never_passes_without_original(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
         gen = ImageGenerator(bucket_name='test-bucket')
         with patch.object(gen, '_generate_from_photo_with_retry', side_effect=[b'bad-1', b'bad-2']), \
              patch.object(gen, '_validate_product_photo_generation', return_value=False):
             result = gen._generate_validated_photo_edit('prompt', MagicMock(), max_qc_retries=1)
 
-        assert result == b'bad-2'  # reintentos agotados, se acepta la ultima imagen
+        assert result is None
 
 
 class TestGenerateFromProductPhoto:
@@ -1863,7 +1864,7 @@ class TestGenerateFromProductPhoto:
                 filename='test-product', max_qc_retries=2,
             )
         assert result == ('', '')
-        assert mock_gen_client.models.generate_content.call_count == 3  # 1 + max_qc_retries
+        assert mock_gen_client.models.generate_content.call_count == 2  # hard cap: two creative attempts
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',

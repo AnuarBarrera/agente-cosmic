@@ -13,6 +13,7 @@ from core.brand_dna.models import AnalysisJob
 from core.content_pipeline.models import ContentCalendar, ContentPost
 from core.tenant_management.models import Subscription, User
 from core.content_pipeline.generators.text_generator import TextGenerator
+from core.content_pipeline.generators.editorial_memory import empty_editorial_memory, update_editorial_memory
 from core.content_pipeline.generators.image_generator import ImageGenerator, _detect_mime
 from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
 from core.content_pipeline.generators.reel_generator import ReelGenerator
@@ -53,6 +54,7 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
                 tone=kwargs.get('tone', ''), filename_prefix=filename,
                 business_url=kwargs.get('business_url', ''), max_qc_retries=1,
                 description=kwargs.get('description', ''), keywords=kwargs.get('keywords', []),
+                fact_profile=kwargs.get('fact_profile'),
             )
         if not urls:
             urls = image_gen.generate_carousel(filename_prefix=filename, max_qc_retries=max_qc_retries, **kwargs)
@@ -64,6 +66,7 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
             vision_context=(brand_dna.product_photo_analysis if brand_dna else ''),
             description=kwargs.get('description', ''), keywords=kwargs.get('keywords', []),
             business_url=kwargs.get('business_url', ''), max_qc_retries=max_qc_retries,
+            fact_profile=kwargs.get('fact_profile'),
         )
         if url:
             return url, [], ''
@@ -164,6 +167,7 @@ def generate_sample_task(job_id: str) -> None:
                 vision_context=brand_dna.product_photo_analysis,
                 description=brand_dna.description, keywords=brand_dna.keywords,
                 business_url=brand_dna.business_url,
+                fact_profile=brand_dna.brand_fact_profile,
             )
             image_urls, video_url = [], ''
         elif (wanted_format == ContentPost.FORMAT_REEL and job.product_reference_image_paths
@@ -185,6 +189,7 @@ def generate_sample_task(job_id: str) -> None:
                     brand_name=brand_dna.business_name, keywords=brand_dna.keywords,
                     description=brand_dna.description, audience=brand_dna.audience,
                     business_url=brand_dna.business_url,
+                    fact_profile=brand_dna.brand_fact_profile,
                 )
             image_urls, background_url = [], ''
         else:
@@ -201,6 +206,7 @@ def generate_sample_task(job_id: str) -> None:
                 description=brand_dna.description,
                 audience=brand_dna.audience,
                 business_url=brand_dna.business_url,
+                fact_profile=brand_dna.brand_fact_profile,
                 brand_dna=brand_dna,
                 post_data=post_data,
                 skip_veo=not settings.REEL_VEO_ENABLED,
@@ -301,6 +307,7 @@ def _generate_missing_image(post: ContentPost) -> None:
             description=brand_dna.description,
             audience=brand_dna.audience,
             business_url=brand_dna.business_url,
+            fact_profile=brand_dna.brand_fact_profile,
             brand_dna=brand_dna,
             post_data={'caption': post.caption},
             # Decision de Anuar 2026-08-18: Veo se apaga en TODO el sistema
@@ -556,9 +563,23 @@ def generate_next_month(calendar_id: str, attempt: int = 0) -> None:
 
         scheduled_dates = smart_schedule_dates(brand_dna, base_date=base_date, count=28)
         text_gen = TextGenerator()
+        # Incluir también la semana de prueba: la primera semana pagada no
+        # debe repetir mecánicamente las piezas que el cliente ya recibió.
+        editorial_memory = None
+        if settings.MONTHLY_EDITORIAL_MEMORY_ENABLED:
+            previous_posts = [
+                {'pillar': 'Histórico', 'caption': caption}
+                for caption in calendar.posts.order_by('day_number').values_list('caption', flat=True)
+            ]
+            editorial_memory = update_editorial_memory(empty_editorial_memory(), previous_posts)
 
         for batch in range(4):
-            posts_data = text_gen.generate(brand_dna)
+            if settings.MONTHLY_EDITORIAL_MEMORY_ENABLED:
+                posts_data = text_gen.generate(
+                    brand_dna, week_number=batch + 1, editorial_memory=editorial_memory,
+                )
+            else:
+                posts_data = text_gen.generate(brand_dna)
             for i, post_data in enumerate(posts_data, start=1):
                 day_number = base_day + (batch * 7) + i
                 scheduled = scheduled_dates[batch * 7 + i - 1]
@@ -574,6 +595,8 @@ def generate_next_month(calendar_id: str, attempt: int = 0) -> None:
                     hashtags=post_data.get('hashtags', []),
                     scheduled_at=scheduled,
                 )
+            if settings.MONTHLY_EDITORIAL_MEMORY_ENABLED:
+                editorial_memory = update_editorial_memory(editorial_memory, posts_data)
 
         schedule_daily_emails(calendar, day_start=base_day + 1, day_end=base_day + 28)
         _enqueue_week_images(calendar_id, week_index=0)

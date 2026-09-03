@@ -576,12 +576,14 @@ class ReelGenerator:
                          highlight_word: str, tag_cta: str, primary_color: str,
                          filename_prefix: str, skip_veo: bool = False,
                          image_gen=None, photos: list[bytes] = None,
-                         mime_types: list[str] = None, colors: list[str] = None) -> tuple[list[bytes], bool]:
+                         mime_types: list[str] = None, colors: list[str] = None,
+                         reference_contexts: list[dict] = None) -> tuple[list[bytes], bool]:
         """Genera los clips de video del reel. Retorna (clips, has_branding).
         has_branding siempre False (HyperFrames eliminado, ver spec 2026-08-31)."""
         if photos:
             clips = self._generate_video_clips_from_photo(
-                image_gen, photos, mime_types, scene_prompts, colors or [primary_color], skip_veo=skip_veo,
+                image_gen, photos, mime_types, scene_prompts, colors or [primary_color],
+                skip_veo=skip_veo, reference_contexts=reference_contexts,
             )
         else:
             clips = self._generate_video_clips(scene_prompts, skip_veo=skip_veo)
@@ -698,7 +700,8 @@ class ReelGenerator:
 
     def _generate_video_clips_from_photo(self, image_gen, photos: list[bytes], mime_types: list[str],
                                            scene_prompts: list[str], colors: list[str],
-                                           max_qc_retries: int = 1, skip_veo: bool = False) -> list[bytes]:
+                                           max_qc_retries: int = 1, skip_veo: bool = False,
+                                           reference_contexts: list[dict] = None) -> list[bytes]:
         photo_parts = [
             types.Part.from_bytes(data=photo_bytes, mime_type=mime_type)
             for photo_bytes, mime_type in zip(photos, mime_types)
@@ -712,11 +715,23 @@ class ReelGenerator:
             # 2-3 la segunda, 4-5 la tercera.
             return photo_parts[(i // 2) % len(photo_parts)]
 
+        def _photo_bytes_for_shot(i: int):
+            return photos[(i // 2) % len(photos)]
+
+        def _context_for_shot(i: int):
+            contexts = reference_contexts or [{}]
+            return contexts[(i // 2) % len(contexts)]
+
         clips = []
 
-        hero_prompt = self._build_photo_edit_prompt(scene_prompts[0], colors)
+        hero_context = _context_for_shot(0)
+        hero_prompt = self._build_photo_edit_prompt(
+            f"{scene_prompts[0]}. Photo notes: {hero_context.get('analysis_description', '')}", colors,
+        )
         hero_image = image_gen._generate_validated_photo_edit(
             hero_prompt, _photo_part_for_shot(0), max_qc_retries=max_qc_retries, aspect_ratio='9:16',
+            original_bytes=_photo_bytes_for_shot(0),
+            usage_mode=hero_context.get('usage_mode', 'edit_allowed'),
         )
         if hero_image is not None:
             veo_clip = None
@@ -740,9 +755,14 @@ class ReelGenerator:
                 clips.append(still_clip)
 
         for i, prompt in enumerate(scene_prompts[1:], start=1):
-            shot_prompt = self._build_photo_edit_prompt(prompt, colors)
+            shot_context = _context_for_shot(i)
+            shot_prompt = self._build_photo_edit_prompt(
+                f"{prompt}. Photo notes: {shot_context.get('analysis_description', '')}", colors,
+            )
             shot_image = image_gen._generate_validated_photo_edit(
                 shot_prompt, _photo_part_for_shot(i), max_qc_retries=max_qc_retries, aspect_ratio='9:16',
+                original_bytes=_photo_bytes_for_shot(i),
+                usage_mode=shot_context.get('usage_mode', 'edit_allowed'),
             )
             if shot_image is not None:
                 clips.append(self._animate_still_to_clip(shot_image, width, height, fps, duration=_IMAGE_SHOT_DURATION_SECONDS))
@@ -1242,16 +1262,84 @@ class ReelGenerator:
             with open(frame_path, 'rb') as f:
                 return f.read()
 
+    def _validate_final_video(self, video_bytes: bytes, narration: bytes | None,
+                              subtitles: list) -> tuple[bool, str]:
+        """Technical audiovisual gate run before upload; fail closed."""
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, 'final.mp4')
+                with open(path, 'wb') as handle:
+                    handle.write(video_bytes)
+                result = subprocess.run(
+                    ['ffprobe', '-v', 'error', '-show_streams', '-show_format',
+                     '-of', 'json', path], check=True, capture_output=True, text=True,
+                )
+            data = json.loads(result.stdout)
+            streams = data.get('streams') or []
+            video = next((s for s in streams if s.get('codec_type') == 'video'), None)
+            audio = next((s for s in streams if s.get('codec_type') == 'audio'), None)
+            duration = float((data.get('format') or {}).get('duration') or 0)
+            if not video or duration <= 0:
+                return False, 'missing_video_stream'
+            if not video.get('width') or not video.get('height'):
+                return False, 'invalid_resolution'
+            if narration is not None and audio is None:
+                return False, 'missing_audio_stream'
+            if narration is not None:
+                narration_duration = len(narration) / (24000 * 2)
+                if duration + 0.1 < narration_duration + _NARRATION_END_PADDING_SECONDS:
+                    return False, 'narration_truncated'
+            if subtitles:
+                last_end = max(float(item.get('end', 0)) for item in subtitles)
+                if last_end > duration + 0.1:
+                    return False, 'subtitles_outside_duration'
+            # faststart means the index atom precedes media data.
+            moov, mdat = video_bytes.find(b'moov'), video_bytes.find(b'mdat')
+            if moov < 0 or mdat < 0 or moov > mdat:
+                return False, 'missing_faststart'
+            if not self._validate_video_contact_sheet(video_bytes, duration):
+                return False, 'contact_sheet_rejected'
+            return True, ''
+        except Exception as exc:
+            logger.warning(f"Final reel QC error: {exc}")
+            return False, 'ffprobe_error'
+
+    def _validate_video_contact_sheet(self, video_bytes: bytes, duration: float) -> bool:
+        """Sample beginning/middle/end after assembly and reuse strict scene QC."""
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                video_path = os.path.join(tmp, 'final.mp4')
+                sheet_path = os.path.join(tmp, 'contact.png')
+                with open(video_path, 'wb') as handle:
+                    handle.write(video_bytes)
+                interval = max(duration / 3, 0.5)
+                subprocess.run(
+                    ['ffmpeg', '-y', '-i', video_path, '-vf',
+                     f"fps=1/{interval},scale=360:-1,tile=3x1", '-frames:v', '1', sheet_path],
+                    check=True, capture_output=True,
+                )
+                with open(sheet_path, 'rb') as handle:
+                    sheet = handle.read()
+            return self._validate_scene_still(sheet)
+        except Exception as exc:
+            logger.warning(f"Contact sheet QC error (rejecting): {exc}")
+            return False
+
     def generate(self, script: dict, colors: list[str], filename_prefix: str,
                  skip_veo: bool = False, image_gen=None, photos: list[bytes] = None,
-                 mime_types: list[str] = None) -> tuple[str, str]:
+                 mime_types: list[str] = None,
+                 reference_contexts: list[dict] = None) -> tuple[str, str]:
         try:
             colors = colors or [random.choice(_FALLBACK_COLOR_POOL)]
             primary_color = colors[0]
+            clip_kwargs = {}
+            if reference_contexts is not None:
+                clip_kwargs['reference_contexts'] = reference_contexts
             clips, has_branding = self._generate_clips(
                 script['scene_prompts'], script['hook_text'], script['highlight_word'],
                 script['tag_cta'], primary_color, filename_prefix, skip_veo=skip_veo,
                 image_gen=image_gen, photos=photos, mime_types=mime_types, colors=colors,
+                **clip_kwargs,
             )
             if len(clips) < 3:
                 logger.warning(f"Reel abortado: solo {len(clips)}/3 clips de Veo generados")
@@ -1267,6 +1355,10 @@ class ReelGenerator:
                 clips, music, narration, script, colors, subtitles,
                 skip_hook_cta_overlay=has_branding,
             )
+            if getattr(settings, 'FINAL_MEDIA_QC_ENABLED', False):
+                valid, reason = self._validate_final_video(final_video, narration, subtitles)
+                if not valid:
+                    raise ValueError(f"Final reel QC rejected: {reason}")
             # HyperFrames eliminado (spec 2026-08-31): has_branding siempre False,
             # poster_offset siempre 1.0
             poster_offset = 1.0
@@ -1312,6 +1404,10 @@ class ReelGenerator:
                 clips, music, narration, script, colors, subtitles,
                 skip_hook_cta_overlay=has_branding,
             )
+            if getattr(settings, 'FINAL_MEDIA_QC_ENABLED', False):
+                valid, reason = self._validate_final_video(final_video, narration, subtitles)
+                if not valid:
+                    raise ValueError(f"Final reel QC rejected: {reason}")
             # HyperFrames eliminado: poster_offset siempre 1.0
             poster_offset = 1.0
             poster = self._extract_poster_frame(final_video, offset_seconds=poster_offset)

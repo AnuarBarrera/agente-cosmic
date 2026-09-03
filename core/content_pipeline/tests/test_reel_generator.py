@@ -743,6 +743,34 @@ class TestGenerateFromProductPhotoReel:
             )
         assert (video_url, poster_url) == ('', '')
 
+
+class TestFinalVideoQC:
+    def test_rejects_missing_audio_when_narration_exists(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        probe = MagicMock(stdout=json.dumps({
+            'streams': [{'codec_type': 'video', 'width': 1080, 'height': 1920}],
+            'format': {'duration': '3.0'},
+        }))
+        video = b'xxxxmoovxxxxmdatxxxx'
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', return_value=probe):
+            assert gen._validate_final_video(video, b'pcm', []) == (False, 'missing_audio_stream')
+
+    def test_rejects_subtitles_past_video_duration(self):
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        probe = MagicMock(stdout=json.dumps({
+            'streams': [
+                {'codec_type': 'video', 'width': 1080, 'height': 1920},
+                {'codec_type': 'audio'},
+            ],
+            'format': {'duration': '3.0'},
+        }))
+        video = b'xxxxmoovxxxxmdatxxxx'
+        with patch('core.content_pipeline.generators.reel_generator.subprocess.run', return_value=probe):
+            result = gen._validate_final_video(video, b'pcm', [{'end': 4.0}])
+        assert result == (False, 'subtitles_outside_duration')
+
     def test_returns_empty_strings_on_exception(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         from core.content_pipeline.generators.image_generator import ImageGenerator

@@ -10,6 +10,7 @@ from core.shared.metrics_utils import track_external_api, record_tokens, vertex_
 from core.shared.rate_limiter import call_with_429_retry
 from core.content_pipeline.generators.text_generator import _is_sensitive_niche, _strip_accents
 from core.content_pipeline.generators.brand_consistency_qc import audit_brand_consistency, rewrite_for_brand_consistency
+from core.content_pipeline.generators.claim_auditor import audit_text_fields
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +241,12 @@ class ReelScriptGenerator:
                     logger.warning(f"ReelScriptGenerator: scene_prompts marcado por consistencia de marca ({reason}), no se reescribe automaticamente")
                     continue
                 result[field_name] = rewrite_for_brand_consistency(field_name, result[field_name], reason, brand_dna)
+            if settings.CLAIM_GUARD_ENABLED:
+                audited, _ = audit_text_fields(
+                    {key: result[key] for key in ('hook_text', 'tag_cta', 'narration_script')},
+                    brand_dna.brand_fact_profile,
+                )
+                result.update(audited)
             return result
         except Exception as e:
             logger.warning(f"ReelScriptGenerator fallback: {e}")

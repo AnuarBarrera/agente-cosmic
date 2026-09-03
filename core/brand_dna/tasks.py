@@ -3,16 +3,70 @@ import os
 import time
 import django_rq
 from django.conf import settings
-from core.brand_dna.models import AnalysisJob, BrandDNA
+from core.brand_dna.models import AnalysisJob, BrandDNA, ProductReferenceAsset
 from core.brand_dna.extractors.web_scraper import WebScraper
 from core.brand_dna.extractors.manual_extractor import ManualBrandExtractor
 from core.brand_dna.extractors.logo_analyzer import LogoAnalyzer
 from core.brand_dna.extractors.product_photo_analyzer import ProductPhotoAnalyzer
+from core.brand_dna.extractors.product_photo_triage import (
+    ProductPhotoTriageAnalyzer, TRIAGE_VERSION, risk_flags_from,
+)
+from core.brand_dna.reference_assets import reference_assets_for, reference_paths_for
+from core.content_pipeline.audit import GenerationContext
 from core.content_pipeline.image_utils import normalize_image
 from core.shared.metrics import ANALYSIS_JOBS_TOTAL, ANALYSIS_DURATION
 from core.shared.gcs_uploads import read_upload, upload_exists
 
 logger = logging.getLogger(__name__)
+
+
+def triage_reference_assets(job, assets=None) -> None:
+    """Analyze each pending hash once; failure degrades to preservation."""
+    assets = list(assets if assets is not None else reference_assets_for(job))
+    triage = ProductPhotoTriageAnalyzer()
+    for asset in assets:
+        if asset.triage_status != ProductReferenceAsset.TRIAGE_PENDING:
+            continue
+        try:
+            if not upload_exists(asset.storage_path):
+                raise FileNotFoundError(asset.storage_path)
+            original_bytes = read_upload(asset.storage_path)
+            data = triage.analyze(
+                original_bytes, asset.mime_type or 'image/jpeg', job.business_description,
+                context=GenerationContext(job_id=str(job.id), asset_id=str(asset.id)),
+            )
+            asset.analysis_description = data['description']
+            asset.product_category = data['category']
+            asset.commercial_relationship = data['commercial_relationship']
+            asset.usage_mode = data['usage_mode']
+            asset.risk_flags = {**risk_flags_from(data), 'policy_reason': data['policy_reason']}
+            asset.visible_brands = data['visible_brands']
+            asset.visible_text_summary = data['visible_text_summary']
+            asset.triage_status = ProductReferenceAsset.TRIAGE_COMPLETE
+            asset.triage_version = TRIAGE_VERSION
+            asset.save()
+        except Exception as exc:
+            logger.warning('Triage no bloqueante fallo para asset=%s: %s', asset.id, exc)
+            asset.usage_mode = ProductReferenceAsset.USAGE_PRESERVE_ONLY
+            asset.triage_status = ProductReferenceAsset.TRIAGE_FAILED
+            asset.triage_version = TRIAGE_VERSION
+            asset.risk_flags = {
+                **(asset.risk_flags or {}), 'triage_failed': True,
+                'fallback': ProductReferenceAsset.USAGE_PRESERVE_ONLY,
+            }
+            asset.save(update_fields=[
+                'usage_mode', 'triage_status', 'triage_version', 'risk_flags', 'updated_at',
+            ])
+
+
+def triage_reference_assets_task(job_id: str, asset_ids: list[str] | None = None) -> None:
+    if not getattr(settings, 'PHOTO_ASSET_TRIAGE_ENABLED', False):
+        return
+    job = AnalysisJob.objects.get(id=job_id)
+    queryset = reference_assets_for(job)
+    if asset_ids:
+        queryset = queryset.filter(id__in=asset_ids)
+    triage_reference_assets(job, queryset)
 
 
 def analyze_brand_task(job_id: str) -> None:
@@ -48,10 +102,21 @@ def analyze_brand_task(job_id: str) -> None:
         job.update_progress(AnalysisJob.STAGE_LOGO, 55)
 
         product_photo_data = {'description': '', 'category': ''}
-        if job.product_reference_image_paths:
-            first_photo_path = job.product_reference_image_paths[0]
-            if upload_exists(first_photo_path):
-                product_photo_bytes = normalize_image(read_upload(first_photo_path))
+        assets = list(reference_assets_for(job))
+        if getattr(settings, 'PHOTO_ASSET_TRIAGE_ENABLED', False) and assets:
+            triage_reference_assets(job, assets)
+            first = assets[0]
+            first.refresh_from_db()
+            product_photo_data = {
+                'description': first.analysis_description,
+                'category': first.product_category,
+            }
+        else:
+            # Compatibility path while the feature flag rolls out and for
+            # jobs constructed by historical callers with JSON only.
+            paths = reference_paths_for(job)
+            if paths and upload_exists(paths[0]):
+                product_photo_bytes = normalize_image(read_upload(paths[0]))
                 product_photo_data = ProductPhotoAnalyzer().analyze(product_photo_bytes, 'image/webp')
 
         job.update_progress(AnalysisJob.STAGE_POSTS, 75)

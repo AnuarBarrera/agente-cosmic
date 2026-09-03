@@ -1,7 +1,8 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from django.test import override_settings
-from core.brand_dna.models import AnalysisJob, BrandDNA
+from core.brand_dna.models import AnalysisJob, BrandDNA, ProductReferenceAsset
+from core.brand_dna.reference_assets import create_reference_asset
 
 pytestmark = pytest.mark.django_db
 
@@ -246,3 +247,57 @@ def test_analyze_brand_task_skips_photo_analysis_without_photo(job_without_produ
     MockAnalyzer.return_value.analyze.assert_not_called()
     brand_dna = job_without_product_photo.brand_dna
     assert brand_dna.product_photo_analysis == ''
+
+
+@override_settings(PHOTO_ASSET_TRIAGE_ENABLED=True)
+def test_triage_task_persists_result_and_does_not_repeat_completed_hash(job_without_product_photo):
+    import io
+    from PIL import Image
+    from core.brand_dna.tasks import triage_reference_assets_task
+
+    buffer = io.BytesIO()
+    Image.new('RGB', (12, 8), color='blue').save(buffer, format='PNG')
+    asset, _ = create_reference_asset(
+        job_without_product_photo, 'uploads/product.png', buffer.getvalue(), 0,
+    )
+    result = {
+        'description': 'Una prenda azul', 'category': 'ropa',
+        'commercial_relationship': 'maker', 'usage_mode': 'edit_allowed',
+        'policy_reason': 'clean_maker_product', 'visible_brands': [],
+        'visible_text_summary': '',
+    }
+    with patch('core.brand_dna.tasks.upload_exists', return_value=True), \
+         patch('core.brand_dna.tasks.read_upload', return_value=buffer.getvalue()), \
+         patch('core.brand_dna.tasks.ProductPhotoTriageAnalyzer') as analyzer:
+        analyzer.return_value.analyze.return_value = result
+        triage_reference_assets_task(str(job_without_product_photo.id))
+        triage_reference_assets_task(str(job_without_product_photo.id))
+
+    asset.refresh_from_db()
+    assert asset.triage_status == ProductReferenceAsset.TRIAGE_COMPLETE
+    assert asset.usage_mode == ProductReferenceAsset.USAGE_EDIT_ALLOWED
+    assert asset.analysis_description == 'Una prenda azul'
+    analyzer.return_value.analyze.assert_called_once()
+
+
+@override_settings(PHOTO_ASSET_TRIAGE_ENABLED=True)
+def test_triage_failure_is_non_blocking_and_preserve_only(job_without_product_photo):
+    import io
+    from PIL import Image
+    from core.brand_dna.tasks import triage_reference_assets_task
+
+    buffer = io.BytesIO()
+    Image.new('RGB', (12, 8), color='blue').save(buffer, format='PNG')
+    asset, _ = create_reference_asset(
+        job_without_product_photo, 'uploads/product.png', buffer.getvalue(), 0,
+    )
+    with patch('core.brand_dna.tasks.upload_exists', return_value=True), \
+         patch('core.brand_dna.tasks.read_upload', return_value=buffer.getvalue()), \
+         patch('core.brand_dna.tasks.ProductPhotoTriageAnalyzer') as analyzer:
+        analyzer.return_value.analyze.side_effect = RuntimeError('provider down')
+        triage_reference_assets_task(str(job_without_product_photo.id))
+
+    asset.refresh_from_db()
+    assert asset.triage_status == ProductReferenceAsset.TRIAGE_FAILED
+    assert asset.usage_mode == ProductReferenceAsset.USAGE_PRESERVE_ONLY
+    assert asset.risk_flags['triage_failed'] is True

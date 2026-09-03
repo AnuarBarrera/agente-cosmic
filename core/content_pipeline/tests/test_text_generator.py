@@ -60,6 +60,58 @@ def test_generate_returns_7_posts(brand_dna):
     GOOGLE_CLOUD_PROJECT='agente-cosmic',
     GOOGLE_CLOUD_LOCATION='us-central1',
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    CLAIM_GUARD_ENABLED=False,
+    MONTHLY_EDITORIAL_MEMORY_ENABLED=False,
+)
+def test_disabled_quality_flags_preserve_legacy_prompt_and_result_shape(brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    response = MOCK_VERTEX_RESPONSE.replace('Post 1: diseno que convierte', 'Aprovecha 30% de descuento')
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(response)
+        result = TextGenerator().generate(
+            brand_dna, week_number=2,
+            editorial_memory={'post_summaries': ['Una idea anterior']},
+        )
+
+    prompt = mock_vc.return_value.models.generate_content.call_args.kwargs['contents']
+    assert 'FUENTE DE VERDAD COMERCIAL' not in prompt
+    assert 'MEMORIA EDITORIAL' not in prompt
+    assert 'CTA / Oferta' in prompt
+    assert result[0]['caption'] == 'Aprovecha 30% de descuento'
+    assert 'claim_audit' not in result[0]
+    assert 'editorial_similarity' not in result[0]
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    CLAIM_GUARD_ENABLED=True,
+    MONTHLY_EDITORIAL_MEMORY_ENABLED=True,
+)
+def test_enabled_quality_flags_guard_claims_without_leaking_auxiliary_fields(brand_dna):
+    from core.content_pipeline.generators.text_generator import TextGenerator
+    response = MOCK_VERTEX_RESPONSE.replace('Post 1: diseno que convierte', 'Aprovecha 30% de descuento')
+    with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
+        mock_vc.return_value = _mock_vertex_client(response)
+        result = TextGenerator().generate(
+            brand_dna, week_number=2,
+            editorial_memory={'post_summaries': ['Una idea anterior']},
+        )
+
+    prompt = mock_vc.return_value.models.generate_content.call_args.kwargs['contents']
+    assert 'FUENTE DE VERDAD COMERCIAL' in prompt
+    assert 'MEMORIA EDITORIAL' in prompt
+    assert 'CTA directo' in prompt
+    assert '30%' not in result[0]['caption']
+    assert 'claim_audit' not in result[0]
+    assert 'editorial_similarity' not in result[0]
+
+
+@override_settings(
+    GOOGLE_CLOUD_PROJECT='agente-cosmic',
+    GOOGLE_CLOUD_LOCATION='us-central1',
+    VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
 )
 def test_generate_post_has_required_keys(brand_dna):
     from core.content_pipeline.generators.text_generator import TextGenerator

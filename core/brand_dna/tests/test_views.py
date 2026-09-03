@@ -568,7 +568,7 @@ def test_regenerate_action_with_product_photo_enqueues_async_task(client, user, 
     assert response.status_code == 200
     data = response.json()
     assert data['status'] == 'processing'
-    assert data['caption'] == 'Nuevo caption'
+    assert data['caption'] == post.caption
     mock_rq.enqueue.assert_called_once()
     call_args = mock_rq.enqueue.call_args
     assert call_args[0][1] == str(post.id)
@@ -600,7 +600,7 @@ def test_regenerate_action_returns_409_when_already_regenerating(client, user, j
     assert post.regen_count == 0
 
 
-def test_regenerate_action_without_product_photo_stays_synchronous(client, user, job_with_calendar):
+def test_regenerate_action_without_product_photo_enqueues_async(client, user, job_with_calendar):
     post = job_with_calendar.brand_dna.calendar.posts.filter(format='single').first()
     client.force_login(user)
     with patch('core.brand_dna.views._regenerate_caption', return_value='Nuevo caption'), \
@@ -614,14 +614,13 @@ def test_regenerate_action_without_product_photo_stays_synchronous(client, user,
 
     assert response.status_code == 200
     data = response.json()
-    assert data['status'] == 'ok'
-    assert data['image_url'] == 'https://storage.test/normal.png'
-    mock_rq.enqueue.assert_not_called()
+    assert data['status'] == 'processing'
+    mock_rq.enqueue.assert_called_once()
     post.refresh_from_db()
-    assert post.regenerating is False
+    assert post.regenerating is True
 
 
-def test_regenerate_action_with_unused_product_photo_stays_synchronous(client, user, job_with_calendar):
+def test_regenerate_action_full_with_product_photo_enqueues_async(client, user, job_with_calendar):
     # MODE_FULL puede tener foto de producto guardada (analyze_submit la acepta en
     # cualquier modo) sin que se haya usado JAMAS para generar: el unico camino que
     # llama generate_from_product_photo es generate_sample_task/MODE_SAMPLE_IMAGE.
@@ -643,13 +642,13 @@ def test_regenerate_action_with_unused_product_photo_stays_synchronous(client, u
         }), content_type='application/json')
 
     assert response.status_code == 200
-    assert response.json()['status'] == 'ok'
-    mock_rq.enqueue.assert_not_called()
+    assert response.json()['status'] == 'processing'
+    mock_rq.enqueue.assert_called_once()
     post.refresh_from_db()
-    assert post.regenerating is False
+    assert post.regenerating is True
 
 
-def test_regenerate_action_carousel_with_unused_product_photo_stays_synchronous(client, user, job_with_calendar):
+def test_regenerate_action_carousel_enqueues_async_and_keeps_old_slides_while_processing(client, user, job_with_calendar):
     # El caso concreto de regresion: un carrusel de MODE_FULL con foto subida NO
     # debe irse por async, porque regenerate_with_reference devuelve 1 sola URL y
     # image_urls=[] dejaria la tarjeta con el badge de carrusel sin sus slides.
@@ -672,15 +671,14 @@ def test_regenerate_action_carousel_with_unused_product_photo_stays_synchronous(
         }), content_type='application/json')
 
     assert response.status_code == 200
-    assert response.json()['status'] == 'ok'
-    mock_rq.enqueue.assert_not_called()
+    assert response.json()['status'] == 'processing'
+    mock_rq.enqueue.assert_called_once()
     post.refresh_from_db()
-    assert post.regenerating is False
-    # El carrusel conserva sus slides -- no se degrada a imagen unica.
-    assert post.image_urls == ['https://storage.test/s1-new.png', 'https://storage.test/s2-new.png']
+    assert post.regenerating is True
+    assert post.image_urls == ['https://storage.test/s1.png', 'https://storage.test/s2.png']
 
 
-def test_regenerate_action_sample_image_without_photo_stays_synchronous(client, user, job_with_calendar):
+def test_regenerate_action_sample_image_without_photo_enqueues_async(client, user, job_with_calendar):
     # La foto es OPCIONAL en el formulario: un MODE_SAMPLE_IMAGE sin foto se genera
     # por el camino normal (_generate_post_media, imagen diseñada con overlay), no
     # por generate_from_product_photo. Rutearlo a async le borraria el diseño --
@@ -704,11 +702,10 @@ def test_regenerate_action_sample_image_without_photo_stays_synchronous(client, 
 
     assert response.status_code == 200
     data = response.json()
-    assert data['status'] == 'ok'
-    assert data['image_url'] == 'https://storage.test/normal.png'
-    mock_rq.enqueue.assert_not_called()
+    assert data['status'] == 'processing'
+    mock_rq.enqueue.assert_called_once()
     post.refresh_from_db()
-    assert post.regenerating is False
+    assert post.regenerating is True
 
 
 def test_post_regen_status_api_returns_current_state(client, user, job_with_calendar):
@@ -838,28 +835,27 @@ def test_download_post_image_blocks_other_user(client, django_user_model, job_wi
     assert response.status_code == 404
 
 
-def test_regenerate_action_uses_carousel_when_post_format_is_carousel(client, user, job_with_calendar):
+def test_regenerate_action_enqueues_carousel_without_mutating_current_media(client, user, job_with_calendar):
     post = job_with_calendar.brand_dna.calendar.posts.get(day_number=3)
     post.format = 'carousel'
     post.save(update_fields=['format'])
     client.force_login(user)
-    with patch('core.brand_dna.views._regenerate_caption', return_value='Nuevo caption'), \
-         patch('core.content_pipeline.generators.image_generator.ImageGenerator.generate_carousel',
-               return_value=['https://example.com/slide1.jpg', 'https://example.com/slide2.jpg']) as mock_carousel, \
-         patch('core.content_pipeline.generators.image_generator.ImageGenerator.generate') as mock_single:
+    old_image_url = post.image_url
+    old_image_urls = post.image_urls
+    with patch('core.brand_dna.views.django_rq') as mock_rq:
         response = client.post(
             f'/api/post/{post.id}/action/',
             data=json.dumps({'action': 'regenerate', 'value': 'Hazlo mas corto'}),
             content_type='application/json',
         )
     assert response.status_code == 200
-    mock_carousel.assert_called_once()
-    mock_single.assert_not_called()
+    mock_rq.enqueue.assert_called_once()
     post.refresh_from_db()
-    assert post.image_url == 'https://example.com/slide1.jpg'
-    assert post.image_urls == ['https://example.com/slide1.jpg', 'https://example.com/slide2.jpg']
+    assert post.image_url == old_image_url
+    assert post.image_urls == old_image_urls
+    assert post.regenerating is True
     data = response.json()
-    assert data['image_urls'] == ['https://example.com/slide1.jpg', 'https://example.com/slide2.jpg']
+    assert data['status'] == 'processing'
 
 
 def test_mark_downloaded_sets_timestamp(client, user, job_with_calendar):

@@ -1103,6 +1103,49 @@ def test_generate_next_month_creates_28_posts_without_images(job_with_dna):
     mock_enqueue_week.assert_called_once_with(str(calendar.id), week_index=0)
 
 
+@override_settings(MONTHLY_EDITORIAL_MEMORY_ENABLED=True)
+def test_generate_next_month_passes_accumulated_editorial_memory(job_with_dna):
+    from core.content_pipeline.tasks import content_generation_task, generate_next_month
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'), \
+         patch('core.content_pipeline.tasks._enqueue_trial_images'), \
+         patch('core.content_pipeline.tasks._enqueue_week_images'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS
+        content_generation_task(str(job_with_dna.id))
+        job_with_dna.status = AnalysisJob.STATUS_DONE
+        job_with_dna.save(update_fields=['status'])
+        calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
+
+        generate_next_month(str(calendar.id))
+
+    monthly_calls = MockText.return_value.generate.call_args_list[1:]
+    assert [call.kwargs['week_number'] for call in monthly_calls] == [1, 2, 3, 4]
+    assert monthly_calls[0].kwargs['editorial_memory']['post_summaries']
+    assert monthly_calls[1].kwargs['editorial_memory']['post_summaries']
+
+
+@override_settings(MONTHLY_EDITORIAL_MEMORY_ENABLED=False)
+def test_generate_next_month_preserves_historical_text_generator_call_when_memory_disabled(job_with_dna):
+    from core.content_pipeline.tasks import content_generation_task, generate_next_month
+    with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
+         patch('core.content_pipeline.tasks.EmailSender'), \
+         patch('core.content_pipeline.tasks.schedule_daily_emails'), \
+         patch('core.content_pipeline.tasks._enqueue_trial_images'), \
+         patch('core.content_pipeline.tasks._enqueue_week_images'):
+        MockText.return_value.generate.return_value = _MOCK_POSTS
+        content_generation_task(str(job_with_dna.id))
+        job_with_dna.status = AnalysisJob.STATUS_DONE
+        job_with_dna.save(update_fields=['status'])
+        calendar = ContentCalendar.objects.get(brand_dna__job=job_with_dna)
+
+        generate_next_month(str(calendar.id))
+
+    for call in MockText.return_value.generate.call_args_list[1:]:
+        assert call.args == (job_with_dna.brand_dna,)
+        assert call.kwargs == {}
+
+
 def test_generate_next_month_resets_flag_on_text_failure(job_with_dna):
     from core.content_pipeline.tasks import content_generation_task, generate_next_month
     with patch('core.content_pipeline.tasks.TextGenerator') as MockText, \
@@ -1808,4 +1851,3 @@ class TestNextReferencePhotos:
              patch('core.content_pipeline.tasks.read_upload', return_value=b'photo-b'):
             photos = _next_reference_photos(job, day_number=1, count=2)
         assert photos == [b'photo-b']
-

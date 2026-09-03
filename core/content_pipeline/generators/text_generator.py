@@ -10,6 +10,8 @@ from core.brand_dna.models import BrandDNA
 from core.shared.metrics_utils import track_external_api, record_tokens, vertex_labels
 from core.shared.rate_limiter import call_with_429_retry
 from core.content_pipeline.generators.brand_consistency_qc import audit_brand_consistency, rewrite_for_brand_consistency
+from core.content_pipeline.generators.claim_auditor import ensure_supported_text
+from core.content_pipeline.generators.editorial_memory import memory_prompt_block, mechanically_similar
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +83,25 @@ def _normalize_hashtags(hashtags: list[str]) -> list[str]:
     return [tag if tag.startswith('#') else f'#{tag}' for tag in hashtags if tag]
 
 
-def _pillars_block() -> str:
+_SAFE_CTA_PILLAR = {
+    'day': 6,
+    'name': 'CTA directo',
+    'angle': 'Invita a contactar, cotizar, reservar o conocer mas de forma directa. No inventes ofertas, descuentos ni vigencias.',
+}
+
+
+def _active_pillars() -> list[dict]:
+    if not settings.CLAIM_GUARD_ENABLED:
+        return CONTENT_PILLARS
+    return [(_SAFE_CTA_PILLAR if pillar['day'] == 6 else pillar) for pillar in CONTENT_PILLARS]
+
+
+def _pillars_block(has_confirmed_promotion: bool = False) -> str:
+    promotion_note = ' Puede comunicar únicamente la promoción confirmada en la fuente de verdad.'
     return '\n'.join(
-        f"Dia {p['day']} — {p['name']}: {p['angle']}" for p in CONTENT_PILLARS
+        f"Dia {p['day']} — {p['name']}: {p['angle']}"
+        f"{promotion_note if settings.CLAIM_GUARD_ENABLED and has_confirmed_promotion and p['day'] == 6 else ''}"
+        for p in _active_pillars()
     )
 
 
@@ -158,8 +176,11 @@ def _is_sensitive_niche(brand_dna: BrandDNA) -> bool:
 
 
 class TextGenerator:
-    def generate(self, brand_dna: BrandDNA, max_qc_retries: int = 2) -> list[dict]:
+    def generate(self, brand_dna: BrandDNA, max_qc_retries: int = 2, *,
+                 week_number: int | None = None, editorial_memory: dict | None = None) -> list[dict]:
         client = _vertex_client()
+        fact_profile = brand_dna.brand_fact_profile or {}
+        commercial_terms = fact_profile.get('confirmed_commercial_terms') or []
         prompt = _PROMPT.format(
             business_name=brand_dna.business_name,
             description=brand_dna.description,
@@ -169,8 +190,14 @@ class TextGenerator:
             posting_style=brand_dna.posting_style or 'No disponible',
             hashtags=', '.join(brand_dna.common_hashtags or []),
             avg_length=brand_dna.avg_caption_length,
-            pillars_block=_pillars_block(),
+            pillars_block=_pillars_block(bool(commercial_terms)),
         )
+        if settings.CLAIM_GUARD_ENABLED:
+            prompt += "\n\nFUENTE DE VERDAD COMERCIAL:\n" + json.dumps(
+                fact_profile, ensure_ascii=False,
+            )[:5000]
+        if settings.MONTHLY_EDITORIAL_MEMORY_ENABLED:
+            prompt += "\n\n" + memory_prompt_block(editorial_memory, week_number)
         def _call():
             with track_external_api('gemini', operation='text_gen'):
                 return client.models.generate_content(
@@ -192,7 +219,8 @@ class TextGenerator:
         # devuelve menos de 7 posts, los ultimos pilares simplemente no se usan.
         for i, post in enumerate(posts):
             post['hashtags'] = _normalize_hashtags(post.get('hashtags') or [])
-            pillar = CONTENT_PILLARS[i] if i < len(CONTENT_PILLARS) else None
+            pillars = _active_pillars()
+            pillar = pillars[i] if i < len(pillars) else None
             post['pillar'] = pillar['name'] if pillar else ''
             if pillar and pillar['day'] == REEL_DAY:
                 post['format'] = 'reel'
@@ -213,6 +241,16 @@ class TextGenerator:
             logger.info(f"Auditando captions para '{brand_dna.business_name}' (nicho sensible o sin business_url)")
             for post in posts:
                 post['caption'] = self._ensure_safe_caption(post['caption'], brand_dna, max_qc_retries)
+        if settings.CLAIM_GUARD_ENABLED:
+            for post in posts:
+                post['caption'], _ = ensure_supported_text(
+                    post['caption'], fact_profile, field_name='caption',
+                )
+        if settings.MONTHLY_EDITORIAL_MEMORY_ENABLED:
+            previous = (editorial_memory or {}).get('post_summaries') or []
+            for post in posts:
+                if any(mechanically_similar(post['caption'], summary) for summary in previous):
+                    logger.info("Editorial QC detectó una idea similar a la memoria mensual")
         return posts
 
     def _ensure_safe_caption(self, caption: str, brand_dna: BrandDNA, max_qc_retries: int) -> str:
