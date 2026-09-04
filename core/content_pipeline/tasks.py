@@ -42,6 +42,15 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
     este dia por _next_reference_photos (rotacion circular) -- None/vacio
     deja el comportamiento identico a hoy (generado desde cero por IA)."""
     if fmt == ContentPost.FORMAT_REEL:
+        if photos and reference_contexts:
+            usable = [
+                (photo, mime, context)
+                for photo, mime, context in zip(photos, mime_types, reference_contexts)
+                if context.get('usage_mode') != 'context_only'
+            ]
+            photos = [item[0] for item in usable]
+            mime_types = [item[1] for item in usable]
+            reference_contexts = [item[2] for item in usable]
         script = reel_script_gen.generate(post_data, brand_dna)
         video_url, poster_url = reel_gen.generate(
             script=script, colors=kwargs.get('colors', []), filename_prefix=filename, skip_veo=skip_veo,

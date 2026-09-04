@@ -797,6 +797,25 @@ def test_generate_missing_image_reel_passes_pool_to_reel_generator(calendar_with
     assert call_kwargs['image_gen'] is MockImage.return_value
 
 
+def test_generate_post_media_reel_excludes_context_only_references(calendar_with_dna):
+    from core.content_pipeline.tasks import _generate_post_media
+    image_gen, script_gen, reel_gen = MagicMock(), MagicMock(), MagicMock()
+    script_gen.generate.return_value = {'hook_text': 'H'}
+    reel_gen.generate.return_value = ('video-url', 'poster-url')
+
+    _generate_post_media(
+        image_gen, script_gen, reel_gen,
+        fmt='reel', filename='candidate', brand_dna=calendar_with_dna.brand_dna,
+        post_data={'caption': 'Caption'}, photos=[b'ad'], mime_types=['image/jpeg'],
+        reference_contexts=[{'usage_mode': 'context_only'}], colors=['#123456'],
+    )
+
+    kwargs = reel_gen.generate.call_args.kwargs
+    assert kwargs['photos'] == []
+    assert kwargs['mime_types'] == []
+    assert kwargs['reference_contexts'] == []
+
+
 def test_next_reference_photos_not_called_when_pool_empty(calendar_with_dna):
     """Guard de rendimiento: sin pool, no debe ni intentar leer GCS."""
     post = _make_post(calendar_with_dna, 1, image_url='', format='single')
