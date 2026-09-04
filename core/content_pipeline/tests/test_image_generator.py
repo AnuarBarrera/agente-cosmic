@@ -592,7 +592,7 @@ class TestLayeredPipeline:
             gen._layered_pipeline('Caption', ['#1a1a2e'], 'profesional')
 
         mock_bg.assert_called_once()
-        mock_content.assert_called_once_with('Caption', brand_context='Tono: profesional.', business_url='')
+        mock_content.assert_called_once_with('Caption', brand_context='Tono: profesional.', business_url='', fact_profile=None)
 
 
 class TestValidateBackground:
@@ -1222,7 +1222,10 @@ class TestGenerateCarouselFromProductPhotos:
                 'Caption', ['#1a1a2e'], 'profesional', 'job1-day3',
             )
         assert urls == [f'https://storage.test/slide{i}.png' for i in range(1, 4)]
-        mock_slides.assert_called_once_with('Caption', 'Tono: profesional.', business_url='', num_slides=3)
+        mock_slides.assert_called_once_with(
+            'Caption', 'Tono: profesional.', business_url='', num_slides=3,
+            fact_profile=None,
+        )
         assert mock_edit.call_count == 3
         assert mock_render.call_count == 3
         for i, call_args in enumerate(mock_render.call_args_list):
@@ -1245,7 +1248,7 @@ class TestGenerateCarouselFromProductPhotos:
             )
         mock_slides.assert_called_once_with(
             'Caption', 'Vendemos gelatinas artesanales. Tono: profesional. Palabras clave: gelatina, artesanal.',
-            business_url='', num_slides=1,
+            business_url='', num_slides=1, fact_profile=None,
         )
 
     @override_settings(GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='us-central1')
@@ -1665,6 +1668,7 @@ class TestGenerateFromProductPhoto:
         assert result == ('https://storage.test/bg.png', 'https://storage.test/final.png')
         mock_upload.assert_called_once_with(
             b'fake-generated-png', 'Aretes artesanales', ['#e94560'], 'alegre', '', None, '', 'test-product',
+            None,
         )
         call_kwargs = mock_gen_client.models.generate_content.call_args.kwargs
         assert call_kwargs['model'] == 'gemini-3.1-flash-lite-image'
@@ -1904,6 +1908,7 @@ class TestGenerateFromProductPhoto:
         mock_layered.assert_called_once_with(
             'Aretes artesanales', ['#e94560'], 'alegre', ['aretes', 'plata'], 'Joyeria artesanal',
             business_url='https://ejemplo.com', font_seed='test-product', background_bytes=b'fake-generated-png',
+            fact_profile=None,
         )
 
     @override_settings(

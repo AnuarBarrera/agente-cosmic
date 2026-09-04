@@ -71,10 +71,28 @@ class ProductPhotoQCSchema(BaseModel):
     ok: bool
 
 
+class ComparativeProductQCSchema(BaseModel):
+    same_product_identity: bool
+    same_product_category: bool
+    critical_shape_preserved: bool
+    colors_materials_compatible: bool
+    brand_text_preserved_or_safely_hidden: bool
+    new_unconfirmed_product: bool
+    has_malformed_object: bool
+    has_unrealistic_grounding: bool
+    has_suggestive_or_exposed_content: bool
+    reason: str = ''
+
+
 class FinalImageQCSchema(BaseModel):
     has_background_text: bool
     has_shadow_artifacts: bool
     plain_white_background: bool
+    expected_text_present: bool = True
+    text_legible: bool = True
+    has_overflow_or_clipping: bool = False
+    has_adequate_contrast: bool = True
+    has_critical_visual_anomaly: bool = False
     ok: bool
 
 
@@ -331,29 +349,65 @@ class ImageGenerator:
         return background_url, final_url
 
     def _generate_validated_photo_edit(self, prompt: str, photo_part,
-                                         max_qc_retries: int = 2, aspect_ratio: str = '1:1') -> bytes | None:
+                                         max_qc_retries: int = 2, aspect_ratio: str = '1:1',
+                                         original_bytes: bytes | None = None,
+                                         usage_mode: str = 'edit_allowed') -> bytes | None:
         """Ciclo compartido: nano banana edita (reintenta ante ValueError sin
         imagen, mismo patron que _generate_background) + QC de fidelidad
         (_validate_product_photo_generation). None si ningun intento produce
         imagen usable -- el caller decide que hacer (fallback, degradar, etc).
         Usado por generate_from_product_photo, regenerate_with_reference, y
         ReelGenerator.generate_from_product_photo (2026-08-16)."""
-        last_bytes = None
-        total_attempts = max_qc_retries + 1
+        if usage_mode == 'preserve_only':
+            return self._safe_reference_fallback(original_bytes)
+        if usage_mode == 'context_only':
+            return None
+
+        total_attempts = min(2, max_qc_retries + 1)
+        attempt_prompt = prompt
         for attempt in range(total_attempts):
             try:
-                last_bytes = self._generate_from_photo_with_retry(prompt, photo_part, aspect_ratio=aspect_ratio)
+                result_bytes = self._generate_from_photo_with_retry(
+                    attempt_prompt, photo_part, aspect_ratio=aspect_ratio,
+                )
             except ValueError as gen_err:
                 logger.warning(f"Photo edit sin imagen (attempt {attempt + 1}/{total_attempts}): {gen_err}")
                 continue
-            if self._validate_product_photo_generation(last_bytes):
-                return last_bytes
-            if attempt < max_qc_retries:
+            qc_reason = ''
+            if original_bytes is not None and settings.COMPARATIVE_PRODUCT_QC_ENABLED:
+                accepted, qc_reason = self._validate_comparative_product_generation(
+                    original_bytes, result_bytes, usage_mode=usage_mode,
+                )
+            else:
+                accepted = self._validate_product_photo_generation(result_bytes)
+            if accepted:
+                return result_bytes
+            if attempt + 1 < total_attempts:
                 logger.warning(f"Photo edit QC failed (attempt {attempt + 1}/{total_attempts}), reintentando...")
-        if last_bytes is None:
+                attempt_prompt = (
+                    f"{prompt}\nSECOND AND FINAL ATTEMPT. Simplify the scene. Keep one product, "
+                    f"no people, no hands, no generated text. Correct these QC findings: "
+                    f"{qc_reason or 'fidelity failure'}."
+                )
+        logger.warning("Photo edit QC: intentos agotados; activando fallback seguro")
+        return self._safe_reference_fallback(original_bytes)
+
+    @staticmethod
+    def _safe_reference_fallback(original_bytes: bytes | None, size: int = 1080) -> bytes | None:
+        """Compose a square fallback using only the uploaded reference pixels."""
+        if not original_bytes:
             return None
-        logger.warning("Photo edit QC: reintentos agotados, usando ultima imagen generada")
-        return last_bytes
+        try:
+            source = Image.open(io.BytesIO(original_bytes)).convert('RGB')
+            source.thumbnail((size, size), Image.Resampling.LANCZOS)
+            canvas = Image.new('RGB', (size, size), '#f4f4f4')
+            canvas.paste(source, ((size - source.width) // 2, (size - source.height) // 2))
+            output = io.BytesIO()
+            canvas.save(output, format='PNG', optimize=True)
+            return output.getvalue()
+        except Exception as exc:
+            logger.warning(f"No se pudo componer fallback seguro: {exc}")
+            return None
 
     def generate_from_product_photo(self, photo_bytes: bytes, mime_type: str, caption: str,
                                     colors: list[str], tone: str, filename: str,
@@ -419,7 +473,10 @@ class ImageGenerator:
                 f"DSLR camera quality, shallow depth of field, photorealistic. Square 1:1 format."
             )
             photo_part = types.Part.from_bytes(data=photo_bytes, mime_type=mime_type)
-            last_bytes = self._generate_validated_photo_edit(prompt, photo_part, max_qc_retries=max_qc_retries)
+            last_bytes = self._generate_validated_photo_edit(
+                prompt, photo_part, max_qc_retries=max_qc_retries,
+                original_bytes=photo_bytes,
+            )
             if last_bytes is None:
                 raise ValueError("Ningun intento devolvio una imagen usable")
             return self._upload_photo_post(last_bytes, caption, colors, tone, description, keywords, business_url, filename, fact_profile)
@@ -466,7 +523,10 @@ class ImageGenerator:
                 f"DSLR camera quality, photorealistic, square 1:1 format."
             )
             image_part = types.Part.from_bytes(data=current_background_bytes, mime_type=_detect_mime(current_background_bytes))
-            last_bytes = self._generate_validated_photo_edit(prompt, image_part, max_qc_retries=max_qc_retries)
+            last_bytes = self._generate_validated_photo_edit(
+                prompt, image_part, max_qc_retries=max_qc_retries,
+                original_bytes=current_background_bytes,
+            )
             if last_bytes is None:
                 raise ValueError("Ningun intento devolvio una imagen usable")
             return self._upload_photo_post(last_bytes, caption, colors, tone, description, keywords, business_url, filename)
@@ -576,7 +636,10 @@ class ImageGenerator:
                     f"DSLR camera quality, shallow depth of field, photorealistic. Square 1:1 format."
                 )
                 photo_part = types.Part.from_bytes(data=photo_bytes, mime_type=mime_type)
-                slide_bg = self._generate_validated_photo_edit(prompt, photo_part, max_qc_retries=max_qc_retries)
+                slide_bg = self._generate_validated_photo_edit(
+                    prompt, photo_part, max_qc_retries=max_qc_retries,
+                    original_bytes=photo_bytes,
+                )
                 if slide_bg is None:
                     logger.warning(f"Slide {i} de carrusel con foto real fallo, se omite")
                     continue
@@ -597,7 +660,13 @@ class ImageGenerator:
         kw_str = ', '.join((keywords or [])[:4])
         brand_ctx = f"{description[:150]}. Tono: {tone}. Palabras clave: {kw_str}." if description else f"Tono: {tone}."
         content = self._generate_post_content(caption, brand_context=brand_ctx, business_url=business_url, fact_profile=fact_profile)
-        return self._render_html_template(background_bytes, content, colors, svg_overlay='', font_seed=font_seed)
+        final_bytes = self._render_html_template(
+            background_bytes, content, colors, svg_overlay='', font_seed=font_seed,
+        )
+        if settings.FINAL_MEDIA_QC_ENABLED and not self._validate_final_image(final_bytes, content):
+            logger.warning("Final image QC rechazó el overlay; usando fondo aprobado sin overlay")
+            return background_bytes
+        return final_bytes
 
 
 
@@ -715,6 +784,25 @@ class ImageGenerator:
         "Absolutely NO text, NO letters, NO words, NO logos, NO UI elements anywhere."
     )
 
+    @staticmethod
+    def _safe_brand_background(colors: list[str] | None = None) -> bytes:
+        """Return a deterministic background when every generated image fails QC.
+
+        This deliberately contains no generated pixels, text, logos, products or
+        people.  The normal overlay pipeline can still turn it into a useful post,
+        while a rejected provider response never escapes as publishable output.
+        """
+        fallback_color = '#1A1A2E'
+        for candidate in colors or []:
+            if re.fullmatch(r'#[0-9a-fA-F]{6}', str(candidate).strip()):
+                fallback_color = str(candidate).strip()
+                break
+
+        image = Image.new('RGB', (1080, 1080), fallback_color)
+        output = io.BytesIO()
+        image.save(output, format='PNG', optimize=True)
+        return output.getvalue()
+
     def _generate_background(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2) -> bytes:
         scene_prompt, product_mode = self._analyze_brand_scene(caption, keywords or [], description, tone, colors, audience=audience)
         fallbacks = self._PRODUCT_FALLBACKS if product_mode else self._SCENE_FALLBACKS
@@ -737,8 +825,11 @@ class ImageGenerator:
                 scene_prompt, product_mode = self._analyze_brand_scene(caption, keywords or [], description, tone, colors, audience=audience)
                 fallbacks = self._PRODUCT_FALLBACKS if product_mode else self._SCENE_FALLBACKS
                 prompt = scene_prompt + self._SAFE_CONSTRAINTS
-        logger.warning("Background QC: reintentos agotados, usando última imagen generada")
-        return last_bytes
+        logger.warning(
+            "Background QC: reintentos agotados; descartando imágenes rechazadas "
+            "y usando plantilla determinista segura"
+        )
+        return self._safe_brand_background(colors)
 
     def _validate_background(self, image_bytes: bytes) -> bool:
         """Gemini reviews the generated image for forbidden elements. Returns True if ok."""
@@ -873,22 +964,78 @@ class ImageGenerator:
             logger.warning(f"Product photo QC error (assuming ok): {e}")
         return True
 
-    def _validate_final_image(self, image_bytes: bytes) -> bool:
+    def _validate_comparative_product_generation(self, original_bytes: bytes,
+                                                   result_bytes: bytes,
+                                                   usage_mode: str = 'edit_allowed') -> tuple[bool, str]:
+        """Compare the assigned reference and result, deriving the verdict locally."""
+        try:
+            client = _vertex_text_client()
+            original = types.Part.from_bytes(
+                data=original_bytes, mime_type=_detect_mime(original_bytes),
+            )
+            result = types.Part.from_bytes(
+                data=result_bytes, mime_type=_detect_mime(result_bytes),
+            )
+            prompt = (
+                "Compare ORIGINAL_REFERENCE (first image) with GENERATED_RESULT (second image). "
+                "New scenery or models are allowed for edit_allowed, but product identity, "
+                "category, critical shape, colors/materials and real brand text must be "
+                "preserved or safely hidden. Reject any unconfirmed new product. "
+                f"Usage mode: {usage_mode}. Return a short actionable reason."
+            )
+            with track_external_api('gemini', operation='comparative_product_qc'):
+                resp = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL,
+                    contents=['ORIGINAL_REFERENCE', original, 'GENERATED_RESULT', result, prompt],
+                    config=types.GenerateContentConfig(
+                        labels=vertex_labels(),
+                        response_mime_type='application/json',
+                        response_schema=ComparativeProductQCSchema,
+                        thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    ),
+                )
+            record_tokens(
+                resp, operation='comparative_product_qc', prompt_preview=prompt[:500],
+                response_preview=resp.text[:500] if resp.text else '',
+            )
+            parsed = ComparativeProductQCSchema(**json.loads(resp.text))
+            accepted = bool(
+                parsed.same_product_identity
+                and parsed.same_product_category
+                and parsed.critical_shape_preserved
+                and parsed.colors_materials_compatible
+                and parsed.brand_text_preserved_or_safely_hidden
+                and not parsed.new_unconfirmed_product
+                and not parsed.has_malformed_object
+                and not parsed.has_unrealistic_grounding
+                and not parsed.has_suggestive_or_exposed_content
+            )
+            return accepted, parsed.reason
+        except Exception as exc:
+            logger.warning(f"Comparative product QC error (rejecting): {exc}")
+            return False, 'comparative_qc_error'
+
+    def _validate_final_image(self, image_bytes: bytes,
+                              expected_content: dict | None = None) -> bool:
         """QC del post renderizado final. Detecta problemas técnicos y calidad estética. Retorna True si es aceptable."""
         try:
             client = _vertex_text_client()
             image_part = types.Part.from_bytes(data=image_bytes, mime_type='image/png')
+            expected = expected_content or {}
             prompt = (
                 "Analyze this social media advertising post image strictly.\n"
-                "NOTE: The image intentionally has a designed text overlay (headline, subtitle, CTA) — "
-                "IGNORE that foreground text, it is part of the design.\n\n"
+                f"Expected designed text: {json.dumps(expected, ensure_ascii=False)[:800]}. "
+                "Verify it is present, legible, unclipped and has adequate contrast.\n\n"
                 "has_background_text: true if the BACKGROUND scene contains visible text, signs, or watermarks.\n"
                 "has_shadow_artifacts: true if there are unnatural dark blobs or shadow ellipses that look "
                 "like AI artifacts — especially a dark oval/circle in the center or bottom of the image.\n"
                 "plain_white_background: true if the background behind the product is plain white, solid grey, "
                 "or a simple flat color with no depth, texture, or environmental context. "
                 "A professional advertising image must have an interesting background, not a plain studio backdrop.\n"
-                "ok: true ONLY if has_background_text=false AND has_shadow_artifacts=false AND plain_white_background=false."
+                "expected_text_present/text_legible/has_overflow_or_clipping/has_adequate_contrast: inspect the designed overlay.\n"
+                "has_critical_visual_anomaly: true for impossible anatomy or severely malformed products.\n"
+                "ok: true ONLY when expected text is present, legible, unclipped and contrasted, and there are no "
+                "background text, shadow artifacts, plain backdrop, or critical visual anomalies."
             )
             with track_external_api('gemini', operation='image_qc'):
                 resp = client.models.generate_content(
@@ -905,7 +1052,17 @@ class ImageGenerator:
                           prompt_preview=prompt[:500],
                           response_preview=resp.text[:500] if resp.text else '')
             data = json.loads(resp.text)
-            ok = bool(data.get('ok', True))
+            parsed = FinalImageQCSchema(**data)
+            ok = bool(
+                not parsed.has_background_text
+                and not parsed.has_shadow_artifacts
+                and not parsed.plain_white_background
+                and parsed.expected_text_present
+                and parsed.text_legible
+                and not parsed.has_overflow_or_clipping
+                and parsed.has_adequate_contrast
+                and not parsed.has_critical_visual_anomaly
+            )
             if not ok:
                 flags = [k for k in ('has_background_text', 'has_shadow_artifacts') if data.get(k)]
                 logger.warning(f"Final image QC rechazado: {', '.join(flags)}")

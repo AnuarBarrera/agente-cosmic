@@ -93,6 +93,12 @@ class BrandDNA(models.Model):
     common_hashtags = models.JSONField(default=list)
     product_photo_analysis = models.TextField(blank=True, default='')
     product_category = models.CharField(max_length=100, blank=True, default='')
+    # Perfil de hechos confirmados para validación de afirmaciones (Claim Guard)
+    # Estructura: confirmed_offerings, confirmed_materials, confirmed_capabilities,
+    # confirmed_commercial_terms, confirmed_service_area, confirmed_certifications,
+    # allowed_moderate_claims, differentiating_terms, unknowns_requiring_confirmation,
+    # source_fragments
+    brand_fact_profile = models.JSONField(default=dict, blank=True)
     # Nombres de campo (de _BRAND_DNA_EDITABLE_FIELDS en views.py) que el usuario ya
     # revisó y aprobó explícitamente. Editar o reanalizar un campo lo quita de esta
     # lista automáticamente — el resto de los campos conserva su estado. Se usa para
