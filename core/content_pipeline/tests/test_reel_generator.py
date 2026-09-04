@@ -745,6 +745,35 @@ class TestGenerateFromProductPhotoReel:
 
 
 class TestFinalVideoQC:
+    def test_contact_sheet_allows_expected_overlay_text(self):
+        from unittest.mock import mock_open
+        from core.content_pipeline.generators.reel_generator import ReelGenerator
+        gen = ReelGenerator(bucket_name='test-bucket')
+        response = MagicMock()
+        response.text = json.dumps({
+            'has_unexpected_or_garbled_text': False,
+            'has_malformed_object': False,
+            'has_unrealistic_grounding': False,
+            'has_suggestive_or_exposed_content': False,
+            'has_black_or_broken_frame': False,
+            'continuity_ok': True,
+            'reason': '',
+            'ok': True,
+        })
+        with patch('core.content_pipeline.generators.reel_generator.tempfile.TemporaryDirectory') as tmp, \
+             patch('builtins.open', mock_open(read_data=b'contact-sheet')), \
+             patch('core.content_pipeline.generators.reel_generator.subprocess.run'), \
+             patch('core.content_pipeline.generators.reel_generator._vertex_client') as client:
+            tmp.return_value.__enter__.return_value = '/tmp/qc'
+            client.return_value.models.generate_content.return_value = response
+            accepted = gen._validate_video_contact_sheet(
+                b'video', 18.0, ['Tu esencia', 'Diseña tu prenda'],
+            )
+
+        assert accepted is True
+        prompt = client.return_value.models.generate_content.call_args.kwargs['contents'][1]
+        assert 'Tu esencia' in prompt
+
     def test_rejects_missing_audio_when_narration_exists(self):
         from core.content_pipeline.generators.reel_generator import ReelGenerator
         gen = ReelGenerator(bucket_name='test-bucket')

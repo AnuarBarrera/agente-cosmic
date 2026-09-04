@@ -325,7 +325,8 @@ class ImageGenerator:
 
     def _upload_photo_post(self, background_bytes: bytes, caption: str, colors: list[str], tone: str,
                             description: str, keywords: list[str], business_url: str, filename: str,
-                            fact_profile: dict = None) -> tuple[str, str]:
+                            fact_profile: dict = None,
+                            source_is_preserved: bool = False) -> tuple[str, str]:
         """Sube el fondo (foto real ya editada/validada por nano banana) y,
         si el overlay de texto se puede componer con exito via
         _layered_pipeline, tambien la version final compuesta. Si el overlay
@@ -336,11 +337,15 @@ class ImageGenerator:
         background_url = self._upload_to_storage(background_bytes, f"{filename}-bg")
         font_seed = filename.rsplit('-day', 1)[0] if '-day' in filename else filename
         try:
+            layered_kwargs = (
+                {'source_is_preserved': True} if source_is_preserved else {}
+            )
             final_bytes = self._layered_pipeline(
                 caption, colors, tone, keywords or [], description,
                 business_url=business_url, font_seed=font_seed,
                 background_bytes=background_bytes,
                 fact_profile=fact_profile,
+                **layered_kwargs,
             )
             final_url = self._upload_to_storage(final_bytes, filename)
         except Exception as e:
@@ -483,7 +488,11 @@ class ImageGenerator:
             )
             if last_bytes is None:
                 raise ValueError("Ningun intento devolvio una imagen usable")
-            return self._upload_photo_post(last_bytes, caption, colors, tone, description, keywords, business_url, filename, fact_profile)
+            upload_kwargs = {'source_is_preserved': True} if usage_mode == 'preserve_only' else {}
+            return self._upload_photo_post(
+                last_bytes, caption, colors, tone, description, keywords,
+                business_url, filename, fact_profile, **upload_kwargs,
+            )
         except Exception as e:
             logger.error(f"ImageGenerator.generate_from_product_photo error: {e}")
             return '', ''
@@ -536,9 +545,10 @@ class ImageGenerator:
             )
             if last_bytes is None:
                 raise ValueError("Ningun intento devolvio una imagen usable")
+            upload_kwargs = {'source_is_preserved': True} if usage_mode == 'preserve_only' else {}
             return self._upload_photo_post(
                 last_bytes, caption, colors, tone, description, keywords,
-                business_url, filename, fact_profile,
+                business_url, filename, fact_profile, **upload_kwargs,
             )
         except Exception as e:
             logger.error(f"ImageGenerator.regenerate_with_reference error: {e}")
@@ -669,7 +679,7 @@ class ImageGenerator:
     # Layered pipeline
     # ------------------------------------------------------------------
 
-    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, font_seed: str = '', business_url: str = '', background_bytes: bytes = None, fact_profile: dict = None) -> bytes:
+    def _layered_pipeline(self, caption: str, colors: list[str], tone: str, keywords: list[str] = None, description: str = '', audience: str = '', max_qc_retries: int = 2, font_seed: str = '', business_url: str = '', background_bytes: bytes = None, fact_profile: dict = None, source_is_preserved: bool = False) -> bytes:
         if background_bytes is None:
             background_bytes = self._generate_background(caption, colors, tone, keywords or [], description, audience=audience, max_qc_retries=max_qc_retries)
         kw_str = ', '.join((keywords or [])[:4])
@@ -678,7 +688,9 @@ class ImageGenerator:
         final_bytes = self._render_html_template(
             background_bytes, content, colors, svg_overlay='', font_seed=font_seed,
         )
-        if settings.FINAL_MEDIA_QC_ENABLED and not self._validate_final_image(final_bytes, content):
+        if settings.FINAL_MEDIA_QC_ENABLED and not self._validate_final_image(
+            final_bytes, content, source_is_preserved=source_is_preserved,
+        ):
             logger.warning("Final image QC rechazó el overlay; usando fondo aprobado sin overlay")
             return background_bytes
         return final_bytes
@@ -1031,7 +1043,8 @@ class ImageGenerator:
             return False, 'comparative_qc_error'
 
     def _validate_final_image(self, image_bytes: bytes,
-                              expected_content: dict | None = None) -> bool:
+                              expected_content: dict | None = None,
+                              source_is_preserved: bool = False) -> bool:
         """QC del post renderizado final. Detecta problemas técnicos y calidad estética. Retorna True si es aceptable."""
         try:
             client = _vertex_text_client()
@@ -1070,8 +1083,8 @@ class ImageGenerator:
             parsed = FinalImageQCSchema(**data)
             ok = bool(
                 not parsed.has_background_text
-                and not parsed.has_shadow_artifacts
-                and not parsed.plain_white_background
+                and (source_is_preserved or not parsed.has_shadow_artifacts)
+                and (source_is_preserved or not parsed.plain_white_background)
                 and parsed.expected_text_present
                 and parsed.text_legible
                 and not parsed.has_overflow_or_clipping

@@ -109,6 +109,17 @@ class SceneQCSchema(BaseModel):
     ok: bool
 
 
+class FinalReelContactSheetQCSchema(BaseModel):
+    has_unexpected_or_garbled_text: bool
+    has_malformed_object: bool
+    has_unrealistic_grounding: bool
+    has_suggestive_or_exposed_content: bool
+    has_black_or_broken_frame: bool
+    continuity_ok: bool
+    reason: str = ''
+    ok: bool
+
+
 _font_cache: dict[int, ImageFont.FreeTypeFont] = {}
 
 
@@ -1263,7 +1274,7 @@ class ReelGenerator:
                 return f.read()
 
     def _validate_final_video(self, video_bytes: bytes, narration: bytes | None,
-                              subtitles: list) -> tuple[bool, str]:
+                              subtitles: list, script: dict | None = None) -> tuple[bool, str]:
         """Technical audiovisual gate run before upload; fail closed."""
         try:
             with tempfile.TemporaryDirectory() as tmp:
@@ -1297,15 +1308,22 @@ class ReelGenerator:
             moov, mdat = video_bytes.find(b'moov'), video_bytes.find(b'mdat')
             if moov < 0 or mdat < 0 or moov > mdat:
                 return False, 'missing_faststart'
-            if not self._validate_video_contact_sheet(video_bytes, duration):
+            expected_text = []
+            if script:
+                expected_text.extend([
+                    script.get('hook_text', ''), script.get('tag_cta', ''),
+                ])
+            expected_text.extend(item.get('text', '') for item in subtitles or [])
+            if not self._validate_video_contact_sheet(video_bytes, duration, expected_text):
                 return False, 'contact_sheet_rejected'
             return True, ''
         except Exception as exc:
             logger.warning(f"Final reel QC error: {exc}")
             return False, 'ffprobe_error'
 
-    def _validate_video_contact_sheet(self, video_bytes: bytes, duration: float) -> bool:
-        """Sample beginning/middle/end after assembly and reuse strict scene QC."""
+    def _validate_video_contact_sheet(self, video_bytes: bytes, duration: float,
+                                      expected_text: list[str] | None = None) -> bool:
+        """Audit assembled frames while allowing intentional overlay/subtitle text."""
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 video_path = os.path.join(tmp, 'final.mp4')
@@ -1320,7 +1338,41 @@ class ReelGenerator:
                 )
                 with open(sheet_path, 'rb') as handle:
                     sheet = handle.read()
-            return self._validate_scene_still(sheet)
+            client = _vertex_client()
+            image_part = types.Part.from_bytes(data=sheet, mime_type='image/png')
+            expected = [text for text in (expected_text or []) if text]
+            prompt = (
+                "Analyze this contact sheet from an assembled social-media reel. "
+                "The reel intentionally contains designed hook, CTA and subtitle overlays. "
+                f"Allowed expected text: {json.dumps(expected, ensure_ascii=False)[:1500]}. "
+                "Do not reject readable text merely because it exists. Reject only unexpected, "
+                "garbled or malformed text, impossible anatomy/products, implausible grounding, "
+                "suggestive content, black/broken frames, or critically incoherent continuity."
+            )
+            with track_external_api('gemini', operation='final_reel_contact_sheet_qc'):
+                response = client.models.generate_content(
+                    model=settings.VERTEX_TEXT_MODEL,
+                    contents=[image_part, prompt],
+                    config=types.GenerateContentConfig(
+                        labels=vertex_labels(), response_mime_type='application/json',
+                        response_schema=FinalReelContactSheetQCSchema,
+                        thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    ),
+                )
+            record_tokens(
+                response, operation='final_reel_contact_sheet_qc',
+                prompt_preview=prompt[:500],
+                response_preview=response.text[:500] if response.text else '',
+            )
+            result = FinalReelContactSheetQCSchema(**json.loads(response.text))
+            return bool(
+                not result.has_unexpected_or_garbled_text
+                and not result.has_malformed_object
+                and not result.has_unrealistic_grounding
+                and not result.has_suggestive_or_exposed_content
+                and not result.has_black_or_broken_frame
+                and result.continuity_ok
+            )
         except Exception as exc:
             logger.warning(f"Contact sheet QC error (rejecting): {exc}")
             return False
@@ -1356,7 +1408,9 @@ class ReelGenerator:
                 skip_hook_cta_overlay=has_branding,
             )
             if getattr(settings, 'FINAL_MEDIA_QC_ENABLED', False):
-                valid, reason = self._validate_final_video(final_video, narration, subtitles)
+                valid, reason = self._validate_final_video(
+                    final_video, narration, subtitles, script=script,
+                )
                 if not valid:
                     raise ValueError(f"Final reel QC rejected: {reason}")
             # HyperFrames eliminado (spec 2026-08-31): has_branding siempre False,
@@ -1405,7 +1459,9 @@ class ReelGenerator:
                 skip_hook_cta_overlay=has_branding,
             )
             if getattr(settings, 'FINAL_MEDIA_QC_ENABLED', False):
-                valid, reason = self._validate_final_video(final_video, narration, subtitles)
+                valid, reason = self._validate_final_video(
+                    final_video, narration, subtitles, script=script,
+                )
                 if not valid:
                     raise ValueError(f"Final reel QC rejected: {reason}")
             # HyperFrames eliminado: poster_offset siempre 1.0

@@ -1,4 +1,5 @@
 import io
+import json
 from unittest.mock import patch, MagicMock
 from django.test import override_settings
 from PIL import Image
@@ -907,6 +908,33 @@ class TestValidateFinalImage:
             mock_vc.return_value.models.generate_content.return_value = mock_resp
             result = gen._validate_final_image(_png_bytes())
         assert result is False
+
+    @override_settings(
+        GOOGLE_CLOUD_PROJECT='agente-cosmic',
+        GOOGLE_CLOUD_LOCATION='us-central1',
+        VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+    )
+    def test_preserved_reference_does_not_fail_on_source_aesthetics(self):
+        from core.content_pipeline.generators.image_generator import ImageGenerator
+        gen = ImageGenerator(bucket_name='test-bucket')
+        with patch("core.content_pipeline.generators.image_generator._vertex_text_client") as mock_vc:
+            mock_resp = MagicMock()
+            mock_resp.text = json.dumps({
+                'has_background_text': False,
+                'has_shadow_artifacts': True,
+                'plain_white_background': True,
+                'expected_text_present': True,
+                'text_legible': True,
+                'has_overflow_or_clipping': False,
+                'has_adequate_contrast': True,
+                'has_critical_visual_anomaly': False,
+                'ok': False,
+            })
+            mock_vc.return_value.models.generate_content.return_value = mock_resp
+            result = gen._validate_final_image(
+                _png_bytes(), source_is_preserved=True,
+            )
+        assert result is True
 
     @override_settings(
         GOOGLE_CLOUD_PROJECT='agente-cosmic',
