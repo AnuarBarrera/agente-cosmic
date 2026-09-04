@@ -152,48 +152,12 @@
       toAdd.forEach(function(file) {
         modalPhotoSeq += 1;
         var photoId = modalPhotoSeq;
-        modalSelectedPhotos.push({id: photoId, file: file, status: 'checking'});
+        // La revisión se hace después de subir la foto, dentro del triage
+        // completo; no bloqueamos ni gastamos una petición previa.
+        modalSelectedPhotos.push({id: photoId, file: file, status: 'ok'});
         renderModalPhotoThumbnails();
         renderModalPhotoCounter();
         updateModalContinueButtonState();
-
-        modalCompressImage(file).then(function(compressed) {
-          var fd = new FormData();
-          fd.append('csrfmiddlewaretoken', MODAL_CSRF);
-          fd.append('product_reference_photo', compressed);
-          var xhr = new XMLHttpRequest();
-          xhr.open('POST', '{% url "product_photo_precheck_api" %}');
-          xhr.onload = function() {
-            var entry = modalSelectedPhotos.find(function(p) { return p.id === photoId; });
-            if (!entry) return;
-            if (xhr.status !== 200) {
-              entry.status = 'skipped';
-              renderModalPhotoThumbnails();
-              updateModalContinueButtonState();
-              return;
-            }
-            var data;
-            try { data = JSON.parse(xhr.responseText); } catch (e) { data = {ok: true, skipped: true}; }
-            if (data.ok === false) {
-              entry.status = 'rejected';
-              entry.reason = data.reason || '';
-              var rejectedCount = modalSelectedPhotos.filter(function(p) { return p.status === 'rejected'; }).length;
-              setModalPrecheckStatus('warning', '⚠ Quitamos ' + rejectedCount + ' foto(s) porque no cumplen con las políticas de contenido.');
-              renderModalPhotoThumbnails();
-              renderModalPhotoCounter();
-            } else {
-              entry.status = 'ok';
-              renderModalPhotoThumbnails();
-            }
-            updateModalContinueButtonState();
-          };
-          xhr.onerror = function() {
-            var entry = modalSelectedPhotos.find(function(p) { return p.id === photoId; });
-            if (entry) { entry.status = 'skipped'; renderModalPhotoThumbnails(); }
-            updateModalContinueButtonState();
-          };
-          xhr.send(fd);
-        });
       });
     });
   }

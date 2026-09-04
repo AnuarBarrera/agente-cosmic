@@ -324,47 +324,12 @@
         toAdd.forEach(function(file) {
           photoSeq += 1;
           var photoId = photoSeq;
-          selectedPhotos.push({id: photoId, file: file, status: 'checking'});
+          // La revisión de marcas/copyright ocurre después de la carga, junto
+          // con el triage completo. Así no consumimos peticiones ni bloqueamos
+          // al usuario por un precheck ambiguo o agotado.
+          selectedPhotos.push({id: photoId, file: file, status: 'ok'});
           renderPhotoThumbnails();
           renderPhotoCounter();
-
-          compressImage(file).then(function(compressed) {
-            var fd = new FormData();
-            fd.append('csrfmiddlewaretoken', document.querySelector('#analyzeForm [name="csrfmiddlewaretoken"]').value);
-            fd.append('product_reference_photo', compressed);
-            var xhr = new XMLHttpRequest();
-            xhr.open('POST', '{% url "product_photo_precheck_api" %}');
-            xhr.onload = function() {
-              var entry = selectedPhotos.find(function(p) { return p.id === photoId; });
-              if (!entry) return; // el usuario ya la quito manualmente mientras el precheck corria
-              if (xhr.status !== 200) {
-                entry.status = 'skipped';
-                renderPhotoThumbnails();
-                return;
-              }
-              var data;
-              try { data = JSON.parse(xhr.responseText); } catch (e) { data = {ok: true, skipped: true}; }
-              if (data.ok === false) {
-                entry.status = 'rejected';
-                entry.reason = data.reason || '';
-                var rejectedCount = selectedPhotos.filter(function(p) { return p.status === 'rejected'; }).length;
-                setPrecheckStatus(
-                  'warning',
-                  '⚠ Quitamos ' + rejectedCount + ' foto(s) porque no cumplen con las políticas de contenido — sube otra si quieres reemplazarlas.',
-                );
-                renderPhotoThumbnails();
-                renderPhotoCounter();
-              } else {
-                entry.status = 'ok';
-                renderPhotoThumbnails();
-              }
-            };
-            xhr.onerror = function() {
-              var entry = selectedPhotos.find(function(p) { return p.id === photoId; });
-              if (entry) { entry.status = 'skipped'; renderPhotoThumbnails(); }
-            };
-            xhr.send(fd);
-          });
         });
       });
     }

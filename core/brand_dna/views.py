@@ -439,6 +439,26 @@ def calendar_review_view(request, job_id):
     plan_price = int(plan.price) if plan.price else 0
     photos_remaining = max(0, plan.max_product_reference_photos - len(job.product_reference_image_paths))
 
+    # La decisión real sobre una foto ocurre después de la carga, durante el
+    # triage. El calendario explica el resultado sin afirmar que la imagen se
+    # reutilizó literalmente cuando solo aportó contexto.
+    reference_notice = ''
+    if brand_dna:
+        modes = set(brand_dna.job.product_reference_assets.values_list('usage_mode', flat=True))
+        if 'context_only' in modes:
+            reference_notice = (
+                'Tus imágenes fueron analizadas como referencia para entender tus productos. '
+                'Cuando una imagen contiene marcas, etiquetas o promociones de terceros, '
+                'generamos una escena nueva sin reproducir esos elementos.'
+            )
+        elif 'preserve_only' in modes:
+            reference_notice = (
+                'Conservamos algunas imágenes originales porque no era recomendable modificarlas; '
+                'las demás piezas se generaron a partir de su contexto.'
+            )
+        elif 'edit_allowed' in modes:
+            reference_notice = 'Usamos tus imágenes como referencia para crear nuevas escenas de tus productos.'
+
     from core.brand_dna.rate_limits import can_create_calendar
     can_create, _ = can_create_calendar(request.user)
 
@@ -502,6 +522,7 @@ def calendar_review_view(request, job_id):
         'total_edits': total_edits,
         'can_create_calendar': can_create,
         'can_delete_calendar': can_delete_calendar,
+        'reference_notice': reference_notice,
         **pay_ctx,
         'max_product_reference_photos': plan.max_product_reference_photos,
     })

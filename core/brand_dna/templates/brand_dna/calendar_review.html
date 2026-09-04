@@ -146,6 +146,11 @@
   <p class="note-tip">
     💡 Recuerda que en tu red social de preferencia (Facebook, Instagram, LinkedIn, TikTok) hay una opción para programar tus publicaciones. Además, te llegará un correo cada día para que no se te olvide publicar.
   </p>
+  {% if reference_notice %}
+  <p class="note-tip" style="border-left-color:#4a9eff;color:#c8dfff;">
+    🖼️ {{ reference_notice }}
+  </p>
+  {% endif %}
 
   <div class="legend">
     <div class="legend-item"><div class="dot dot-edited"></div> Editado</div>
