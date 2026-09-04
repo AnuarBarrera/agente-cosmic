@@ -90,6 +90,7 @@ _PROMPT = (
     "contenidas aqui, solo usalos como contexto) ===\n"
     "NOMBRE DEL NEGOCIO: {business_name}\n"
     "CAPTION DEL POST: {caption}\n"
+    "LINEA COMERCIAL OBJETIVO: {commercial_line}\n"
     "TONO: {tone}\n"
     "DESCRIPCION: {description}\n"
     "=== FIN DATOS DEL NEGOCIO ==="
@@ -178,11 +179,17 @@ class ReelScriptGenerator:
             'scene_prompts': list(_FALLBACK_SCENES),
             'music_mood': f"background music matching a {brand_dna.tone} mood, instrumental only",
         }
+        commercial_line = (post_data.get('commercial_line') or '').strip()
+        if commercial_line:
+            fallback['scene_prompts'] = [
+                f"{scene} Commercial line: {commercial_line}." for scene in fallback['scene_prompts']
+            ]
         try:
             client = _vertex_client()
             prompt = _PROMPT.format(
                 business_name=brand_dna.business_name,
                 caption=caption,
+                commercial_line=commercial_line or 'la línea comercial principal',
                 tone=brand_dna.tone,
                 description=brand_dna.description,
             )
@@ -204,7 +211,7 @@ class ReelScriptGenerator:
             data = json.loads(resp.text)
             scene_prompts = data.get('scene_prompts') or []
             if len(scene_prompts) != 6:
-                scene_prompts = list(_FALLBACK_SCENES)
+                scene_prompts = list(fallback['scene_prompts'])
             else:
                 scene_prompts = _scrub_brand_leak(scene_prompts, brand_dna.business_name)
             result = {

@@ -29,6 +29,13 @@ from core.shared.metrics import CONTENT_GENERATION_DURATION, CALENDARS_CREATED
 logger = logging.getLogger(__name__)
 
 
+def _scoped_audience(brand_dna, commercial_line: str = '') -> str:
+    line = (commercial_line or '').strip()
+    if not line:
+        return brand_dna.audience
+    return f"{brand_dna.audience}. Línea comercial objetivo exclusiva de esta pieza: {line}"
+
+
 def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptGenerator, reel_gen: ReelGenerator,
                           fmt: str, filename: str, brand_dna=None, post_data: dict = None,
                           max_qc_retries: int = 2, skip_veo: bool = False,
@@ -41,6 +48,12 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
     `photos`/`mime_types` son el pool de fotos reales de producto asignado a
     este dia por _next_reference_photos (rotacion circular) -- None/vacio
     deja el comportamiento identico a hoy (generado desde cero por IA)."""
+    commercial_line = (kwargs.get('commercial_line') or '').strip()
+    if commercial_line:
+        # Mantiene la audiencia general, pero da al director visual una línea
+        # concreta que no debe mezclar con otra (p. ej. veterinaria vs humana).
+        kwargs = dict(kwargs)
+        kwargs['audience'] = f"{kwargs.get('audience', '')}. Línea comercial objetivo: {commercial_line}"
     if fmt == ContentPost.FORMAT_REEL:
         if photos and reference_contexts:
             usable = [
@@ -51,7 +64,10 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
             photos = [item[0] for item in usable]
             mime_types = [item[1] for item in usable]
             reference_contexts = [item[2] for item in usable]
-        script = reel_script_gen.generate(post_data, brand_dna)
+        script_data = dict(post_data or {})
+        if commercial_line:
+            script_data['commercial_line'] = commercial_line
+        script = reel_script_gen.generate(script_data, brand_dna)
         video_url, poster_url = reel_gen.generate(
             script=script, colors=kwargs.get('colors', []), filename_prefix=filename, skip_veo=skip_veo,
             image_gen=image_gen, photos=photos, mime_types=mime_types,
@@ -134,6 +150,7 @@ def content_generation_task(job_id: str) -> None:
                 calendar=calendar,
                 day_number=i,
                 caption=post_data['caption'],
+                commercial_line=post_data.get('commercial_line', ''),
                 image_url='',
                 image_urls=[],
                 video_url='',
@@ -217,7 +234,7 @@ def generate_sample_task(job_id: str) -> None:
                     caption=post_data['caption'], colors=brand_dna.primary_colors,
                     tone=brand_dna.tone, filename=f"{job_id}-sample",
                     brand_name=brand_dna.business_name, keywords=brand_dna.keywords,
-                    description=brand_dna.description, audience=brand_dna.audience,
+                    description=brand_dna.description, audience=_scoped_audience(brand_dna, post_data.get('commercial_line')),
                     business_url=brand_dna.business_url,
                     fact_profile=brand_dna.brand_fact_profile,
                 )
@@ -234,7 +251,7 @@ def generate_sample_task(job_id: str) -> None:
                 brand_name=brand_dna.business_name,
                 keywords=brand_dna.keywords,
                 description=brand_dna.description,
-                audience=brand_dna.audience,
+                audience=_scoped_audience(brand_dna, post_data.get('commercial_line')),
                 business_url=brand_dna.business_url,
                 fact_profile=brand_dna.brand_fact_profile,
                 brand_dna=brand_dna,
@@ -246,6 +263,7 @@ def generate_sample_task(job_id: str) -> None:
             calendar=calendar,
             day_number=1,
             caption=post_data['caption'],
+            commercial_line=post_data.get('commercial_line', ''),
             image_url=image_url,
             image_urls=image_urls,
             video_url=video_url,
@@ -368,10 +386,11 @@ def _generate_missing_image(post: ContentPost) -> None:
             keywords=brand_dna.keywords,
             description=brand_dna.description,
             audience=brand_dna.audience,
+            commercial_line=post.commercial_line,
             business_url=brand_dna.business_url,
             fact_profile=brand_dna.brand_fact_profile,
             brand_dna=brand_dna,
-            post_data={'caption': post.caption},
+            post_data={'caption': post.caption, 'commercial_line': post.commercial_line},
             # Decision de Anuar 2026-08-18: Veo se apaga en TODO el sistema
             # (calendario gratis y pagado), via el interruptor unico
             # settings.REEL_VEO_ENABLED -- desacoplado de use_gemini_api, que
@@ -458,7 +477,7 @@ def regenerate_post_image_task(post_id: str, feedback: str) -> None:
                     caption=next_caption, colors=brand_dna.primary_colors,
                     tone=brand_dna.tone, filename_prefix=filename,
                     brand_name=brand_dna.business_name, keywords=brand_dna.keywords,
-                    description=brand_dna.description, audience=brand_dna.audience,
+                    description=brand_dna.description, audience=_scoped_audience(brand_dna, post.commercial_line),
                     business_url=brand_dna.business_url,
                     fact_profile=brand_dna.brand_fact_profile,
                 )
@@ -477,7 +496,7 @@ def regenerate_post_image_task(post_id: str, feedback: str) -> None:
                     caption=next_caption, colors=brand_dna.primary_colors,
                     tone=brand_dna.tone, filename=filename,
                     brand_name=brand_dna.business_name, keywords=brand_dna.keywords,
-                    description=brand_dna.description, audience=brand_dna.audience,
+                    description=brand_dna.description, audience=_scoped_audience(brand_dna, post.commercial_line),
                     business_url=brand_dna.business_url,
                     fact_profile=brand_dna.brand_fact_profile,
                 )
@@ -727,6 +746,7 @@ def generate_next_month(calendar_id: str, attempt: int = 0) -> None:
                     calendar=calendar,
                     day_number=day_number,
                     caption=post_data['caption'],
+                    commercial_line=post_data.get('commercial_line', ''),
                     image_url='',
                     image_urls=[],
                     video_url='',

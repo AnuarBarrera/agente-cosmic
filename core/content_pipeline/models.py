@@ -44,6 +44,10 @@ class ContentPost(models.Model):
     calendar = models.ForeignKey(ContentCalendar, on_delete=models.CASCADE, related_name='posts')
     day_number = models.IntegerField()
     caption = models.TextField()
+    # Línea comercial objetivo de esta pieza (p. ej. "medicina veterinaria" o
+    # "salud humana"). Se conserva para que la generación visual asíncrona y
+    # las regeneraciones mantengan la misma audiencia que el caption.
+    commercial_line = models.CharField(max_length=255, blank=True, default='')
     image_url = models.URLField(max_length=1000)
     # Carrusel (H20 + roadmap #5): lista ordenada de URLs de slides, vacia para posts
     # normales. image_url sigue siendo la portada/slide 1 para retrocompatibilidad

@@ -58,12 +58,18 @@ _PROMPT = (
     "MARCA: {business_name}\n"
     "DESCRIPCION: {description}\n"
     "AUDIENCIA: {audience}\n"
+    "LINEAS COMERCIALES: {commercial_lines}\n"
     "TONO: {tone}\n"
     "KEYWORDS: {keywords}\n"
     "ESTILO DE POSTS PREVIOS: {posting_style}\n"
     "HASHTAGS COMUNES: {hashtags}\n"
     "=== FIN DATOS DE LA MARCA ===\n\n"
     "Genera un array de 7 posts EN EL MISMO ORDEN que los pilares de arriba. Cada caption "
+    "debe pertenecer a UNA SOLA línea comercial. Si la marca atiende varias líneas, reparte "
+    "los posts entre ellas de forma equilibrada y devuelve en commercial_line el nombre breve "
+    "de la línea usada en cada post. El caption, la audiencia mencionada y la escena visual "
+    "deben ser coherentes con esa línea; nunca mezcles medicina humana y veterinaria en la misma "
+    "pieza. Si no hay varias líneas, usa una cadena vacía. "
     "tiene maximo {avg_length} caracteres. Los horarios sugeridos deben variar entre "
     "09:00, 12:00, 17:00 y 19:00."
 )
@@ -73,6 +79,7 @@ class GeneratedPostSchema(BaseModel):
     caption: str = Field(description="Texto del post")
     hashtags: list[str] = Field(description="3 hashtags")
     suggested_time: str = Field(description="Horario sugerido en formato HH:MM")
+    commercial_line: str = Field(default='', description="Una sola línea comercial objetivo de esta pieza")
 
 
 def _normalize_hashtags(hashtags: list[str]) -> list[str]:
@@ -181,6 +188,7 @@ class TextGenerator:
         client = _vertex_client()
         fact_profile = brand_dna.brand_fact_profile or {}
         commercial_terms = fact_profile.get('confirmed_commercial_terms') or []
+        commercial_lines = fact_profile.get('confirmed_offerings') or commercial_terms
         prompt = _PROMPT.format(
             business_name=brand_dna.business_name,
             description=brand_dna.description,
@@ -189,6 +197,7 @@ class TextGenerator:
             keywords=', '.join(brand_dna.keywords or []),
             posting_style=brand_dna.posting_style or 'No disponible',
             hashtags=', '.join(brand_dna.common_hashtags or []),
+            commercial_lines='; '.join(commercial_lines[:8]) or 'Una sola línea comercial general',
             avg_length=brand_dna.avg_caption_length,
             pillars_block=_pillars_block(bool(commercial_terms)),
         )
