@@ -53,6 +53,7 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
         # Mantiene la audiencia general, pero da al director visual una línea
         # concreta que no debe mezclar con otra (p. ej. veterinaria vs humana).
         kwargs = dict(kwargs)
+        kwargs.pop('commercial_line', None)
         kwargs['audience'] = f"{kwargs.get('audience', '')}. Línea comercial objetivo: {commercial_line}"
     if fmt == ContentPost.FORMAT_REEL:
         if photos and reference_contexts:
