@@ -93,6 +93,7 @@ class FinalImageQCSchema(BaseModel):
     has_overflow_or_clipping: bool = False
     has_adequate_contrast: bool = True
     has_critical_visual_anomaly: bool = False
+    primary_subject_too_small: bool = False
     ok: bool
 
 
@@ -400,13 +401,27 @@ class ImageGenerator:
     @staticmethod
     def _safe_reference_fallback(original_bytes: bytes | None,
                                  aspect_ratio: str = '1:1') -> bytes | None:
-        """Compose a fallback using only the uploaded reference pixels."""
+        """Compose a useful fallback using only the uploaded reference pixels.
+
+        ``thumbnail`` never enlarges a low-resolution upload.  That previously
+        left small references occupying only a few percent of the canvas, which
+        passed technical QC but was unusable as an ad.  Deterministic resizing
+        is safe for ``preserve_only``: it changes neither product identity nor
+        content, and gives the reference enough visual weight for the format.
+        """
         if not original_bytes:
             return None
         try:
             source = Image.open(io.BytesIO(original_bytes)).convert('RGB')
             width, height = (1080, 1920) if aspect_ratio == '9:16' else (1080, 1080)
-            source.thumbnail((width, height), Image.Resampling.LANCZOS)
+            max_width = int(width * (0.88 if aspect_ratio == '9:16' else 0.82))
+            max_height = int(height * (0.60 if aspect_ratio == '9:16' else 0.62))
+            scale = min(max_width / source.width, max_height / source.height)
+            resized = (
+                max(1, round(source.width * scale)),
+                max(1, round(source.height * scale)),
+            )
+            source = source.resize(resized, Image.Resampling.LANCZOS)
             canvas = Image.new('RGB', (width, height), '#f4f4f4')
             canvas.paste(source, ((width - source.width) // 2, (height - source.height) // 2))
             output = io.BytesIO()
@@ -1062,8 +1077,10 @@ class ImageGenerator:
                 "A professional advertising image must have an interesting background, not a plain studio backdrop.\n"
                 "expected_text_present/text_legible/has_overflow_or_clipping/has_adequate_contrast: inspect the designed overlay.\n"
                 "has_critical_visual_anomaly: true for impossible anatomy or severely malformed products.\n"
+                "primary_subject_too_small: true if the main product/photo is visually tiny or occupies less "
+                "than roughly one quarter of the canvas, leaving excessive empty space.\n"
                 "ok: true ONLY when expected text is present, legible, unclipped and contrasted, and there are no "
-                "background text, shadow artifacts, plain backdrop, or critical visual anomalies."
+                "background text, shadow artifacts, plain backdrop, critical visual anomalies, or undersized subject."
             )
             with track_external_api('gemini', operation='image_qc'):
                 resp = client.models.generate_content(
@@ -1090,6 +1107,7 @@ class ImageGenerator:
                 and not parsed.has_overflow_or_clipping
                 and parsed.has_adequate_contrast
                 and not parsed.has_critical_visual_anomaly
+                and not parsed.primary_subject_too_small
             )
             if not ok:
                 flags = [k for k in ('has_background_text', 'has_shadow_artifacts') if data.get(k)]

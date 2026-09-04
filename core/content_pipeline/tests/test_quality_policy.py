@@ -38,6 +38,16 @@ def test_safe_reference_fallback_uses_original_pixels_in_square_canvas():
     assert image.getpixel((540, 540)) == (255, 0, 0)
 
 
+def test_safe_reference_fallback_enlarges_low_resolution_reference():
+    result = ImageGenerator._safe_reference_fallback(_png(width=80, height=40))
+    image = Image.open(BytesIO(result))
+    red_pixels = [
+        x for x in range(image.width)
+        if image.getpixel((x, image.height // 2)) == (255, 0, 0)
+    ]
+    assert len(red_pixels) >= 800
+
+
 @override_settings(COMPARATIVE_PRODUCT_QC_ENABLED=True)
 def test_rejected_second_photo_edit_returns_safe_fallback_not_rejected_result():
     gen = ImageGenerator('bucket')

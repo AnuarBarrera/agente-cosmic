@@ -115,6 +115,7 @@ class FinalReelContactSheetQCSchema(BaseModel):
     has_unrealistic_grounding: bool
     has_suggestive_or_exposed_content: bool
     has_black_or_broken_frame: bool
+    primary_subject_too_small: bool = False
     continuity_ok: bool
     reason: str = ''
     ok: bool
@@ -1347,7 +1348,8 @@ class ReelGenerator:
                 f"Allowed expected text: {json.dumps(expected, ensure_ascii=False)[:1500]}. "
                 "Do not reject readable text merely because it exists. Reject only unexpected, "
                 "garbled or malformed text, impossible anatomy/products, implausible grounding, "
-                "suggestive content, black/broken frames, or critically incoherent continuity."
+                "suggestive content, black/broken frames, a main subject that is tiny in most "
+                "frames (less than roughly one quarter of the frame), or critically incoherent continuity."
             )
             with track_external_api('gemini', operation='final_reel_contact_sheet_qc'):
                 response = client.models.generate_content(
@@ -1371,6 +1373,7 @@ class ReelGenerator:
                 and not result.has_unrealistic_grounding
                 and not result.has_suggestive_or_exposed_content
                 and not result.has_black_or_broken_frame
+                and not result.primary_subject_too_small
                 and result.continuity_ok
             )
         except Exception as exc:
