@@ -55,6 +55,10 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
         kwargs = dict(kwargs)
         kwargs.pop('commercial_line', None)
         kwargs['audience'] = f"{kwargs.get('audience', '')}. Línea comercial objetivo: {commercial_line}"
+        kwargs['description'] = (
+            f"LÍNEA COMERCIAL EXCLUSIVA DE ESTA PIEZA: {commercial_line}. "
+            f"NO mezclar ni mencionar otras líneas comerciales. {kwargs.get('description', '')}"
+        )
     if fmt == ContentPost.FORMAT_REEL:
         if photos and reference_contexts:
             usable = [
