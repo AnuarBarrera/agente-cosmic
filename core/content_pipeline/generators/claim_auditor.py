@@ -33,7 +33,11 @@ _UNSUPPORTED_OUTCOME = re.compile(
 )
 _ENVIRONMENTAL_NUMBER = re.compile(
     r'(?:\b\d+(?:[.,]\d+)?\s*(?:%|kg|toneladas?|litros?|co2)\b.{0,55}\b(?:recicla|ambient|residuo|emision|sostenib)|'
-    r'\b(?:recicla|ambient|residuo|emision|sostenib)\w*.{0,55}\b\d+(?:[.,]\d+)?)', re.I,
+    r'\b(?:recicla|ambient|residuo|emision|sostenib)\w*.{0,55}\b\d+(?:[.,]\d+)?|'
+    # Las cantidades vagas escritas con palabras siguen siendo cifras externas.
+    # Ejemplo real: "consume miles de litros de agua".
+    r'\b(?:decenas?|cientos?|miles?|millones?)\s+de\s+'
+    r'(?:litros?|kilos?|kilogramos?|toneladas?)\b)', re.I,
 )
 _MODERATE = re.compile(r'\b(resistente|durader[oa]s?|c[oó]mod[oa]s?|sostenible|ecol[oó]gic[oa]s?)\b', re.I)
 _SPECIFIC_QUALIFIERS = (

@@ -7,6 +7,7 @@ from core.brand_dna.models import ProductReferenceAsset
 def test_relationship_inference_uses_business_context():
     assert infer_commercial_relationship('Somos una comercializadora veterinaria') == 'reseller'
     assert infer_commercial_relationship('Elaboramos prendas hechas a mano') == 'maker'
+    assert infer_commercial_relationship('Confecciono prendas recicladas para mascotas') == 'maker'
     assert infer_commercial_relationship('Productos para mascotas') == 'unknown'
 
 

@@ -37,7 +37,11 @@ def infer_commercial_relationship(description: str) -> str:
     normalized = (description or '').lower()
     if any(term in normalized for term in ('comercializ', 'distribu', 'reventa', 'revende')):
         return ProductReferenceAsset.RELATIONSHIP_RESELLER
-    if any(term in normalized for term in ('fabricamos', 'fabricante', 'diseñamos', 'elaboramos', 'hecho a mano')):
+    if any(term in normalized for term in (
+        'fabricamos', 'fabricante', 'diseñamos', 'elaboramos', 'hecho a mano',
+        # Incluye conjugaciones como confecciono, confecciona y confeccionamos.
+        'confeccion',
+    )):
         return ProductReferenceAsset.RELATIONSHIP_MAKER
     if any(term in normalized for term in ('servicio', 'consultoría', 'consultoria', 'asesoría', 'asesoria')):
         return ProductReferenceAsset.RELATIONSHIP_SERVICE

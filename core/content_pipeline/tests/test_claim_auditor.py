@@ -33,6 +33,16 @@ def test_rejects_unconfirmed_shipping_and_certification():
     assert all(item['decision'] == 'needs_confirmation' for item in findings)
 
 
+def test_rejects_environmental_quantity_written_with_words():
+    findings = audit_claims(
+        'Producir mezclilla consume miles de litros de agua.', {},
+    )
+
+    assert len(findings) == 1
+    assert findings[0]['category'] == 'environmental_metrics'
+    assert findings[0]['decision'] == 'needs_confirmation'
+
+
 def test_moderate_claim_is_softened_when_not_explicitly_allowed():
     findings = audit_claims('Una opción duradera para tu hogar.', {})
 
