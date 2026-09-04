@@ -30,6 +30,10 @@ _ENVIRONMENTAL_NUMBER = re.compile(
     r'\b(?:recicla|ambient|residuo|emision|sostenib)\w*.{0,55}\b\d+(?:[.,]\d+)?)', re.I,
 )
 _MODERATE = re.compile(r'\b(resistente|durader[oa]s?|c[oó]mod[oa]s?|sostenible|ecol[oó]gic[oa]s?)\b', re.I)
+_SPECIFIC_QUALIFIERS = (
+    'este mes', 'esta semana', 'solo hoy', 'por tiempo limitado',
+    'nacional', 'todo mexico', 'todo el pais', 'cualquier ciudad',
+)
 
 
 def _normalize(value: str) -> str:
@@ -46,9 +50,19 @@ def _supported(fragment: str, evidence: list[str], pattern: re.Pattern) -> str:
     """Devuelve evidencia relevante; evita que una fuente irrelevante avale el claim."""
     normalized_fragment = _normalize(fragment)
     tokens = {t for t in re.findall(r'\w+', normalized_fragment) if len(t) >= 3 or t.isdigit()}
+    fragment_numbers = set(re.findall(r'\d+(?:[.,]\d+)?', normalized_fragment))
+    required_qualifiers = {
+        qualifier for qualifier in _SPECIFIC_QUALIFIERS
+        if qualifier in normalized_fragment
+    }
     for item in evidence:
         normalized_item = _normalize(item)
         if not pattern.search(item):
+            continue
+        evidence_numbers = set(re.findall(r'\d+(?:[.,]\d+)?', normalized_item))
+        if fragment_numbers and not fragment_numbers.issubset(evidence_numbers):
+            continue
+        if any(qualifier not in normalized_item for qualifier in required_qualifiers):
             continue
         evidence_tokens = {t for t in re.findall(r'\w+', normalized_item) if len(t) >= 3 or t.isdigit()}
         if tokens & evidence_tokens:

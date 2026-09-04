@@ -178,6 +178,7 @@ REEL_TEXT_OVERLAY_ENGINE = get_env('REEL_TEXT_OVERLAY_ENGINE', default='drawtext
 # BigQuery, ver consolidado.md). El codigo de Veo se queda intacto para poder
 # reactivarlo cambiando solo esta variable de entorno, sin tocar codigo.
 REEL_VEO_ENABLED = get_env('REEL_VEO_ENABLED', default='False', cast=bool)
+PHOTO_ASSET_TRIAGE_ENABLED = get_env('PHOTO_ASSET_TRIAGE_ENABLED', default='False', cast=bool)
 COMPARATIVE_PRODUCT_QC_ENABLED = get_env('COMPARATIVE_PRODUCT_QC_ENABLED', default='False', cast=bool)
 ASYNC_FULL_REGEN_ENABLED = get_env('ASYNC_FULL_REGEN_ENABLED', default='True', cast=bool)
 FINAL_MEDIA_QC_ENABLED = get_env('FINAL_MEDIA_QC_ENABLED', default='False', cast=bool)

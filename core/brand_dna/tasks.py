@@ -12,6 +12,7 @@ from core.brand_dna.extractors.product_photo_triage import (
     ProductPhotoTriageAnalyzer, TRIAGE_VERSION, risk_flags_from,
 )
 from core.brand_dna.reference_assets import reference_assets_for, reference_paths_for
+from core.brand_dna.fact_profile import build_brand_fact_profile
 from core.content_pipeline.audit import GenerationContext
 from core.content_pipeline.image_utils import normalize_image
 from core.shared.metrics import ANALYSIS_JOBS_TOTAL, ANALYSIS_DURATION
@@ -133,6 +134,9 @@ def analyze_brand_task(job_id: str) -> None:
             logo_elements=logo_data.get('logo_elements', ''),
             product_photo_analysis=product_photo_data.get('description', ''),
             product_category=product_photo_data.get('category', ''),
+            brand_fact_profile=build_brand_fact_profile(
+                job.business_description, keywords=web_data.get('keywords', []),
+            ),
         )
         job.update_progress(AnalysisJob.STAGE_CONTENT, 78)
 

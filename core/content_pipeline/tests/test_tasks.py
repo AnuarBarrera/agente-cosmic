@@ -5,7 +5,7 @@ from rq.job import Job, Dependency
 from django.test import override_settings
 from django.utils import timezone
 from datetime import timedelta
-from core.brand_dna.models import AnalysisJob, BrandDNA
+from core.brand_dna.models import AnalysisJob, BrandDNA, ProductReferenceAsset
 from core.content_pipeline.models import ContentCalendar, ContentPost
 
 pytestmark = pytest.mark.django_db
@@ -879,6 +879,52 @@ def test_regenerate_post_image_task_updates_image_and_clears_flag(calendar_with_
     post.refresh_from_db()
     assert post.image_url == 'https://storage.test/new.png'
     assert post.product_photo_background_url == 'https://storage.test/new-bg.png'
+    assert post.regen_count == 1
+    assert post.regenerating is False
+
+
+def test_regenerate_post_text_only_does_not_touch_media(calendar_with_dna):
+    from core.content_pipeline.tasks import regenerate_post_image_task
+    post = _make_post(
+        calendar_with_dna, 1,
+        image_url='https://storage.googleapis.com/test-bucket/posts/old.png',
+    )
+    post.regenerating = True
+    post.save(update_fields=['regenerating'])
+
+    with patch('core.brand_dna.views._regenerate_caption', return_value='Caption corregido'), \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
+        regenerate_post_image_task(str(post.id), 'corrige el texto')
+
+    MockImage.assert_not_called()
+    post.refresh_from_db()
+    assert post.caption == 'Caption corregido'
+    assert post.image_url == 'https://storage.googleapis.com/test-bucket/posts/old.png'
+    assert post.regen_count == 1
+    assert post.regenerating is False
+
+
+def test_regenerate_carousel_keeps_carousel_shape(calendar_with_dna):
+    from core.content_pipeline.tasks import regenerate_post_image_task
+    post = _make_post(
+        calendar_with_dna, 3, format='carousel',
+        image_url='https://storage.googleapis.com/test-bucket/posts/old-slide1.png',
+    )
+    post.image_urls = [post.image_url, 'https://storage.googleapis.com/test-bucket/posts/old-slide2.png']
+    post.regenerating = True
+    post.save(update_fields=['image_urls', 'regenerating'])
+    new_urls = ['https://storage.test/new-slide1.png', 'https://storage.test/new-slide2.png']
+
+    with patch('core.content_pipeline.tasks._next_reference_media', return_value=([], [], None)), \
+         patch('core.content_pipeline.tasks.ImageGenerator') as MockImage:
+        MockImage.return_value.generate_carousel.return_value = new_urls
+        regenerate_post_image_task(str(post.id), 'cambiar imagen')
+
+    post.refresh_from_db()
+    assert post.format == 'carousel'
+    assert post.image_url == new_urls[0]
+    assert post.image_urls == new_urls
+    assert post.regen_count == 1
     assert post.regenerating is False
 
 
@@ -1808,6 +1854,31 @@ def test_send_reactivation_emails_task_skips_calendar_for_tester_and_admin_plans
 
 
 class TestNextReferencePhotos:
+    @override_settings(PHOTO_ASSET_TRIAGE_ENABLED=True)
+    def test_triaged_asset_returns_its_policy_context(self, calendar_with_dna):
+        from core.content_pipeline.tasks import _next_reference_media
+        job = calendar_with_dna.brand_dna.job
+        asset = ProductReferenceAsset.objects.create(
+            job=job, position=0, storage_path='uploads/asset.jpg', sha256='a' * 64,
+            mime_type='image/jpeg', analysis_description='Collar tejido azul',
+            product_category='collar', commercial_relationship='maker',
+            usage_mode='edit_allowed', triage_status='complete',
+        )
+        with patch('core.content_pipeline.tasks.upload_exists', return_value=True), \
+             patch('core.content_pipeline.tasks.read_upload', return_value=b'photo-a'):
+            photos, mime_types, contexts = _next_reference_media(job, day_number=1, count=1)
+
+        assert photos == [b'photo-a']
+        assert mime_types == ['image/jpeg']
+        assert contexts == [{
+            'asset_id': str(asset.id),
+            'analysis_description': 'Collar tejido azul',
+            'product_category': 'collar',
+            'commercial_relationship': 'maker',
+            'usage_mode': 'edit_allowed',
+            'risk_flags': {},
+        }]
+
     def test_empty_pool_returns_empty_list(self, calendar_with_dna):
         from core.content_pipeline.tasks import _next_reference_photos
         job = calendar_with_dna.brand_dna.job

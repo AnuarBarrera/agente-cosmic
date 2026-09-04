@@ -183,6 +183,7 @@ def analyze_submit(request):
             })
 
     product_reference_paths = []
+    product_reference_uploads = []
     max_product_photos = get_user_plan(request.user).max_product_reference_photos
     for photo_file in request.FILES.getlist('product_reference_photo')[:max_product_photos]:
         photo_bytes = photo_file.read()
@@ -198,6 +199,7 @@ def analyze_submit(request):
                 'error': 'No pudimos subir una de tus fotos de producto. Intenta de nuevo en unos minutos.',
             })
         product_reference_paths.append(photo_path)
+        product_reference_uploads.append((photo_path, photo_bytes))
 
     job = AnalysisJob.objects.create(
         id=job_id,
@@ -209,6 +211,10 @@ def analyze_submit(request):
         logo_file_path=logo_path,
         product_reference_image_paths=product_reference_paths,
     )
+
+    from core.brand_dna.reference_assets import create_reference_asset
+    for position, (photo_path, photo_bytes) in enumerate(product_reference_uploads):
+        create_reference_asset(job, photo_path, photo_bytes, position)
 
     from core.brand_dna.tasks import analyze_brand_task
     django_rq.enqueue(analyze_brand_task, str(job.id))
@@ -288,6 +294,15 @@ def add_product_photos_api(request, job_id):
 
     job.product_reference_image_paths = existing + new_paths
     job.save(update_fields=['product_reference_image_paths'])
+    from core.brand_dna.reference_assets import create_reference_asset
+    new_asset_ids = []
+    for offset, ((photo_bytes, _filename), photo_path) in enumerate(zip(photos_bytes, new_paths)):
+        asset, created = create_reference_asset(job, photo_path, photo_bytes, len(existing) + offset)
+        if created:
+            new_asset_ids.append(str(asset.id))
+    if new_asset_ids and getattr(settings, 'PHOTO_ASSET_TRIAGE_ENABLED', False):
+        from core.brand_dna.tasks import triage_reference_assets_task
+        django_rq.enqueue(triage_reference_assets_task, str(job.id), new_asset_ids)
     return JsonResponse({
         'ok': True, 'added': len(new_paths),
         'remaining': max(0, plan.max_product_reference_photos - len(job.product_reference_image_paths)),

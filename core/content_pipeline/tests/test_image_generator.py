@@ -2126,7 +2126,7 @@ class TestRegenerateWithReference:
 
         mock_upload.assert_called_once_with(
             b'fake-regenerated-png', 'Nuevo caption regenerado', ['#e94560'], 'alegre',
-            'Joyeria artesanal', ['aretes'], 'https://ejemplo.com', 'test-product-regen',
+            'Joyeria artesanal', ['aretes'], 'https://ejemplo.com', 'test-product-regen', None,
         )
 
     @override_settings(

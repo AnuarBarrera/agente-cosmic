@@ -10,10 +10,12 @@ from rq.job import Dependency
 
 MEXICO_TZ = dt_timezone(timedelta(hours=-6))  # UTC-6 sin DST (desde 2023)
 from core.brand_dna.models import AnalysisJob
+from core.brand_dna.reference_assets import reference_assets_for
 from core.content_pipeline.models import ContentCalendar, ContentPost
 from core.tenant_management.models import Subscription, User
 from core.content_pipeline.generators.text_generator import TextGenerator
 from core.content_pipeline.generators.editorial_memory import empty_editorial_memory, update_editorial_memory
+from core.content_pipeline.generators.claim_auditor import ensure_supported_text
 from core.content_pipeline.generators.image_generator import ImageGenerator, _detect_mime
 from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
 from core.content_pipeline.generators.reel_generator import ReelGenerator
@@ -21,6 +23,7 @@ from core.shared.gcs_uploads import read_upload, read_upload_from_public_url, up
 from core.content_pipeline.email_sender import EmailSender
 from core.content_pipeline.scheduler import schedule_daily_emails
 from core.content_pipeline.smart_scheduler import smart_schedule_dates
+from core.content_pipeline.quality import classify_regeneration_feedback
 from core.shared.metrics import CONTENT_GENERATION_DURATION, CALENDARS_CREATED
 
 logger = logging.getLogger(__name__)
@@ -29,7 +32,9 @@ logger = logging.getLogger(__name__)
 def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptGenerator, reel_gen: ReelGenerator,
                           fmt: str, filename: str, brand_dna=None, post_data: dict = None,
                           max_qc_retries: int = 2, skip_veo: bool = False,
-                          photos: list[bytes] = None, mime_types: list[str] = None, **kwargs) -> tuple[str, list[str], str]:
+                          photos: list[bytes] = None, mime_types: list[str] = None,
+                          reference_contexts: list[dict] = None,
+                          **kwargs) -> tuple[str, list[str], str]:
     """Genera el/los medio(s) de un post segun su formato. Retorna
     (image_url, image_urls, video_url) — image_url es siempre la portada
     (slide 1 del carrusel, poster frame del reel) para retrocompatibilidad.
@@ -41,6 +46,7 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
         video_url, poster_url = reel_gen.generate(
             script=script, colors=kwargs.get('colors', []), filename_prefix=filename, skip_veo=skip_veo,
             image_gen=image_gen, photos=photos, mime_types=mime_types,
+            reference_contexts=reference_contexts,
         )
         if not video_url:
             url = image_gen.generate(filename=filename, max_qc_retries=max_qc_retries, **kwargs)
@@ -55,18 +61,24 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
                 business_url=kwargs.get('business_url', ''), max_qc_retries=1,
                 description=kwargs.get('description', ''), keywords=kwargs.get('keywords', []),
                 fact_profile=kwargs.get('fact_profile'),
+                reference_contexts=reference_contexts,
             )
         if not urls:
             urls = image_gen.generate_carousel(filename_prefix=filename, max_qc_retries=max_qc_retries, **kwargs)
         return (urls[0] if urls else ''), urls, ''
     if photos:
+        reference_context = (reference_contexts or [{}])[0]
         background_url, url = image_gen.generate_from_product_photo(
             photo_bytes=photos[0], mime_type=mime_types[0], caption=kwargs.get('caption', ''),
             colors=kwargs.get('colors', []), tone=kwargs.get('tone', ''), filename=filename,
-            vision_context=(brand_dna.product_photo_analysis if brand_dna else ''),
+            vision_context=(
+                reference_context.get('analysis_description')
+                or (brand_dna.product_photo_analysis if brand_dna else '')
+            ),
             description=kwargs.get('description', ''), keywords=kwargs.get('keywords', []),
             business_url=kwargs.get('business_url', ''), max_qc_retries=max_qc_retries,
             fact_profile=kwargs.get('fact_profile'),
+            usage_mode=reference_context.get('usage_mode', 'edit_allowed'),
         )
         if url:
             return url, [], ''
@@ -281,6 +293,37 @@ def _next_reference_photos(job: AnalysisJob, day_number: int, count: int) -> lis
     return photos
 
 
+def _next_reference_media(job: AnalysisJob, day_number: int, count: int):
+    """Return assigned bytes plus per-photo policy context when triage is active."""
+    if not getattr(settings, 'PHOTO_ASSET_TRIAGE_ENABLED', False):
+        photos = _next_reference_photos(job, day_number, count)
+        return photos, [_detect_mime(photo) for photo in photos], None
+
+    assets = list(reference_assets_for(job))
+    if not assets:
+        photos = _next_reference_photos(job, day_number, count)
+        return photos, [_detect_mime(photo) for photo in photos], None
+
+    start = (day_number - 1) % len(assets)
+    photos, mime_types, contexts = [], [], []
+    for offset in range(count):
+        asset = assets[(start + offset) % len(assets)]
+        if not upload_exists(asset.storage_path):
+            continue
+        photo = read_upload(asset.storage_path)
+        photos.append(photo)
+        mime_types.append(asset.mime_type or _detect_mime(photo))
+        contexts.append({
+            'asset_id': str(asset.id),
+            'analysis_description': asset.analysis_description,
+            'product_category': asset.product_category,
+            'commercial_relationship': asset.commercial_relationship,
+            'usage_mode': asset.usage_mode,
+            'risk_flags': asset.risk_flags,
+        })
+    return photos, mime_types, contexts
+
+
 def _generate_missing_image(post: ContentPost) -> None:
     """Genera y guarda la imagen de un post que quedo sin image_url. No lanza — loggea y sigue."""
     brand_dna = post.calendar.brand_dna
@@ -293,8 +336,9 @@ def _generate_missing_image(post: ContentPost) -> None:
         # carrusel/reel usan hasta 3 (ver _next_reference_photos). Pool vacio
         # en el job devuelve lista vacia de inmediato, sin tocar GCS.
         photo_count = 1 if post.format == ContentPost.FORMAT_SINGLE else 3
-        photos = _next_reference_photos(job, post.day_number, photo_count)
-        mime_types = [_detect_mime(p) for p in photos]
+        photos, mime_types, reference_contexts = _next_reference_media(
+            job, post.day_number, photo_count,
+        )
         post.image_url, post.image_urls, post.video_url = _generate_post_media(
             image_gen, ReelScriptGenerator(), ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET, use_gemini_api=use_gemini_api),
             fmt=post.format,
@@ -318,6 +362,7 @@ def _generate_missing_image(post: ContentPost) -> None:
             skip_veo=not settings.REEL_VEO_ENABLED,
             photos=photos,
             mime_types=mime_types,
+            reference_contexts=reference_contexts,
         )
         post.save(update_fields=['image_url', 'image_urls', 'video_url'])
     except Exception as img_err:
@@ -348,28 +393,105 @@ def regenerate_post_image_task(post_id: str, feedback: str) -> None:
         # el guard de reentrada de views.py bloqueaba ese post permanentemente.
         post = ContentPost.objects.select_related('calendar__brand_dna__job').get(id=post_id)
         brand_dna = post.calendar.brand_dna
-        image_gen = ImageGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET)
-        current_background_bytes = read_upload_from_public_url(
-            post.product_photo_background_url or post.image_url
+        feedback_kind = classify_regeneration_feedback(feedback)
+        next_caption = post.caption
+        if feedback_kind in ('text', 'both'):
+            # Import tardío para evitar el ciclo views -> tasks en import time.
+            from core.brand_dna.views import _regenerate_caption
+            next_caption = _regenerate_caption(post, feedback)
+            if settings.CLAIM_GUARD_ENABLED:
+                next_caption, _ = ensure_supported_text(
+                    next_caption, brand_dna.brand_fact_profile, field_name='caption',
+                )
+
+        if feedback_kind == 'text':
+            if not next_caption:
+                raise ValueError('La regeneración de texto no produjo una salida válida')
+            post.caption = next_caption
+            post.regen_count += 1
+            post.regenerating = False
+            post.save(update_fields=['caption', 'regen_count', 'regenerating'])
+            return
+
+        image_gen = ImageGenerator(
+            bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET,
+            use_gemini_api=_is_paid_content(post),
         )
-        background_url, new_url = image_gen.regenerate_with_reference(
-            current_background_bytes=current_background_bytes,
-            feedback=feedback,
-            vision_context=brand_dna.product_photo_analysis,
-            caption=post.caption,
-            colors=brand_dna.primary_colors,
-            tone=brand_dna.tone,
-            description=brand_dna.description,
-            keywords=brand_dna.keywords,
-            business_url=brand_dna.business_url,
-            filename=f"{brand_dna.job.id}-day{post.day_number}-regen-{int(time.time())}",
+        filename = f"{brand_dna.job.id}-day{post.day_number}-regen-{int(time.time())}"
+        photo_count = 3 if post.format == ContentPost.FORMAT_CAROUSEL else 1
+        photos, mime_types, reference_contexts = _next_reference_media(
+            brand_dna.job, post.day_number, photo_count,
         )
-        if new_url:
-            post.image_url = new_url
-            post.image_urls = []
-            post.product_photo_background_url = background_url
+
+        background_url = ''
+        new_urls = []
+        if post.format == ContentPost.FORMAT_CAROUSEL:
+            if photos:
+                new_urls = image_gen.generate_carousel_from_product_photos(
+                    photos, mime_types, caption=next_caption,
+                    colors=brand_dna.primary_colors, tone=brand_dna.tone,
+                    filename_prefix=filename, business_url=brand_dna.business_url,
+                    description=brand_dna.description, keywords=brand_dna.keywords,
+                    fact_profile=brand_dna.brand_fact_profile,
+                    reference_contexts=reference_contexts,
+                )
+            if not new_urls:
+                new_urls = image_gen.generate_carousel(
+                    caption=next_caption, colors=brand_dna.primary_colors,
+                    tone=brand_dna.tone, filename_prefix=filename,
+                    brand_name=brand_dna.business_name, keywords=brand_dna.keywords,
+                    description=brand_dna.description, audience=brand_dna.audience,
+                    business_url=brand_dna.business_url,
+                    fact_profile=brand_dna.brand_fact_profile,
+                )
+            new_url = new_urls[0] if new_urls else ''
+        else:
+            context = (reference_contexts or [{}])[0]
+            usage_mode = context.get('usage_mode', 'edit_allowed')
+            if photos and usage_mode != 'context_only':
+                source_bytes = photos[0]
+            else:
+                source_bytes = read_upload_from_public_url(
+                    post.product_photo_background_url or post.image_url
+                )
+            if photos and usage_mode == 'context_only':
+                new_url = image_gen.generate(
+                    caption=next_caption, colors=brand_dna.primary_colors,
+                    tone=brand_dna.tone, filename=filename,
+                    brand_name=brand_dna.business_name, keywords=brand_dna.keywords,
+                    description=brand_dna.description, audience=brand_dna.audience,
+                    business_url=brand_dna.business_url,
+                    fact_profile=brand_dna.brand_fact_profile,
+                )
+            else:
+                background_url, new_url = image_gen.regenerate_with_reference(
+                    current_background_bytes=source_bytes,
+                    feedback=feedback,
+                    vision_context=(
+                        context.get('analysis_description') or brand_dna.product_photo_analysis
+                    ),
+                    caption=next_caption,
+                    colors=brand_dna.primary_colors,
+                    tone=brand_dna.tone,
+                    description=brand_dna.description,
+                    keywords=brand_dna.keywords,
+                    business_url=brand_dna.business_url,
+                    filename=filename,
+                    fact_profile=brand_dna.brand_fact_profile,
+                    usage_mode=usage_mode,
+                )
+        if not new_url:
+            raise ValueError('La regeneración no produjo un medio válido')
+        post.caption = next_caption
+        post.image_url = new_url
+        post.image_urls = new_urls
+        post.product_photo_background_url = background_url
+        post.regen_count += 1
         post.regenerating = False
-        post.save(update_fields=['image_url', 'image_urls', 'product_photo_background_url', 'regenerating'])
+        post.save(update_fields=[
+            'caption', 'image_url', 'image_urls', 'product_photo_background_url',
+            'regen_count', 'regenerating',
+        ])
     except Exception as e:
         logger.error(f"regenerate_post_image_task error para post {post_id}: {e}")
         ContentPost.objects.filter(id=post_id).update(regenerating=False)

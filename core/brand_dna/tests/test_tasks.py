@@ -67,6 +67,8 @@ def test_task_creates_brand_dna(pending_job):
     dna = BrandDNA.objects.get(job=pending_job)
     assert dna.business_name == 'Tu Web MX'
     assert dna.tone == 'profesional'
+    assert dna.brand_fact_profile['version'] == 1
+    assert dna.brand_fact_profile['source_fragments'][0]['source'] == 'business_description'
 
 
 @override_settings(

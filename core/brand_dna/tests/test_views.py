@@ -7,7 +7,9 @@ from unittest.mock import patch, MagicMock
 from django.test import Client, override_settings
 from django.utils import timezone
 from datetime import timedelta
-from core.brand_dna.models import AnalysisJob, BrandDNA, ProductPhotoPrecheckAttempt
+from core.brand_dna.models import (
+    AnalysisJob, BrandDNA, ProductPhotoPrecheckAttempt, ProductReferenceAsset,
+)
 from core.content_pipeline.models import ContentCalendar, ContentPost
 from core.tenant_management.models import Plan, TenantModel, Subscription, User
 
@@ -181,6 +183,10 @@ def test_analyze_submit_saves_product_reference_photo_when_permitted(user, free_
     job = AnalysisJob.objects.filter(user=user).latest('created_at')
     assert job.generation_mode == AnalysisJob.MODE_SAMPLE_IMAGE
     assert job.product_reference_image_paths != []
+    asset = ProductReferenceAsset.objects.get(job=job)
+    assert asset.storage_path == job.product_reference_image_paths[0]
+    assert asset.sha256
+    assert (asset.width, asset.height) == (10, 10)
     mock_save.assert_called_once()
 
 

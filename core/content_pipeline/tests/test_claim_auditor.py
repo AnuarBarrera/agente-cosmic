@@ -55,3 +55,25 @@ def test_image_field_guard_removes_unsupported_claim_when_enabled():
     fields = {'headline': '30% de descuento', 'subtitle': '', 'cta': 'Compra hoy'}
     guarded = _claim_guard_fields(fields, {})
     assert '30%' not in guarded['headline']
+
+
+def test_general_promotion_does_not_authorize_unconfirmed_month_or_percentage():
+    profile = {
+        'confirmed_commercial_terms': ['Tenemos grandes promociones y precios accesibles.'],
+    }
+
+    corrected, findings = ensure_supported_text(
+        'Tenemos precios especiales este mes y 10% de descuento.', profile,
+    )
+
+    assert 'este mes' not in corrected.lower()
+    assert '10%' not in corrected
+    assert any(item['decision'] == 'needs_confirmation' for item in findings)
+
+
+def test_local_shipping_does_not_authorize_national_shipping():
+    profile = {'confirmed_service_area': ['Hacemos envíos locales.']}
+
+    corrected, _ = ensure_supported_text('Hacemos envíos a todo el país.', profile)
+
+    assert 'todo el país' not in corrected.lower()
