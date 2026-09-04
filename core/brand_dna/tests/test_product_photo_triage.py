@@ -35,6 +35,14 @@ def test_clean_maker_product_allows_creative_edit():
     assert reason == 'clean_maker_product'
 
 
+def test_low_quality_maker_product_still_allows_ai_scene_recreation():
+    mode, reason = apply_triage_rules(
+        {'is_low_quality': True}, ProductReferenceAsset.RELATIONSHIP_MAKER,
+    )
+    assert mode == ProductReferenceAsset.USAGE_EDIT_ALLOWED
+    assert reason == 'low_quality_maker_product'
+
+
 def test_clean_third_party_packaging_is_preserved_for_reseller():
     mode, _ = apply_triage_rules(
         {'has_third_party_packaging': True}, ProductReferenceAsset.RELATIONSHIP_RESELLER,

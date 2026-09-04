@@ -60,6 +60,13 @@ def apply_triage_rules(data: dict, relationship_hint: str) -> tuple[str, str]:
             return ProductReferenceAsset.USAGE_CONTEXT_ONLY, 'reseller_packaging_dense'
         return ProductReferenceAsset.USAGE_PRESERVE_ONLY, 'reseller_packaging'
     if data.get('is_low_quality'):
+        # Low resolution/soft focus is precisely the case where an edit can
+        # add value.  It is not evidence of a rights or identity hazard.  A
+        # maker's own product may therefore be recreated in a new scene;
+        # preserve-only remains the conservative choice when ownership is not
+        # established.
+        if relationship_hint == ProductReferenceAsset.RELATIONSHIP_MAKER:
+            return ProductReferenceAsset.USAGE_EDIT_ALLOWED, 'low_quality_maker_product'
         return ProductReferenceAsset.USAGE_PRESERVE_ONLY, 'low_quality'
     if relationship_hint == ProductReferenceAsset.RELATIONSHIP_MAKER:
         return ProductReferenceAsset.USAGE_EDIT_ALLOWED, 'clean_maker_product'
