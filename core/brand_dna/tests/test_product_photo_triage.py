@@ -19,6 +19,16 @@ def test_dense_composite_ad_is_context_only():
     assert reason == 'composite_or_promotion_dense'
 
 
+def test_composite_ad_with_promotion_is_context_only_even_without_dense_text():
+    mode, reason = apply_triage_rules({
+        'is_composite_ad': True,
+        'has_existing_price_or_promotion': True,
+        'has_dense_text': False,
+    }, ProductReferenceAsset.RELATIONSHIP_RESELLER)
+    assert mode == ProductReferenceAsset.USAGE_CONTEXT_ONLY
+    assert reason == 'composite_promotion'
+
+
 def test_clean_maker_product_allows_creative_edit():
     mode, reason = apply_triage_rules({}, ProductReferenceAsset.RELATIONSHIP_MAKER)
     assert mode == ProductReferenceAsset.USAGE_EDIT_ALLOWED

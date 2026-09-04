@@ -23,3 +23,12 @@ def test_fact_profile_retains_user_provided_promotion_without_inventing_terms():
         'Tenemos grandes promociones y precios accesibles.'
     ]
     assert profile['confirmed_service_area'] == []
+
+
+def test_fact_profile_recognizes_canonical_upcycling_from_user_typo():
+    profile = build_brand_fact_profile(
+        'Marca\nConfecciono prendas con upcicling de mezclilla.',
+        keywords=['upcycling', 'mezclilla'],
+    )
+
+    assert profile['differentiating_terms'] == ['upcycling', 'mezclilla']

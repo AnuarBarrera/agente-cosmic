@@ -48,6 +48,9 @@ def apply_triage_rules(data: dict, relationship_hint: str) -> tuple[str, str]:
     """Deterministic policy is authoritative over the model recommendation."""
     if data.get('has_licensed_character'):
         return ProductReferenceAsset.USAGE_CONTEXT_ONLY, 'licensed_character'
+    if (data.get('is_composite_ad') and data.get('has_existing_price_or_promotion')
+            and not data.get('has_dense_text')):
+        return ProductReferenceAsset.USAGE_CONTEXT_ONLY, 'composite_promotion'
     if data.get('is_composite_ad') or data.get('has_existing_price_or_promotion'):
         if data.get('has_dense_text'):
             return ProductReferenceAsset.USAGE_CONTEXT_ONLY, 'composite_or_promotion_dense'

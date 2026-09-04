@@ -26,7 +26,10 @@ def _normalize(value: str) -> str:
         char for char in unicodedata.normalize('NFD', value or '')
         if unicodedata.category(char) != 'Mn'
     )
-    return re.sub(r'\s+', ' ', value.lower()).strip()
+    normalized = re.sub(r'\s+', ' ', value.lower()).strip()
+    # Corrección ortográfica inequívoca del anglicismo; conserva la fuente
+    # original y permite que el término canónico del ADN siga siendo trazable.
+    return normalized.replace('upcicling', 'upcycling')
 
 
 def _fragments(source_text: str) -> list[str]:
