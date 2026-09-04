@@ -73,7 +73,16 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
                 reference_contexts=reference_contexts,
             )
         if not urls:
-            urls = image_gen.generate_carousel(filename_prefix=filename, max_qc_retries=max_qc_retries, **kwargs)
+            # Preserve the calendar's existing carousel shape when a
+            # context-only reference cannot be edited.  The historical
+            # default of four slides must not silently change a three-slide
+            # post during remediation/regeneration.
+            carousel_kwargs = dict(kwargs)
+            carousel_kwargs['num_slides'] = len(photos) if photos else 4
+            urls = image_gen.generate_carousel(
+                filename_prefix=filename, max_qc_retries=max_qc_retries,
+                **carousel_kwargs,
+            )
         return (urls[0] if urls else ''), urls, ''
     if photos:
         reference_context = (reference_contexts or [{}])[0]

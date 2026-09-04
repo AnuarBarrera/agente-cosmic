@@ -25,6 +25,12 @@ _PERCENT_OR_PRICE = re.compile(r'(?:\b\d+(?:[.,]\d+)?\s*%|[$€£]\s*\d|\b\d+(?:
 _DISCOUNT = re.compile(r'\b(descuent\w*|promoci[oó]n\w*|oferta\w*|rebaja\w*|precio especial\w*|gratis)\b', re.I)
 _SHIPPING = re.compile(r'\b(env[ií](?:o|os|amos|amos a)?|entreg\w*|cobertura (?:nacional|en)|todo m[eé]xico|a todo el pa[ií]s)\b', re.I)
 _CERTIFIED = re.compile(r'\b(certificad\w*|acreditad\w*|avalad\w*|garantiz\w*|garant[ií]a)\b', re.I)
+_UNSUPPORTED_OUTCOME = re.compile(
+    r'(?:absorci[oó]n\s+superior|protegen?\b.{0,45}\b(?:[oó]ptim\w*|segur\w*)|'
+    r'optimiza\w*\b.{0,45}\b(?:tiempo|procedimiento|cirug[ií]a)|'
+    r'asegura\w*\b.{0,45}\b(?:eficiencia|seguridad|resultado)|'
+    r'compromete\w*\b.{0,30}\bseguridad|favorece\w*\b.{0,30}\bbienestar)', re.I,
+)
 _ENVIRONMENTAL_NUMBER = re.compile(
     r'(?:\b\d+(?:[.,]\d+)?\s*(?:%|kg|toneladas?|litros?|co2)\b.{0,55}\b(?:recicla|ambient|residuo|emision|sostenib)|'
     r'\b(?:recicla|ambient|residuo|emision|sostenib)\w*.{0,55}\b\d+(?:[.,]\d+)?)', re.I,
@@ -92,6 +98,7 @@ def audit_claims(text: str, profile: dict | None) -> list[dict]:
         ('commercial_terms', 'critical', _DISCOUNT, 'Una promoción o descuento requiere vigencia y términos confirmados.'),
         ('service_area', 'critical', _SHIPPING, 'Envíos y cobertura requieren un área de servicio confirmada.'),
         ('certifications', 'critical', _CERTIFIED, 'Certificaciones y garantías requieren respaldo explícito.'),
+        ('unsupported_outcome', 'critical', _UNSUPPORTED_OUTCOME, 'Resultados clínicos o de rendimiento requieren respaldo explícito.'),
         ('environmental_metrics', 'critical', _ENVIRONMENTAL_NUMBER, 'Las cifras ambientales requieren una fuente aprobada.'),
     )
     for fragment in fragments:
@@ -102,6 +109,7 @@ def audit_claims(text: str, profile: dict | None) -> list[dict]:
                 'commercial_terms': 'confirmed_commercial_terms',
                 'service_area': 'confirmed_service_area',
                 'certifications': 'confirmed_certifications',
+                'unsupported_outcome': 'source_fragments',
                 # No hay bucket implícito para métricas: debe estar en un
                 # fragmento de fuente aprobado y coincidir con la afirmación.
                 'environmental_metrics': 'source_fragments',

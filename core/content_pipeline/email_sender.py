@@ -45,6 +45,22 @@ def _magic_url(user, destination_path: str) -> str:
 
 
 class EmailSender:
+    def send_quality_correction(self, job: AnalysisJob, brand_dna: BrandDNA,
+                                corrected_days: list[int]) -> None:
+        """Notify a customer that previously affected media was corrected."""
+        calendar_url = _magic_url(job.user, reverse('calendar_review', args=[job.id]))
+        html = render_to_string('content_pipeline/email_quality_correction.html', {
+            'brand_dna': brand_dna, 'calendar_url': calendar_url,
+            'corrected_days': corrected_days,
+        })
+        name = brand_dna.business_name.strip() if brand_dna.business_name else ''
+        subject = f'✅ Corregimos tu contenido — {name}' if name else '✅ Corregimos tu contenido — Agente Cosmic'
+        plain = f'Detectamos y corregimos un problema de calidad en tu contenido. Ya puedes descargar los días {", ".join(map(str, corrected_days))}.'
+        send_mail(subject, plain, settings.DEFAULT_FROM_EMAIL,
+                  recipient_list=[job.email], html_message=html, fail_silently=False)
+        EMAILS_SENT.labels(type='quality_correction').inc()
+        logger.info(f'Email de corrección enviado a {job.email} para job {job.id}')
+
     def send_initial(self, job: AnalysisJob, brand_dna: BrandDNA) -> None:
         calendar_url = _magic_url(job.user, reverse('calendar_review', args=[job.id]))
         html = render_to_string('content_pipeline/email_initial.html', {
@@ -247,7 +263,6 @@ class EmailSender:
         )
         EMAILS_SENT.labels(type='reactivation_analysis').inc()
         logger.info(f"Email de reactivacion (analisis) enviado a {user.email}")
-
 
 
 

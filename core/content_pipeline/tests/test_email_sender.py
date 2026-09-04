@@ -62,6 +62,16 @@ def test_send_initial_email_subject_contains_business_name(full_setup):
 
 
 @override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx')
+def test_send_quality_correction_mentions_corrected_days(full_setup):
+    from core.content_pipeline.email_sender import EmailSender
+    job, dna, calendar, posts = full_setup
+    with patch('core.content_pipeline.email_sender.send_mail') as mock_send:
+        EmailSender().send_quality_correction(job, dna, [1, 2])
+    assert 'corregimos' in mock_send.call_args[0][0].lower()
+    assert '1, 2' in mock_send.call_args[0][1]
+
+
+@override_settings(DEFAULT_FROM_EMAIL='noreply@cosmic.mx')
 def test_send_daily_email_marks_post_sent(full_setup):
     from core.content_pipeline.email_sender import EmailSender
     job, dna, calendar, posts = full_setup

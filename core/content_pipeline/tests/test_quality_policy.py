@@ -10,6 +10,7 @@ from core.content_pipeline.quality import (
     classify_scene_complexity,
     simplify_scene_direction,
 )
+from core.content_pipeline.generators.claim_auditor import ensure_supported_text
 
 
 def _png(width=80, height=40, color='red'):
@@ -23,6 +24,15 @@ def test_feedback_classifier_understands_change_image_as_visual():
     assert classify_regeneration_feedback('corrige el texto') == 'text'
     assert classify_regeneration_feedback('cambia la foto y el título') == 'both'
     assert classify_regeneration_feedback('hazlo mejor') == 'both'
+
+
+def test_claim_guard_removes_unsupported_medical_outcome():
+    corrected, findings = ensure_supported_text(
+        'Nuestras gasas ofrecen una absorción superior que optimiza el tiempo en quirófano.',
+        {'source_fragments': []},
+    )
+    assert corrected == 'Conoce lo que tenemos para ti. Contáctanos para más información.'
+    assert any(item['category'] == 'unsupported_outcome' for item in findings)
 
 
 def test_high_complexity_scene_is_simplified():
