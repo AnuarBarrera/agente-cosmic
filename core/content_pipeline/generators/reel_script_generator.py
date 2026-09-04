@@ -91,6 +91,9 @@ _PROMPT = (
     "NOMBRE DEL NEGOCIO: {business_name}\n"
     "CAPTION DEL POST: {caption}\n"
     "LINEA COMERCIAL OBJETIVO: {commercial_line}\n"
+    "REFERENCIAS VISUALES ASIGNADAS: {reference_context}\n"
+    "El guion y las escenas deben corresponder al tipo de producto visible en esas referencias. "
+    "No atribuyas materiales o propiedades que las referencias no confirmen.\n"
     "TONO: {tone}\n"
     "DESCRIPCION: {description}\n"
     "=== FIN DATOS DEL NEGOCIO ==="
@@ -180,6 +183,7 @@ class ReelScriptGenerator:
             'music_mood': f"background music matching a {brand_dna.tone} mood, instrumental only",
         }
         commercial_line = (post_data.get('commercial_line') or '').strip()
+        reference_context = (post_data.get('reference_context') or '').strip()
         if commercial_line:
             fallback['scene_prompts'] = [
                 f"{scene} Commercial line: {commercial_line}." for scene in fallback['scene_prompts']
@@ -190,6 +194,7 @@ class ReelScriptGenerator:
                 business_name=brand_dna.business_name,
                 caption=caption,
                 commercial_line=commercial_line or 'la línea comercial principal',
+                reference_context=reference_context or 'sin referencia visual específica',
                 tone=brand_dna.tone,
                 description=brand_dna.description,
             )

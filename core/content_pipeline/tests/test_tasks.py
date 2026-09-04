@@ -1891,12 +1891,114 @@ class TestNextReferencePhotos:
         assert mime_types == ['image/jpeg']
         assert contexts == [{
             'asset_id': str(asset.id),
+            'position': 0,
             'analysis_description': 'Collar tejido azul',
             'product_category': 'collar',
             'commercial_relationship': 'maker',
             'usage_mode': 'edit_allowed',
             'risk_flags': {},
         }]
+
+    @override_settings(PHOTO_ASSET_TRIAGE_ENABLED=True)
+    def test_reference_media_prefers_asset_matching_commercial_line(self, calendar_with_dna):
+        from core.content_pipeline.tasks import _next_reference_media
+        job = calendar_with_dna.brand_dna.job
+        collar = ProductReferenceAsset.objects.create(
+            job=job, position=0, storage_path='uploads/collar.jpg', sha256='b' * 64,
+            mime_type='image/jpeg', analysis_description='Braided blue pet collar',
+            product_category='Pet collar', commercial_relationship='maker',
+            usage_mode='edit_allowed', triage_status='complete',
+        )
+        ProductReferenceAsset.objects.create(
+            job=job, position=1, storage_path='uploads/vest.jpg', sha256='c' * 64,
+            mime_type='image/jpeg', analysis_description='Dog wearing a plaid vest',
+            product_category='Pet clothing', commercial_relationship='maker',
+            usage_mode='edit_allowed', triage_status='complete',
+        )
+        with patch('core.content_pipeline.tasks.upload_exists', return_value=True), \
+             patch('core.content_pipeline.tasks.read_upload', side_effect=lambda path: path.encode()):
+            photos, _, contexts = _next_reference_media(
+                job, day_number=2, count=1, desired_context='Collares para mascotas',
+            )
+
+        assert photos == [b'uploads/collar.jpg']
+        assert contexts[0]['asset_id'] == str(collar.id)
+
+    @override_settings(PHOTO_ASSET_TRIAGE_ENABLED=True)
+    def test_garment_collar_is_not_treated_as_pet_collar(self, calendar_with_dna):
+        from core.content_pipeline.tasks import _next_reference_media
+        job = calendar_with_dna.brand_dna.job
+        collar = ProductReferenceAsset.objects.create(
+            job=job, position=0, storage_path='uploads/pet-collar.jpg', sha256='d' * 64,
+            mime_type='image/jpeg', analysis_description='Braided blue pet collar',
+            product_category='Pet collar', commercial_relationship='maker',
+            usage_mode='edit_allowed', triage_status='complete',
+        )
+        ProductReferenceAsset.objects.create(
+            job=job, position=1, storage_path='uploads/coat.jpg', sha256='e' * 64,
+            mime_type='image/jpeg', analysis_description='Fleece dog coat with faux fur collar',
+            product_category='Pet clothing', commercial_relationship='maker',
+            usage_mode='edit_allowed', triage_status='complete',
+        )
+        with patch('core.content_pipeline.tasks.upload_exists', return_value=True), \
+             patch('core.content_pipeline.tasks.read_upload', side_effect=lambda path: path.encode()):
+            photos, _, contexts = _next_reference_media(
+                job, day_number=2, count=1, desired_context='Collares para mascotas',
+            )
+
+        assert photos == [b'uploads/pet-collar.jpg']
+        assert contexts[0]['asset_id'] == str(collar.id)
+
+    @override_settings(PHOTO_ASSET_TRIAGE_ENABLED=True)
+    def test_unknown_commercial_line_uses_lexical_fallback(self, calendar_with_dna):
+        from core.content_pipeline.tasks import _next_reference_media
+        job = calendar_with_dna.brand_dna.job
+        matching = ProductReferenceAsset.objects.create(
+            job=job, position=0, storage_path='uploads/bandana.jpg', sha256='f' * 64,
+            mime_type='image/jpeg', analysis_description='Bandana roja para mascota',
+            product_category='Accesorio', commercial_relationship='maker',
+            usage_mode='edit_allowed', triage_status='complete',
+        )
+        ProductReferenceAsset.objects.create(
+            job=job, position=1, storage_path='uploads/bowl.jpg', sha256='1' * 64,
+            mime_type='image/jpeg', analysis_description='Plato azul para mascota',
+            product_category='Accesorio', commercial_relationship='maker',
+            usage_mode='edit_allowed', triage_status='complete',
+        )
+        with patch('core.content_pipeline.tasks.upload_exists', return_value=True), \
+             patch('core.content_pipeline.tasks.read_upload', side_effect=lambda path: path.encode()):
+            photos, _, contexts = _next_reference_media(
+                job, day_number=2, count=1, desired_context='Bandanas',
+            )
+
+        assert photos == [b'uploads/bandana.jpg']
+        assert contexts[0]['asset_id'] == str(matching.id)
+
+    @override_settings(PHOTO_ASSET_TRIAGE_ENABLED=True)
+    def test_human_vest_does_not_make_pet_mat_a_clothing_reference(self, calendar_with_dna):
+        from core.content_pipeline.tasks import _next_reference_media
+        job = calendar_with_dna.brand_dna.job
+        clothing = ProductReferenceAsset.objects.create(
+            job=job, position=0, storage_path='uploads/dog-vest.jpg', sha256='2' * 64,
+            mime_type='image/jpeg', analysis_description='Dog wearing a plaid vest',
+            product_category='Pet supplies', commercial_relationship='maker',
+            usage_mode='edit_allowed', triage_status='complete',
+        )
+        ProductReferenceAsset.objects.create(
+            job=job, position=1, storage_path='uploads/pet-mat.jpg', sha256='3' * 64,
+            mime_type='image/jpeg',
+            analysis_description='A man wearing a plaid vest beside a dog lying on a pink pet mat',
+            product_category='Pet supplies', commercial_relationship='maker',
+            usage_mode='edit_allowed', triage_status='complete',
+        )
+        with patch('core.content_pipeline.tasks.upload_exists', return_value=True), \
+             patch('core.content_pipeline.tasks.read_upload', side_effect=lambda path: path.encode()):
+            photos, _, contexts = _next_reference_media(
+                job, day_number=2, count=1, desired_context='Prendas para mascotas',
+            )
+
+        assert photos == [b'uploads/dog-vest.jpg']
+        assert contexts[0]['asset_id'] == str(clothing.id)
 
     def test_empty_pool_returns_empty_list(self, calendar_with_dna):
         from core.content_pipeline.tasks import _next_reference_photos

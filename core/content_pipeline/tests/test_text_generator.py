@@ -168,13 +168,15 @@ def test_generate_does_not_double_prefix_hashtags_that_already_have_hash(brand_d
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
 )
 def test_generate_tags_each_post_with_its_pillar(brand_dna):
-    from core.content_pipeline.generators.text_generator import TextGenerator, CONTENT_PILLARS
+    from core.content_pipeline.generators.text_generator import TextGenerator, _active_pillars
     with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
         mock_vc.return_value = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
         gen = TextGenerator()
         result = gen.generate(brand_dna)
 
-    assert [p['pillar'] for p in result] == [pillar['name'] for pillar in CONTENT_PILLARS]
+    # Con CLAIM_GUARD_ENABLED el pilar de oferta se sustituye por el CTA seguro
+    # que no inventa promociones; la expectativa debe reflejar los pilares activos.
+    assert [p['pillar'] for p in result] == [pillar['name'] for pillar in _active_pillars()]
 
 
 @override_settings(
@@ -214,14 +216,14 @@ def test_generate_marks_only_reel_day_as_reel_format(brand_dna):
     VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
 )
 def test_generate_prompt_includes_pillars_block(brand_dna):
-    from core.content_pipeline.generators.text_generator import TextGenerator, CONTENT_PILLARS
+    from core.content_pipeline.generators.text_generator import TextGenerator, _active_pillars
     with patch('core.content_pipeline.generators.text_generator._vertex_client') as mock_vc:
         mock_client = _mock_vertex_client(MOCK_VERTEX_RESPONSE)
         mock_vc.return_value = mock_client
         TextGenerator().generate(brand_dna)
 
     prompt_sent = mock_client.models.generate_content.call_args.kwargs['contents']
-    for pillar in CONTENT_PILLARS:
+    for pillar in _active_pillars():
         assert pillar['name'] in prompt_sent
 
 

@@ -493,6 +493,7 @@ class TestLayeredPipeline:
         VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
         VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
         GOOGLE_CLOUD_STORAGE_BUCKET='test-bucket',
+        FINAL_MEDIA_QC_ENABLED=False,
     )
     def test_pipeline_calls_render_html_template(self):
         from core.content_pipeline.generators.image_generator import ImageGenerator
@@ -514,6 +515,7 @@ class TestLayeredPipeline:
         GOOGLE_CLOUD_LOCATION='us-central1',
         VERTEX_IMAGE_MODEL='imagen-3.0-generate-001',
         VERTEX_TEXT_MODEL='publishers/google/models/gemini-2.5-flash',
+        FINAL_MEDIA_QC_ENABLED=False,
     )
     def test_skips_generate_background_when_background_bytes_given(self):
         """El camino de foto real de producto (generate_from_product_photo/
@@ -1668,6 +1670,7 @@ class TestGenerateFromProductPhoto:
         GOOGLE_CLOUD_PROJECT='agente-cosmic', GOOGLE_CLOUD_LOCATION='global',
         GOOGLE_CLOUD_LOCATION_TEXT='global',
         VERTEX_IMAGE_MODEL_LITE='gemini-3.1-flash-lite-image',
+        COMPARATIVE_PRODUCT_QC_ENABLED=False,
     )
     def test_sends_photo_and_creative_direction_uses_lite_model(self):
         """De vuelta a VERTEX_IMAGE_MODEL_LITE el 2026-08-16 -- el swap
@@ -1696,7 +1699,7 @@ class TestGenerateFromProductPhoto:
         assert result == ('https://storage.test/bg.png', 'https://storage.test/final.png')
         mock_upload.assert_called_once_with(
             b'fake-generated-png', 'Aretes artesanales', ['#e94560'], 'alegre', '', None, '', 'test-product',
-            None,
+            None, reference_context='',
         )
         call_kwargs = mock_gen_client.models.generate_content.call_args.kwargs
         assert call_kwargs['model'] == 'gemini-3.1-flash-lite-image'
@@ -1928,13 +1931,19 @@ class TestGenerateFromProductPhoto:
                 caption='Aretes artesanales', colors=['#e94560'], tone='alegre',
                 filename='test-product', description='Joyeria artesanal',
                 keywords=['aretes', 'plata'], business_url='https://ejemplo.com',
+                vision_context='Aretes de plata con piedra azul',
             )
 
         assert background_url == 'https://storage.test/test-product-bg.png'
         assert final_url == 'https://storage.test/test-product.png'
         assert upload_calls == ['test-product-bg', 'test-product']
         mock_layered.assert_called_once_with(
-            'Aretes artesanales', ['#e94560'], 'alegre', ['aretes', 'plata'], 'Joyeria artesanal',
+            'Aretes artesanales', ['#e94560'], 'alegre', ['aretes', 'plata'],
+            'Joyeria artesanal Referencia visual asignada exclusivamente a esta pieza: '
+            'Aretes de plata con piedra azul. El texto superpuesto debe coincidir con el tipo de '
+            'producto visible y no atribuirle materiales o propiedades que estas notas no confirmen. '
+            'Personas, muebles y utilería son contexto: no los presentes como productos del negocio '
+            'salvo que el ADN confirme explícitamente esa oferta.',
             business_url='https://ejemplo.com', font_seed='test-product', background_bytes=b'fake-generated-png',
             fact_profile=None,
         )
@@ -2155,6 +2164,7 @@ class TestRegenerateWithReference:
         mock_upload.assert_called_once_with(
             b'fake-regenerated-png', 'Nuevo caption regenerado', ['#e94560'], 'alegre',
             'Joyeria artesanal', ['aretes'], 'https://ejemplo.com', 'test-product-regen', None,
+            reference_context='Aretes de plata',
         )
 
     @override_settings(

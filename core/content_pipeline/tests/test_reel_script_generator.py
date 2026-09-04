@@ -58,7 +58,10 @@ def test_generate_returns_fallback_on_api_error(brand_dna):
 )
 def test_generate_parses_valid_gemini_response(brand_dna):
     from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
-    post_data = {'caption': 'Bolsos artesanales hechos a mano'}
+    post_data = {
+        'caption': 'Bolsos artesanales hechos a mano',
+        'reference_context': 'Bolso azul de tela con asas cortas',
+    }
     response_json = (
         '{"hook_text":"Bolsos que cuentan tu historia","highlight_word":"historia",'
         '"tag_cta":"Compra ahora","narration_script":"Cada bolso es unico, hecho a mano con materiales de la mas alta calidad.",'
@@ -245,7 +248,10 @@ def test_generate_scrubs_business_name_leak_from_gemini_response(brand_dna):
 )
 def test_prompt_differentiates_veo_scene_from_imagen_scenes(brand_dna):
     from core.content_pipeline.generators.reel_script_generator import ReelScriptGenerator
-    post_data = {'caption': 'Bolsos artesanales hechos a mano'}
+    post_data = {
+        'caption': 'Bolsos artesanales hechos a mano',
+        'reference_context': 'Bolso azul de tela con asas cortas',
+    }
     response_json = (
         '{"hook_text":"H","highlight_word":"H","tag_cta":"C","narration_script":"N",'
         '"scene_prompts":["s1","s2","s3","s4","s5","s6"],"music_mood":"M"}'
@@ -261,6 +267,8 @@ def test_prompt_differentiates_veo_scene_from_imagen_scenes(brand_dna):
     assert 'GENERADOR DE IMAGEN FIJA' in sent_prompt
     assert '5 shots' in sent_prompt
     assert 'NO debe incluir manipulacion precisa' in sent_prompt
+    assert 'Bolso azul de tela con asas cortas' in sent_prompt
+    assert 'No atribuyas materiales o propiedades' in sent_prompt
 
 
 @override_settings(

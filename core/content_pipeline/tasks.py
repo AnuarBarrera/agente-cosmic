@@ -1,5 +1,7 @@
 import logging
+import re
 import time
+import unicodedata
 from datetime import datetime as dt_datetime, timedelta, timezone as dt_timezone
 from django.conf import settings
 from django.utils import timezone
@@ -72,6 +74,12 @@ def _generate_post_media(image_gen: ImageGenerator, reel_script_gen: ReelScriptG
         script_data = dict(post_data or {})
         if commercial_line:
             script_data['commercial_line'] = commercial_line
+        if reference_contexts:
+            script_data['reference_context'] = ' | '.join(
+                str(context.get('analysis_description') or '')
+                for context in reference_contexts
+                if context.get('analysis_description')
+            )
         script = reel_script_gen.generate(script_data, brand_dna)
         video_url, poster_url = reel_gen.generate(
             script=script, colors=kwargs.get('colors', []), filename_prefix=filename, skip_veo=skip_veo,
@@ -334,7 +342,95 @@ def _next_reference_photos(job: AnalysisJob, day_number: int, count: int) -> lis
     return photos
 
 
-def _next_reference_media(job: AnalysisJob, day_number: int, count: int):
+_REFERENCE_CONCEPTS = {
+    'collar': {'collar', 'collares', 'necklace', 'neckwear'},
+    'clothing': {
+        'prenda', 'prendas', 'ropa', 'vestir', 'vestido', 'vest', 'vests',
+        'coat', 'sweater', 'jacket', 'apparel', 'clothing', 'outfit',
+        'chaleco', 'abrigo', 'sueter',
+    },
+}
+
+
+def _reference_words(value: str) -> set[str]:
+    normalized = ''.join(
+        char for char in unicodedata.normalize('NFD', value or '')
+        if unicodedata.category(char) != 'Mn'
+    ).lower()
+    return set(re.findall(r'[a-z0-9]+', normalized))
+
+
+def _reference_concepts(value: str) -> set[str]:
+    words = _reference_words(value)
+    concepts = set()
+    # En prendas, "collar" también nombra la parte que rodea el cuello. Si
+    # aparecen ambos conceptos, la prenda es el producto principal.
+    if words & _REFERENCE_CONCEPTS['clothing']:
+        concepts.add('clothing')
+    elif words & _REFERENCE_CONCEPTS['collar']:
+        concepts.add('collar')
+    return concepts
+
+
+def _asset_reference_concepts(asset) -> set[str]:
+    """Clasifica el producto de la mascota, no la ropa incidental de una persona."""
+    category_concepts = _reference_concepts(asset.product_category)
+    if category_concepts:
+        return category_concepts
+
+    normalized = ''.join(
+        char for char in unicodedata.normalize('NFD', asset.analysis_description or '')
+        if unicodedata.category(char) != 'Mn'
+    ).lower()
+    description_words = _reference_words(asset.analysis_description)
+    clothing_words = description_words & _REFERENCE_CONCEPTS['clothing']
+    collar_words = description_words & _REFERENCE_CONCEPTS['collar']
+    animal_words = {'dog', 'dogs', 'cat', 'cats', 'pet', 'pets', 'perro', 'perros',
+                    'gato', 'gatos', 'mascota', 'mascotas'}
+    wearing_words = {'wearing', 'wears', 'dressed', 'viste', 'vistiendo', 'lleva', 'usan'}
+    # La descripción del analizador sigue un orden narrativo. Exigir estos tres
+    # grupos evita que "el hombre usa un chaleco" convierta una colchoneta en
+    # referencia de ropa para mascota.
+    # La relación importa: en "dog wearing ..." el animal aparece antes del
+    # verbo; "man wearing ... beside a dog" no debe heredar esa etiqueta.
+    animal_is_wearing = bool(
+        description_words & animal_words
+        and description_words & wearing_words
+        and any(
+            re.search(rf'\b{animal}\b[^.]*\b(?:wearing|wears|dressed|viste|vistiendo|lleva|usan)\b', normalized)
+            for animal in animal_words
+        )
+    )
+    if animal_is_wearing and clothing_words:
+        return {'clothing'}
+    if animal_is_wearing and collar_words:
+        return {'collar'}
+    if re.search(r'\bpet\s+(?:collar|necklace|neckwear)\b', normalized):
+        return {'collar'}
+    return set()
+
+
+def _reference_match_score(asset, desired_context: str) -> int:
+    """Puntaje léxico de respaldo cuando no existe una categoría conocida."""
+    desired_words = _reference_words(desired_context)
+    asset_words = _reference_words(f'{asset.product_category} {asset.analysis_description}')
+    if not desired_words:
+        return 0
+    # Acepta flexiones simples (p. ej. ``bandana``/``bandanas``) para que el
+    # fallback léxico siga siendo útil cuando el texto del calendario está en
+    # plural y la descripción de la foto en singular.
+    def stem(word: str) -> str:
+        if len(word) > 4 and word.endswith('s'):
+            return word[:-1]
+        return word
+
+    desired_stems = {stem(word) for word in desired_words}
+    asset_stems = {stem(word) for word in asset_words}
+    return len(desired_stems & asset_stems)
+
+
+def _next_reference_media(job: AnalysisJob, day_number: int, count: int,
+                          desired_context: str = ''):
     """Return assigned bytes plus per-photo policy context when triage is active."""
     if not getattr(settings, 'PHOTO_ASSET_TRIAGE_ENABLED', False):
         photos = _next_reference_photos(job, day_number, count)
@@ -344,6 +440,20 @@ def _next_reference_media(job: AnalysisJob, day_number: int, count: int):
     if not assets:
         photos = _next_reference_photos(job, day_number, count)
         return photos, [_detect_mime(photo) for photo in photos], None
+
+    if desired_context:
+        desired_concepts = _reference_concepts(desired_context)
+        conceptual_matches = [
+            asset for asset in assets
+            if desired_concepts & _asset_reference_concepts(asset)
+        ]
+        if conceptual_matches:
+            assets = conceptual_matches
+        else:
+            scored = [(asset, _reference_match_score(asset, desired_context)) for asset in assets]
+            best_score = max((score for _, score in scored), default=0)
+            if best_score:
+                assets = [asset for asset, score in scored if score == best_score]
 
     start = (day_number - 1) % len(assets)
     photos, mime_types, contexts = [], [], []
@@ -356,6 +466,7 @@ def _next_reference_media(job: AnalysisJob, day_number: int, count: int):
         mime_types.append(asset.mime_type or _detect_mime(photo))
         contexts.append({
             'asset_id': str(asset.id),
+            'position': asset.position,
             'analysis_description': asset.analysis_description,
             'product_category': asset.product_category,
             'commercial_relationship': asset.commercial_relationship,
@@ -379,6 +490,7 @@ def _generate_missing_image(post: ContentPost) -> None:
         photo_count = 1 if post.format == ContentPost.FORMAT_SINGLE else 3
         photos, mime_types, reference_contexts = _next_reference_media(
             job, post.day_number, photo_count,
+            desired_context=post.commercial_line or post.caption,
         )
         post.image_url, post.image_urls, post.video_url = _generate_post_media(
             image_gen, ReelScriptGenerator(), ReelGenerator(bucket_name=settings.GOOGLE_CLOUD_STORAGE_BUCKET, use_gemini_api=use_gemini_api),
@@ -463,6 +575,7 @@ def regenerate_post_image_task(post_id: str, feedback: str) -> None:
         photo_count = 3 if post.format == ContentPost.FORMAT_CAROUSEL else 1
         photos, mime_types, reference_contexts = _next_reference_media(
             brand_dna.job, post.day_number, photo_count,
+            desired_context=post.commercial_line or next_caption,
         )
 
         background_url = ''
